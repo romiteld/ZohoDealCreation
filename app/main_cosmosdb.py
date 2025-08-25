@@ -3,27 +3,13 @@ FastAPI main application using Cosmos DB instead of Chroma/SQLite
 No more SQLite compatibility issues!
 """
 
-# Mock ChromaDB before ANY other imports to prevent issues
-import sys
-import os
-
-# Mock ChromaDB module
-class MockChromaDB:
-    def __getattr__(self, name):
-        return lambda *args, **kwargs: None
-
-chromadb = MockChromaDB()
-sys.modules['chromadb'] = chromadb
-sys.modules['chromadb.utils'] = chromadb
-sys.modules['chromadb.config'] = chromadb
-
 import logging
-import asyncio
+import os
 from datetime import datetime
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, status, Header, Request
+from fastapi import FastAPI, HTTPException, Depends, status, Header
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
@@ -32,14 +18,32 @@ from dotenv import load_dotenv
 load_dotenv('.env.local')
 load_dotenv()
 
-# Initialize logging
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# Initialize structured logging
+import structlog
+structlog.configure(
+    processors=[
+        structlog.stdlib.filter_by_level,
+        structlog.stdlib.add_logger_name,
+        structlog.stdlib.add_log_level,
+        structlog.stdlib.PositionalArgumentsFormatter(),
+        structlog.processors.TimeStamper(fmt="iso"),
+        structlog.processors.StackInfoRenderer(),
+        structlog.processors.format_exc_info,
+        structlog.dev.ConsoleRenderer()
+    ],
+    context_class=dict,
+    logger_factory=structlog.stdlib.LoggerFactory(),
+    cache_logger_on_first_use=True,
+)
+
+logger = structlog.get_logger(__name__)
 
 # Import models and services
-from app.models import EmailPayload as EmailRequest, ProcessingResult as ZohoResponse, ExtractedData
+from app.models import EmailRequest, ZohoResponse, ErrorResponse
 from app.business_rules import BusinessRulesEngine
-from app.integrations import ZohoApiClient as ZohoIntegration, AzureBlobStorageClient as AzureBlobStorage, PostgreSQLClient
+from app.integrations import ZohoIntegration, AzureBlobStorage, PostgreSQLClient
+from app.crewai_manager_cosmosdb import EmailProcessingCrew
+from app.vector_store import get_vector_store, cleanup_vector_store
 
 # API Key Authentication
 API_KEY = os.getenv("API_KEY", "your-secure-api-key-here")
@@ -61,53 +65,24 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting Well Intake API with Cosmos DB vector store")
     
-    # Initialize PostgreSQL client with error handling and timeout
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        try:
-            postgres_client = PostgreSQLClient(database_url)
-            # Try to connect with a longer timeout
-            await asyncio.wait_for(postgres_client.init_pool(), timeout=30.0)
-            app.state.postgres_client = postgres_client
-            logger.info("PostgreSQL client initialized successfully")
-        except asyncio.TimeoutError:
-            logger.warning("PostgreSQL connection timed out (will continue without deduplication)")
-            app.state.postgres_client = None
-        except Exception as e:
-            logger.warning(f"PostgreSQL connection failed (will continue without deduplication): {e}")
-            app.state.postgres_client = None
-    else:
-        logger.warning("DATABASE_URL not configured, PostgreSQL deduplication disabled")
-        app.state.postgres_client = None
-    
-    # Initialize vector store if available
+    # Initialize vector store
     try:
-        from app.vector_store import get_vector_store
         vector_store = await get_vector_store()
-        app.state.vector_store = vector_store
         logger.info("Cosmos DB vector store initialized")
     except Exception as e:
         logger.warning(f"Vector store initialization failed (will continue without): {e}")
-        app.state.vector_store = None
     
-    # Initialize Zoho integration with PostgreSQL client
-    app.state.zoho_integration = ZohoIntegration(
-        oauth_service_url=os.getenv("ZOHO_OAUTH_SERVICE_URL", "https://well-zoho-oauth.azurewebsites.net")
-    )
-    # Pass PostgreSQL client to Zoho client for caching
-    if hasattr(app.state, 'postgres_client') and app.state.postgres_client:
-        app.state.zoho_integration.pg_client = app.state.postgres_client
-        logger.info("Zoho integration initialized with PostgreSQL caching")
+    # Initialize PostgreSQL client
+    postgres_client = PostgreSQLClient()
+    await postgres_client.initialize()
+    app.state.postgres_client = postgres_client
     
     yield
     
     # Shutdown
     logger.info("Shutting down Well Intake API")
-    if hasattr(app.state, 'vector_store') and app.state.vector_store:
-        from app.vector_store import cleanup_vector_store
-        await cleanup_vector_store()
-    if hasattr(app.state, 'postgres_client') and app.state.postgres_client:
-        await app.state.postgres_client.close()
+    await cleanup_vector_store()
+    await postgres_client.close()
 
 # Create FastAPI app
 app = FastAPI(
@@ -126,15 +101,14 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Initialize services (zoho_integration will be initialized in lifespan)
+# Initialize services
 business_rules = BusinessRulesEngine()
-blob_storage = AzureBlobStorage(
-    connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING", ""),
-    container_name=os.getenv("AZURE_CONTAINER_NAME", "email-attachments")
-)
+zoho_integration = ZohoIntegration()
+blob_storage = AzureBlobStorage()
 
 # Initialize CrewAI with Firecrawl
 firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY", "")
+crew_processor = EmailProcessingCrew(firecrawl_api_key)
 
 @app.get("/")
 async def root():
@@ -199,7 +173,7 @@ async def health_check():
     return health_status
 
 @app.post("/intake/email", response_model=ZohoResponse, dependencies=[Depends(verify_api_key)])
-async def process_email(request: EmailRequest, req: Request):
+async def process_email(request: EmailRequest):
     """Process email and create Zoho CRM records"""
     try:
         logger.info(f"Processing email from {request.sender_email}")
@@ -219,41 +193,25 @@ async def process_email(request: EmailRequest, req: Request):
         # Extract sender domain
         sender_domain = request.sender_email.split('@')[1] if '@' in request.sender_email else 'unknown.com'
         
-        # Try to use CrewAI if available, otherwise use fallback
-        try:
-            from app.crewai_manager_optimized import EmailProcessingCrew
-            crew_processor = EmailProcessingCrew(firecrawl_api_key)
-            extracted_data = await crew_processor.run_async(request.body, sender_domain)
-            logger.info(f"Extracted data with CrewAI: {extracted_data}")
-        except Exception as e:
-            logger.warning(f"CrewAI processing failed: {e}, using fallback extractor")
-            from app.crewai_manager_optimized import SimplifiedEmailExtractor
-            extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
-            logger.info(f"Extracted data with fallback: {extracted_data}")
+        # Process with CrewAI (now using Cosmos DB)
+        extracted_data = await crew_processor.run_async(request.body, sender_domain)
+        logger.info(f"Extracted data: {extracted_data}")
         
         # Apply business rules
-        processed_data = business_rules.process_data(
-            extracted_data.model_dump() if hasattr(extracted_data, 'model_dump') else extracted_data,
-            request.body,
-            request.sender_email
-        )
-        # Convert back to ExtractedData model
-        from app.models import ExtractedData
-        enhanced_data = ExtractedData(**processed_data)
+        enhanced_data = business_rules.apply_rules(extracted_data, request)
         
         # Check for duplicates using Cosmos DB
-        is_duplicate = False
-        if hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
-            is_duplicate = await req.app.state.postgres_client.check_duplicate(
-                request.sender_email,
-                enhanced_data.candidate_name
-            )
+        postgres_client = app.state.postgres_client
+        is_duplicate = await postgres_client.check_duplicate(
+            request.sender_email,
+            enhanced_data.candidate_name
+        )
         
         if is_duplicate:
             logger.info(f"Duplicate detected for {request.sender_email}")
         
         # Create or update Zoho records
-        zoho_result = await req.app.state.zoho_integration.create_or_update_records(
+        deal_id = await zoho_integration.create_or_update_records(
             enhanced_data,
             request.sender_email,
             attachment_urls,
@@ -261,27 +219,18 @@ async def process_email(request: EmailRequest, req: Request):
         )
         
         # Store in database for deduplication
-        if not is_duplicate and hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
-            await req.app.state.postgres_client.store_processed_email(
+        if not is_duplicate:
+            await postgres_client.store_processed_email(
                 request.sender_email,
                 enhanced_data.candidate_name,
-                zoho_result["deal_id"]
+                deal_id
             )
         
-        # Determine message based on duplicate status
-        if zoho_result.get("was_duplicate"):
-            message = f"Email processed successfully (found existing records in Zoho)"
-        else:
-            message = "Email processed successfully"
-        
         return ZohoResponse(
-            status="success",
-            deal_id=zoho_result["deal_id"],
-            account_id=zoho_result["account_id"],
-            contact_id=zoho_result["contact_id"],
-            deal_name=zoho_result["deal_name"],
-            primary_email=zoho_result["primary_email"],
-            message=message
+            success=True,
+            deal_id=deal_id,
+            message="Email processed successfully",
+            extracted_data=enhanced_data.model_dump()
         )
         
     except Exception as e:
@@ -289,7 +238,7 @@ async def process_email(request: EmailRequest, req: Request):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/test/kevin-sullivan", dependencies=[Depends(verify_api_key)])
-async def test_kevin_sullivan(req: Request):
+async def test_kevin_sullivan():
     """Test endpoint with Kevin Sullivan sample email"""
     test_email = EmailRequest(
         sender_email="referrer@wellpartners.com",
@@ -315,7 +264,7 @@ async def test_kevin_sullivan(req: Request):
         attachments=[]
     )
     
-    return await process_email(test_email, req)
+    return await process_email(test_email)
 
 # Static file serving for Outlook Add-in
 @app.get("/manifest.xml")

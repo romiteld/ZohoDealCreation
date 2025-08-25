@@ -1,0 +1,88 @@
+# Git files
+.git/
+.gitignore
+.github/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+zoho/
+venv/
+ENV/
+env/
+.venv/
+
+# Environment files (we'll copy specific ones)
+.env
+.env.production
+*.env
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+logs/
+server.log
+
+# Azure files
+.azure/
+.deployment
+deploy.zip
+*.zip
+
+# Test files
+test_*.py
+tests/
+pytest.ini
+
+# Documentation
+*.md
+README.md
+CLAUDE.md
+docs/
+
+# Build artifacts
+build/
+dist/
+*.egg-info/
+.eggs/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# Database files
+*.db
+*.sqlite
+*.sqlite3
+
+# Docker files (for nested builds)
+Dockerfile*
+docker-compose*.yml

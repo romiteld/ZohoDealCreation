@@ -3,9 +3,6 @@ Optimized CrewAI manager using Cosmos DB for PostgreSQL instead of Chroma
 No SQLite dependencies - works perfectly on Azure
 """
 
-# Mock ChromaDB before ANY other imports to prevent issues
-import app.chromadb_mock
-
 import os
 import json
 import logging

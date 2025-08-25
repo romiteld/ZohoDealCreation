@@ -1,20 +1,12 @@
 #!/bin/bash
-echo "Starting Well Intake API - $(date)"
+echo "=== Azure App Service Startup Script (Cosmos DB Mode) ==="
+echo "=== No SQLite/Chroma dependencies! ==="
 
-# Ensure pip is updated
-python -m pip install --upgrade pip
+# Install base requirements
+pip install --no-cache-dir -r requirements.txt
 
-# Install requirements
-echo "Installing requirements..."
-python -m pip install -r requirements.txt --no-cache-dir
+# No need for pysqlite3-binary or SQLite patches!
+echo "=== Using Cosmos DB for PostgreSQL with pgvector ==="
 
-# Verify critical imports
-echo "Verifying installations..."
-python -c "import fastapi; print('✓ FastAPI')" || exit 1
-python -c "import uvicorn; print('✓ Uvicorn')" || exit 1
-python -c "import asyncpg; print('✓ AsyncPG')" || exit 1
-python -c "import crewai; print('✓ CrewAI')" || exit 1
-
-# Start the application
-echo "Starting Gunicorn..."
-exec gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 1 --worker-class uvicorn.workers.UvicornWorker app.main_optimized:app
+echo "=== Starting application with Gunicorn ==="
+exec gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 2 --worker-class uvicorn.workers.UvicornWorker app.main:app

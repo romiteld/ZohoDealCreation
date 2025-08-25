@@ -8,6 +8,11 @@ from langchain_openai import ChatOpenAI
 from langchain.tools import Tool
 from app.models import ExtractedData
 import re
+from dotenv import load_dotenv
+
+# Load environment variables
+load_dotenv('.env.local')
+load_dotenv()  # Fallback to .env if .env.local doesn't exist
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +20,27 @@ class EmailProcessingCrew:
     def __init__(self, firecrawl_api_key: str):
         self.firecrawl_api_key = firecrawl_api_key
         self.firecrawl_app = FirecrawlApp(api_key=firecrawl_api_key) if firecrawl_api_key else None
-        # Initialize LLM with GPT-5-mini
-        self.llm = ChatOpenAI(
-            model="gpt-5-mini",
-            temperature=1,
-            api_key=os.getenv("OPENAI_API_KEY")
-        )
+        
+        # Initialize LLM with GPT-5-mini, avoiding proxy parameter issues
+        try:
+            api_key = os.getenv("OPENAI_API_KEY")
+            if not api_key:
+                logger.error("OPENAI_API_KEY not found in environment")
+                raise ValueError("OPENAI_API_KEY is required")
+            
+            # Initialize with minimal parameters to avoid proxy issues
+            self.llm = ChatOpenAI(
+                model="gpt-5-mini",
+                temperature=1,  # Required for gpt-5-mini
+                api_key=api_key,
+                max_retries=2,
+                timeout=30
+            )
+            logger.info("LLM initialized successfully with ChatOpenAI")
+        except Exception as e:
+            logger.error(f"Failed to initialize ChatOpenAI: {e}")
+            raise
+        
         # Create custom tool for web scraping
         self.web_search_tool = self._create_web_search_tool()
 

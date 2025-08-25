@@ -1,38 +1,40 @@
-# Core Web Framework
+# Minimal working requirements for Azure deployment
+# Core web framework
 fastapi==0.104.1
-uvicorn[standard]==0.24.0
+uvicorn==0.24.0
 gunicorn==21.2.0
 
-# Azure Services
+# Essential dependencies 
+pydantic==2.8.2
+pydantic-core==2.20.1
+typing-extensions==4.8.0
+python-dotenv==1.0.0
+requests==2.31.0
+setuptools==70.0.0
+
+# SQLite3 fix for ChromaDB/CrewAI on Azure
+pysqlite3-binary==0.5.4
+
+# CrewAI (working version)
+crewai==0.30.11
+
+# OpenAI
+openai==1.35.3
+
+# Azure services
 azure-storage-blob==12.19.0
 
-# PostgreSQL with pgvector
+# Database
 asyncpg==0.29.0
 psycopg2-binary==2.9.9
-pgvector==0.2.4
 
-# HTTP Client
-requests==2.31.0
-httpx==0.27.2
-
-# Data Processing
-pydantic==2.8.2
-python-multipart==0.0.6
-beautifulsoup4==4.12.2
-lxml==4.9.3
-
-# Environment
-python-dotenv==1.0.0
-
-# AI - CrewAI will install its own langchain dependencies
-crewai==0.159.0
-openai==1.68.2
-
-# Additional tools
+# Web research
 firecrawl-py==0.0.16
 
-# Logging
-structlog==23.2.0
+# Email processing
+email-validator==2.1.0
+beautifulsoup4==4.12.2
 
-# SQLite for ChromaDB on Azure
-pysqlite3-binary
+# Other essentials
+python-multipart==0.0.6
+structlog==23.2.0

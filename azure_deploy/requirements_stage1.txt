@@ -1,9 +1,0 @@
-setuptools==69.0.2
-wheel
-pip>=23.0
-gunicorn==21.2.0
-uvicorn[standard]==0.24.0
-fastapi==0.104.1
-pydantic==2.8.2
-python-dotenv==1.0.0
-pysqlite3-binary

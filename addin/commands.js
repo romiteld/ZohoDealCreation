@@ -6,7 +6,7 @@
 /* global Office */
 
 // Configuration for API connection
-const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.azurewebsites.net';
+const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io';
 const API_KEY = window.API_KEY || ''; // Will be set via deployment configuration
 
 Office.onReady(() => {

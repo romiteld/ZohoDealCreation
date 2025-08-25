@@ -170,6 +170,34 @@ class PostgreSQLClient:
             row = await conn.fetchrow(query, param)
             return dict(row) if row else None
     
+    async def check_duplicate(self, sender_email: str, candidate_name: str) -> bool:
+        """Check if similar record already exists for this sender/candidate combo."""
+        await self.init_pool()
+        
+        query = """
+        SELECT COUNT(*) as count 
+        FROM email_processing_history 
+        WHERE primary_email = $1 AND contact_name = $2
+        AND processed_at > NOW() - INTERVAL '30 days'
+        """
+        
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, sender_email, candidate_name)
+            return row['count'] > 0 if row else False
+    
+    async def store_processed_email(self, sender_email: str, candidate_name: str, deal_id: str):
+        """Store processed email record for deduplication."""
+        await self.init_pool()
+        
+        insert_sql = """
+        INSERT INTO email_processing_history (
+            primary_email, contact_name, zoho_deal_id, processing_status
+        ) VALUES ($1, $2, $3, 'success')
+        """
+        
+        async with self.pool.acquire() as conn:
+            await conn.execute(insert_sql, sender_email, candidate_name, deal_id)
+    
     async def store_company_enrichment(self, domain: str, enrichment_data: Dict[str, Any]):
         """Cache company enrichment data."""
         await self.init_pool()
@@ -626,3 +654,146 @@ class ZohoApiClient(ZohoClient):
     
     def __init__(self, oauth_service_url: str = None):
         super().__init__()
+    
+    async def create_or_update_records(self, extracted_data, sender_email: str, attachment_urls: list = None, is_duplicate: bool = False) -> dict:
+        """
+        Create or update Zoho records (Account -> Contact -> Deal) based on extracted data.
+        This is the main orchestration method called by the API.
+        Returns dict with all created record IDs and details.
+        """
+        try:
+            # Extract data with defaults
+            candidate_name = extracted_data.candidate_name or "Unknown Contact"
+            company_name = extracted_data.company_name or self.infer_company_from_domain(sender_email)
+            job_title = extracted_data.job_title or "Financial Advisor"
+            location = extracted_data.location or "Unknown Location"
+            
+            # Format deal name using business rules format
+            deal_name = f"{job_title} ({location}) - {company_name}"
+            
+            # Determine primary email (Reply-To or From)
+            primary_email = sender_email
+            
+            # Check for existing records in Zoho CRM first
+            existing_contact = await self.check_zoho_contact_duplicate(primary_email)
+            existing_account = await self.check_zoho_account_duplicate(company_name)
+            
+            # Log duplicate status
+            if existing_contact:
+                logger.info(f"Found existing contact in Zoho: {existing_contact.get('id')}")
+            if existing_account:
+                logger.info(f"Found existing account in Zoho: {existing_account.get('id')}")
+            
+            # Determine source based on referrer
+            if extracted_data.referrer_name and extracted_data.referrer_name != "Unknown":
+                source = "Referral"
+                source_detail = extracted_data.referrer_name
+            else:
+                source = "Email Inbound"
+                source_detail = "Direct email contact"
+            
+            # 1. Create/update Account
+            logger.info(f"Creating/updating account for: {company_name}")
+            account_id = await self.upsert_account(
+                company_name=company_name,
+                website=None,  # Could be enriched later
+                enriched_data=None
+            )
+            logger.info(f"Account ID: {account_id}")
+            
+            # 2. Create/update Contact
+            logger.info(f"Creating/updating contact for: {candidate_name} ({primary_email})")
+            contact_id = await self.upsert_contact(
+                full_name=candidate_name,
+                email=primary_email,
+                account_id=account_id
+            )
+            logger.info(f"Contact ID: {contact_id}")
+            
+            # 3. Create Deal (always create new deal per business requirements)
+            logger.info(f"Creating deal: {deal_name}")
+            deal_data = {
+                "deal_name": deal_name,
+                "contact_id": contact_id,
+                "account_id": account_id,
+                "source": source,
+                "source_detail": source_detail,
+                "description": f"Email intake from {primary_email}"
+            }
+            
+            deal_id = self.create_deal(deal_data)
+            logger.info(f"Deal ID: {deal_id}")
+            
+            # 4. Attach files if any
+            if attachment_urls:
+                for i, url in enumerate(attachment_urls):
+                    filename = f"attachment_{i+1}"
+                    try:
+                        self.attach_file_to_deal(deal_id, url, filename)
+                    except Exception as e:
+                        logger.warning(f"Failed to attach file {filename}: {e}")
+            
+            # Return comprehensive result
+            return {
+                "deal_id": deal_id,
+                "account_id": account_id,
+                "contact_id": contact_id,
+                "deal_name": deal_name,
+                "primary_email": primary_email,
+                "was_duplicate": bool(existing_contact or existing_account),
+                "existing_contact_id": existing_contact.get('id') if existing_contact else None,
+                "existing_account_id": existing_account.get('id') if existing_account else None
+            }
+            
+        except Exception as e:
+            logger.error(f"Error in create_or_update_records: {str(e)}")
+            raise
+    
+    async def check_zoho_contact_duplicate(self, email: str) -> dict:
+        """Check if a contact with this email already exists in Zoho CRM"""
+        try:
+            # Search for contacts by email
+            search_query = f"(Email:equals:{email})"
+            response = self._make_request("GET", f"Contacts/search?criteria={search_query}")
+            
+            if response.get("data") and len(response["data"]) > 0:
+                contact = response["data"][0]
+                logger.info(f"Found existing contact in Zoho: {contact['Full_Name']} ({contact['Email']})")
+                return {
+                    "id": contact["id"],
+                    "name": contact["Full_Name"],
+                    "email": contact["Email"],
+                    "account_name": contact.get("Account_Name", {}).get("name") if contact.get("Account_Name") else None
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error checking Zoho contact duplicate: {e}")
+            return None
+    
+    async def check_zoho_account_duplicate(self, company_name: str) -> dict:
+        """Check if an account with this company name already exists in Zoho CRM"""
+        try:
+            if not company_name or company_name == "Unknown":
+                return None
+                
+            # Search for accounts by name (case-insensitive)
+            search_query = f"(Account_Name:equals:{company_name})"
+            response = self._make_request("GET", f"Accounts/search?criteria={search_query}")
+            
+            if response.get("data") and len(response["data"]) > 0:
+                account = response["data"][0]
+                logger.info(f"Found existing account in Zoho: {account['Account_Name']}")
+                return {
+                    "id": account["id"],
+                    "name": account["Account_Name"],
+                    "website": account.get("Website"),
+                    "industry": account.get("Industry")
+                }
+            
+            return None
+            
+        except Exception as e:
+            logger.warning(f"Error checking Zoho account duplicate: {e}")
+            return None

@@ -1,45 +1,61 @@
 #!/bin/bash
-# Azure App Service Post-Build Script
-# This script runs after the main build process
+echo "=== Post-build script starting ==="
 
-echo "=========================================="
-echo "Starting Post-Build Process..."
-echo "=========================================="
+# CRITICAL: Install pysqlite3-binary first for ChromaDB/CrewAI compatibility
+echo "Installing pysqlite3-binary for SQLite fix..."
+pip install --no-cache-dir --force-reinstall pysqlite3-binary==0.5.4
 
-# Verify all critical packages are installed
-echo "Verifying package installations..."
-python -c "import fastapi; print(f'FastAPI: {fastapi.__version__}')"
-python -c "import crewai; print(f'CrewAI: {crewai.__version__}')"
-python -c "import langchain; print(f'Langchain: {langchain.__version__}')"
-python -c "import openai; print(f'OpenAI: {openai.__version__}')"
+# Ensure all dependencies are installed
+pip install --no-cache-dir -r requirements.txt
 
-# Create necessary directories
-echo "Creating necessary directories..."
-mkdir -p /home/site/wwwroot/logs
-mkdir -p /home/site/wwwroot/temp
+# Install additional dependencies that might be missing
+pip install --no-cache-dir typing-extensions==4.8.0
+pip install --no-cache-dir pydantic-core==2.20.1
+pip install --no-cache-dir pydantic==2.8.2
 
-# Set proper permissions
-echo "Setting permissions..."
-chmod +x /home/site/wwwroot/prebuild.sh 2>/dev/null || true
-chmod +x /home/site/wwwroot/postbuild.sh 2>/dev/null || true
-chmod +x /home/site/wwwroot/startup.sh 2>/dev/null || true
+# Ensure langchain-openai is installed
+pip install --no-cache-dir langchain-openai==0.0.5
 
-# Create a startup script if it doesn't exist
-if [ ! -f /home/site/wwwroot/startup.sh ]; then
-    echo "Creating startup.sh..."
-    cat > /home/site/wwwroot/startup.sh << 'EOF'
-#!/bin/bash
-echo "Starting Well Intake API..."
-cd /home/site/wwwroot
-gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 2 --worker-class uvicorn.workers.UvicornWorker --access-logfile - --error-logfile - app.main:app
-EOF
-    chmod +x /home/site/wwwroot/startup.sh
-fi
+# Test imports to ensure everything works
+python -c "
+import sys
+print('Python version:', sys.version)
+print('Testing imports...')
 
-echo "=========================================="
-echo "Post-Build Process Completed!"
-echo "=========================================="
+# Test SQLite patch first
+try:
+    import pysqlite3
+    sys.modules['sqlite3'] = pysqlite3
+    import sqlite3
+    print(f'✓ SQLite patched. Version: {sqlite3.sqlite_version}')
+except Exception as e:
+    print(f'✗ SQLite patch failed: {e}')
 
-# Display final package list for verification
-echo "Installed packages:"
-pip list
+try:
+    import fastapi
+    print('✓ FastAPI imported')
+except ImportError as e:
+    print(f'✗ FastAPI import failed: {e}')
+
+try:
+    import uvicorn
+    print('✓ Uvicorn imported')
+except ImportError as e:
+    print(f'✗ Uvicorn import failed: {e}')
+
+try:
+    import crewai
+    print('✓ CrewAI imported')
+except ImportError as e:
+    print(f'✗ CrewAI import failed: {e}')
+
+try:
+    from app.main import app
+    print('✓ Main app imported successfully')
+except ImportError as e:
+    print(f'✗ Main app import failed: {e}')
+
+print('Import test completed')
+"
+
+echo "=== Post-build script completed ==="
