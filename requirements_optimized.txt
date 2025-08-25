@@ -1,0 +1,53 @@
+# Optimized Requirements for Well Intake API
+# Performance-focused with minimal dependencies
+
+# Core Web Framework (latest stable versions for performance)
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+gunicorn==21.2.0
+uvloop==0.19.0  # High-performance event loop
+
+# Async Support
+aiofiles==23.2.1
+aiohttp==3.9.1
+asyncio-throttle==1.0.2
+
+# Azure Services (minimal SDK)
+azure-storage-blob==12.19.0
+azure-core==1.29.6
+
+# PostgreSQL (optimized async driver)
+asyncpg==0.29.0
+# Remove psycopg2-binary if not needed
+
+# HTTP and Networking
+httpx==0.26.0  # Modern async HTTP client
+tenacity==8.2.3
+
+# Data Processing
+pydantic==2.5.3
+orjson==3.9.10  # Fast JSON parsing
+python-multipart==0.0.6
+
+# Environment Configuration
+python-dotenv==1.0.0
+
+# AI and ML (lazy loaded)
+numpy==1.26.3
+langchain-openai==0.0.5  # Minimal OpenAI integration
+crewai==0.1.39  # Specific version for stability
+crewai-tools==0.0.15
+
+# Caching and Performance
+cachetools==5.3.2
+redis==5.0.1  # Optional: for distributed caching
+
+# Monitoring and Logging
+structlog==24.1.0
+python-json-logger==2.0.7
+
+# Development Tools (optional, exclude in production)
+# pytest==7.4.4
+# pytest-asyncio==0.23.3
+# black==23.12.1
+# ruff==0.1.11

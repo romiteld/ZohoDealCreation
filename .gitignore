@@ -1,0 +1,121 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.manifest
+*.spec
+
+# Virtual Environment
+zoho/
+venv/
+ENV/
+env/
+.venv
+
+# Environment Variables
+.env
+.env.local
+.env.production
+.env.development
+*.env
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Logs
+*.log
+server.log
+app_logs.zip
+LogFiles/
+logs/
+
+# Azure
+deployments/
+deploy.zip
+*.zip
+
+# Testing
+.coverage
+htmlcov/
+.pytest_cache/
+test_comprehensive_report.json
+test_startup_report.json
+
+# Temporary files
+*.tmp
+*.bak
+*.backup
+temp/
+tmp/
+
+# Static files (if generated)
+static/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Secrets and Keys
+*.pem
+*.key
+*.crt
+*.pfx
+client_secret.json
+service_account.json
+
+# OS Files
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Python specific
+pip-log.txt
+pip-delete-this-directory.txt
+.Python
+develop-eggs/
+downloads/
+.installed.cfg
+*.egg-info/
+.scrapy
+docs/_build/
+target/
+.ipynb_checkpoints
+profile_default/
+ipython_config.py
+.python-version
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+.pytype/
+cython_debug/
+
+# Flask
+instance/
+.webassets-cache
+
+# FastAPI
+.fastapi_cache/
+
+# Azure Functions
+local.settings.json
+.python_packages/

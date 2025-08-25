@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Email Processor Commands</title>
+
+    <!-- Office JavaScript API -->
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+    <!-- Load environment configuration -->
+    <script type="text/javascript">
+        // Load API base URL from environment or use default
+        // In production, this would be loaded from your configuration
+        window.API_BASE_URL = 'https://well-intake-api.azurewebsites.net';
+    </script>
+
+    <!-- Commands implementation -->
+    <script type="text/javascript" src="commands.js"></script>
+</head>
+<body>
+    <!-- This page is loaded in the background and doesn't need any UI -->
+    <!-- It only serves to load and execute the commands.js file -->
+</body>
+</html>
