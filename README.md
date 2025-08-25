@@ -21,22 +21,47 @@ An intelligent email processing system that automatically converts recruitment e
 ## 🏗️ Architecture Overview
 
 ```
-┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
-│  Outlook Email  │────▶│  Outlook Add-in  │────▶│   FastAPI App   │
-└─────────────────┘     └──────────────────┘     └────────┬────────┘
-                                                           │
-                        ┌──────────────────────────────────┼──────────────────────────────────┐
-                        │                                  │                                  │
-                  ┌─────▼──────┐                    ┌─────▼──────┐                    ┌──────▼─────┐
-                  │   CrewAI   │                    │ Azure Blob │                    │  Zoho CRM  │
-                  │ GPT-5-mini │                    │   Storage  │                    │   API v8   │
-                  └─────┬──────┘                    └────────────┘                    └──────┬─────┘
-                        │                                                                     │
-                  ┌─────▼──────┐                                                      ┌──────▼─────┐
-                  │ PostgreSQL │                                                      │   OAuth    │
-                  │  (Cosmos)  │                                                      │  Service   │
-                  └────────────┘                                                      └────────────┘
+┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────────┐
+│  Outlook Email  │────▶│  Outlook Add-in  │────▶│   FastAPI App          │
+└─────────────────┘     └──────────────────┘     │ (well-intake-api)      │
+                                                  └───────────┬─────────────┘
+                                                              │
+        ┌─────────────────────────────────────────────────────┼─────────────────────────────────────────────┐
+        │                                                     │                                             │
+  ┌─────▼──────┐                                       ┌─────▼──────────┐                          ┌───────▼────────┐
+  │   CrewAI   │                                       │  Azure Blob    │                          │   Zoho CRM    │
+  │ GPT-5-mini │                                       │   Storage      │                          │   API v8      │
+  └─────┬──────┘                                       └────────────────┘                          └───────┬────────┘
+        │                                                                                                   │
+  ┌─────▼──────────────────┐                                                                      ┌───────▼────────┐
+  │ Cosmos DB PostgreSQL   │                                                                      │  OAuth Service │
+  │ with Citus & pgvector  │                          ┌────────────────┐                          │(well-zoho-     │
+  │ (well-intake-db)       │                          │ Log Analytics  │                          │ oauth)         │
+  └────────────────────────┘                          │   Workspace    │                          └────────────────┘
+                                                       └────────────────┘
 ```
+
+### Azure Resource Organization
+
+**Resource Groups:**
+- **TheWell-App-East**: Application tier resources (East US region)
+  - `well-intake-api` - Main FastAPI application (Azure Web Apps)
+  - Python 3.12 runtime with Gunicorn/Uvicorn
+  - B1 App Service Plan for production workloads
+  
+- **TheWell-Infra-East**: Infrastructure and data tier resources (East US region)
+  - `well-zoho-oauth` - OAuth token management service (Flask on Azure Web Apps)
+  - `well-intake-db` - Cosmos DB for PostgreSQL with Citus distributed database
+    - PostgreSQL 15 with pgvector extension
+    - 2 vCores, 128GB storage on coordinator node
+    - Distributed architecture for scalability
+  - Storage Account - Azure Blob Storage for email attachments
+    - Container: `email-attachments` with private access
+    - SAS token authentication for secure access
+    - Standard_LRS redundancy
+  - Log Analytics Workspace - Application monitoring and diagnostics
+    - 30-day retention period
+    - Integration with Azure Web Apps for log streaming
 
 ## 🚀 Quick Start
 
@@ -77,9 +102,9 @@ API_KEY=your-secure-api-key-here
 ENVIRONMENT=development
 
 # Azure Services
-AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=...
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;AccountName=<storage-account>;...
 AZURE_STORAGE_CONTAINER_NAME=email-attachments
-DATABASE_URL=postgresql://user:password@host:port/database
+DATABASE_URL=postgresql://<username>:<password>@<hostname>:5432/<database>?sslmode=require
 
 # AI Services
 OPENAI_API_KEY=sk-...
@@ -186,28 +211,147 @@ curl -X GET "http://localhost:8000/test/kevin-sullivan" \
 
 ## 🚢 Deployment
 
-### Azure Deployment
+### Complete Azure Infrastructure
 
-1. **Prepare deployment package**
+#### 1. Azure Resources Overview
+
+| Resource | Name | Resource Group | Type | Purpose |
+|----------|------|----------------|------|---------|
+| Main API | `well-intake-api` | TheWell-App-East | Web App (Python 3.12) | FastAPI email processing service |
+| OAuth Service | `well-zoho-oauth` | TheWell-Infra-East | Web App (Python 3.11) | Zoho OAuth token management |
+| Database | `well-intake-db` | TheWell-Infra-East | Cosmos DB for PostgreSQL | Distributed database with pgvector for deduplication |
+| Blob Storage | Private Storage Account | TheWell-Infra-East | Storage Account (Standard_LRS) | Email attachment storage with SAS token access |
+| Monitoring | Log Analytics Workspace | TheWell-Infra-East | Log Analytics | Application monitoring and diagnostics |
+
+**Production URLs:**
+- Main API: `https://well-intake-api.azurewebsites.net`
+- OAuth Service: `https://well-zoho-oauth.azurewebsites.net`
+- Manifest: `https://well-intake-api.azurewebsites.net/manifest.xml`
+
+#### 2. Main API Deployment (well-intake-api)
+
 ```bash
+# Prepare deployment package
 zip -r deploy.zip . -x "zoho/*" "*.pyc" "__pycache__/*" ".env*" "*.git*" "deploy.zip" "test_*.py" "server.log"
-```
 
-2. **Deploy to Azure**
-```bash
+# Deploy to Azure
 az webapp deploy --resource-group TheWell-App-East \
   --name well-intake-api --src-path deploy.zip --type zip
-```
 
-3. **Configure startup command**
-```bash
+# Configure startup command
 az webapp config set --resource-group TheWell-App-East --name well-intake-api \
   --startup-file "gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 2 --worker-class uvicorn.workers.UvicornWorker app.main:app"
+
+# Set environment variables
+az webapp config appsettings set --resource-group TheWell-App-East \
+  --name well-intake-api --settings @app-settings.json
+
+# Monitor logs
+az webapp log tail --resource-group TheWell-App-East --name well-intake-api
 ```
 
-4. **Monitor logs**
+#### 3. OAuth Service Deployment (well-zoho-oauth)
+
 ```bash
-az webapp log tail --resource-group TheWell-App-East --name well-intake-api
+# Deploy OAuth service (Flask app)
+cd oauth-service
+zip -r oauth-deploy.zip . -x "*.pyc" "__pycache__/*" ".env*" "*.git*"
+
+az webapp deploy --resource-group TheWell-Infra-East \
+  --name well-zoho-oauth --src-path oauth-deploy.zip --type zip
+
+# Configure Flask startup
+az webapp config set --resource-group TheWell-Infra-East --name well-zoho-oauth \
+  --startup-file "gunicorn --bind=0.0.0.0 --timeout 600 app:app"
+
+# View OAuth service logs
+az webapp log tail --resource-group TheWell-Infra-East --name well-zoho-oauth
+```
+
+#### 4. Database Configuration (Cosmos DB for PostgreSQL)
+
+```bash
+# Connection details
+Host: <your-db-server>.postgres.cosmos.azure.com
+Port: 5432
+Database: citus
+Username: <db-username>
+SSL Mode: require
+
+# Connect to database
+psql "host=<your-db-server>.postgres.cosmos.azure.com port=5432 dbname=citus user=<db-username> sslmode=require"
+
+# Enable pgvector extension (for AI embeddings)
+CREATE EXTENSION IF NOT EXISTS vector;
+
+# Create tables for deduplication and caching
+CREATE TABLE IF NOT EXISTS processed_emails (
+    message_id VARCHAR(255) PRIMARY KEY,
+    processed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    zoho_deal_id VARCHAR(100),
+    embeddings vector(1536)
+);
+```
+
+#### 5. Blob Storage Configuration
+
+```bash
+# Storage account details
+Account Name: <your-storage-account>
+Container: email-attachments
+Access Level: Private (SAS token required)
+
+# Create container if not exists
+az storage container create \
+  --name email-attachments \
+  --account-name <your-storage-account> \
+  --auth-mode login
+
+# Generate SAS token for application access
+az storage container generate-sas \
+  --name email-attachments \
+  --account-name <your-storage-account> \
+  --permissions rwdl \
+  --expiry 2026-12-31 \
+  --auth-mode login
+```
+
+#### 6. Monitoring Setup
+
+```bash
+# Log Analytics Workspace
+Workspace ID: <your-workspace-id>
+Workspace Name: <your-workspace-name>
+
+# Configure application to send logs
+az webapp log config \
+  --resource-group TheWell-App-East \
+  --name well-intake-api \
+  --application-logging filesystem \
+  --detailed-error-messages true \
+  --failed-request-tracing true \
+  --level verbose
+
+# Query logs
+az monitor log-analytics query \
+  --workspace <your-workspace-id> \
+  --analytics-query "AppServiceHTTPLogs | where TimeGenerated > ago(1h) | where ScStatus >= 400"
+```
+
+#### 7. Health Check Endpoints
+
+```bash
+# Main API health check
+curl https://well-intake-api.azurewebsites.net/health
+
+# OAuth service health check  
+curl https://well-zoho-oauth.azurewebsites.net/health
+
+# Database connectivity check
+az postgres flexible-server show-connection-string \
+  --server-name well-intake-db \
+  --database-name citus \
+  --admin-user citus
 ```
 
 ### Outlook Add-in Installation
