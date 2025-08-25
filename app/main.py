@@ -350,6 +350,18 @@ async def get_taskpane():
         return FileResponse(html_path, media_type="text/html")
     raise HTTPException(status_code=404, detail="Taskpane.html not found")
 
+# Icon file serving
+@app.get("/icon-{size}.png")
+async def get_icon(size: int):
+    """Serve icon files for Outlook Add-in"""
+    if size not in [16, 32, 80]:
+        raise HTTPException(status_code=404, detail="Invalid icon size")
+    
+    icon_path = os.path.join(os.path.dirname(__file__), "..", "static", "icons", f"icon-{size}.png")
+    if os.path.exists(icon_path):
+        return FileResponse(icon_path, media_type="image/png")
+    raise HTTPException(status_code=404, detail=f"Icon {size} not found")
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

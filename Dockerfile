@@ -22,6 +22,7 @@ RUN pip install --no-cache-dir --upgrade pip && \
 # Copy application code
 COPY app/ ./app/
 COPY addin/ ./addin/
+COPY static/ ./static/
 
 # Create directory for logs
 RUN mkdir -p /app/logs
