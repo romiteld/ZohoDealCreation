@@ -13,6 +13,8 @@ from functools import lru_cache
 
 from fastapi import FastAPI, Depends, HTTPException, Header, BackgroundTasks
 from fastapi.security import APIKeyHeader
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from pydantic import BaseModel
 
 # Lazy imports for heavy modules
@@ -32,6 +34,8 @@ get_dotenv()
 
 # Import local modules with lazy loading where possible
 from app.models import EmailPayload, ExtractedData, ProcessingResult
+from app.static_files import router as static_router
+from app.error_handlers import register_error_handlers
 
 # --- Configuration ---
 API_KEY = os.getenv("API_KEY")
@@ -96,8 +100,47 @@ app = FastAPI(
     version="3.0.0",
     lifespan=lifespan,
     docs_url="/docs",
-    redoc_url="/redoc"
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
+
+# Configure CORS for Outlook Add-in
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "https://outlook.office.com",
+        "https://outlook.office365.com",
+        "https://outlook.live.com",
+        "https://well-intake-api.azurewebsites.net",
+        "http://localhost:8000",
+        "http://localhost:3000",
+        "*"  # Allow all origins in development
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["*"],
+    expose_headers=["*"]
+)
+
+# Add trusted host middleware for production
+if os.getenv("ENVIRONMENT") == "production":
+    app.add_middleware(
+        TrustedHostMiddleware,
+        allowed_hosts=[
+            "well-intake-api.azurewebsites.net",
+            "*.azurewebsites.net",
+            "localhost"
+        ]
+    )
+
+# Include static file routes for Outlook Add-in
+app.include_router(static_router)
+
+# Register error handlers
+register_error_handlers(app)
+
+# Set debug mode based on environment
+app.debug = os.getenv("ENVIRONMENT", "development") == "development"
 
 # --- Lazy Loading Service Factories ---
 
@@ -568,18 +611,6 @@ async def run_ai_extraction_with_fallback(crew_manager, email_body: str, domain:
         company_name=None,
         referrer_name=None
     )
-
-# --- Static File Routes ---
-
-@app.on_event("startup")
-async def mount_static_routes():
-    """Mount static file routes after startup"""
-    try:
-        from app.static_files import router as static_router
-        app.include_router(static_router)
-        logger.info("Static routes mounted successfully")
-    except Exception as e:
-        logger.warning(f"Failed to mount static routes: {e}")
 
 # --- Test Endpoint ---
 

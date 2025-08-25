@@ -6,6 +6,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Well Intake API** - An intelligent email processing system that automates CRM record creation in Zoho from recruitment emails. Uses CrewAI with GPT-5-mini for data extraction, PostgreSQL for deduplication, and Azure services for infrastructure.
 
+## Current Status (Updated: 2025-08-25)
+
+✅ **WORKING**: Full pipeline operational
+- Zoho Deal creation fixed with correct field mappings
+- Progress notifications implemented in Outlook add-in
+- Deployed to Azure App Service at `https://well-intake-api.azurewebsites.net`
+- OAuth service running at `https://well-zoho-oauth.azurewebsites.net`
+
 ## Critical Constraints
 
 ⚠️ **NEVER CHANGE THE AI MODEL** - The system uses GPT-5-mini exclusively. Do not change to GPT-4, GPT-3.5, or any other model.
@@ -231,6 +239,26 @@ pytest --cov=app --cov-report=html
 - Application Insights for performance metrics
 - Custom metrics: emails_processed, zoho_records_created, ai_extraction_confidence
 
+## Recent Fixes (2025-08-25)
+
+### ✅ Zoho Deal Creation Fixed
+- **Issue**: Deals were failing to create due to incorrect field mappings
+- **Fix**: Updated field names to match Zoho API v8 requirements:
+  - Using "Source" instead of "Lead_Source"
+  - Proper source values: "Email Inbound", "Referral", "Website Inbound", "Reverse Recruiting"
+  - Added "Source_Detail" field for referrer names
+  - Enhanced error logging to show full Zoho API responses
+
+### ✅ Progress Notifications Added
+- **Issue**: Users had no feedback when clicking "Send to Zoho"
+- **Fix**: Added step-by-step progress indicators:
+  - "📧 Reading email content..."
+  - "📎 Processing X attachment(s)..."
+  - "🤖 Analyzing email with AI..."
+  - "📊 Creating Zoho CRM records..."
+  - Success message shows Deal name
+  - Error messages include specific details
+
 ## Known Issues & Solutions
 
 ### CrewAI Performance
@@ -240,10 +268,6 @@ pytest --cov=app --cov-report=html
 ### GPT-5-mini Temperature Error
 - **Problem**: "temperature must be 1 for GPT-5-mini"
 - **Solution**: Always use `temperature=1`, never use 0.3 or other values
-
-### Zoho Owner Field Errors
-- **Problem**: 400 Bad Request when creating Deals
-- **Solution**: Owner field is optional - only set if environment variables configured
 
 ### API Key Authentication
 - **Problem**: 403 Invalid API Key
