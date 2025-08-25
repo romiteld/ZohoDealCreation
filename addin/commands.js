@@ -207,57 +207,64 @@ async function sendToBackend(emailData) {
  */
 function displayResults(result) {
   // Create a formatted message from the result
-  let message = "Email processed successfully!";
+  let message = "✅ Zoho records created successfully!";
   
-  if (result.summary) {
-    message = `Summary: ${result.summary.substring(0, 200)}...`;
+  if (result.deal_name) {
+    message = `✅ Deal created: ${result.deal_name}`;
   } else if (result.message) {
     message = result.message;
-  } else if (result.status) {
-    message = `Status: ${result.status}`;
+  } else if (result.status === 'success') {
+    message = "✅ Email successfully processed and sent to Zoho CRM";
   }
 
-  // Show success notification
+  // Show success notification with details
   showNotification(message, Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage);
 
-  // If there's detailed results, we might want to open a dialog or task pane
-  if (result.detailed_analysis || result.actions || result.categories) {
-    // Store results for the task pane to access
-    if (typeof(Storage) !== "undefined") {
-      localStorage.setItem('lastProcessingResult', JSON.stringify(result));
-    }
+  // Log details for debugging
+  if (result.deal_id) {
+    console.log(`Deal ID: ${result.deal_id}`);
+    console.log(`Account ID: ${result.account_id}`);
+    console.log(`Contact ID: ${result.contact_id}`);
+  }
 
-    // Optionally open task pane to show detailed results
-    Office.context.ui.displayDialogAsync(
-      `${API_BASE_URL}/results.html?resultId=${Date.now()}`,
-      { height: 60, width: 40 },
-      (asyncResult) => {
-        if (asyncResult.status === Office.AsyncResultStatus.Failed) {
-          console.error("Failed to open results dialog:", asyncResult.error.message);
-        }
-      }
-    );
+  // Store results for reference
+  if (typeof(Storage) !== "undefined") {
+    localStorage.setItem('lastZohoResult', JSON.stringify({
+      timestamp: new Date().toISOString(),
+      ...result
+    }));
   }
 }
 
 /**
  * Main function to process the email
- * Called when the user clicks the "Process Email" button
+ * Called when the user clicks the "Send to Zoho" button
  */
 async function processEmail(event) {
   try {
-    // Show progress notification
-    showNotification("Processing email...", Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
-
-    // Extract email data
+    // Step 1: Extract email data
+    showNotification("📧 Reading email content...", Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
     const emailData = await extractEmailData();
     console.log("Extracted email data:", emailData);
 
-    // Send to backend
+    // Step 2: Check for attachments
+    if (emailData.attachments && emailData.attachments.length > 0) {
+      showNotification(`📎 Processing ${emailData.attachments.length} attachment(s)...`, Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
+    }
+
+    // Step 3: Send to backend for AI processing
+    showNotification("🤖 Analyzing email with AI...", Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
+    
+    // Add a slight delay to ensure user sees the message
+    await new Promise(resolve => setTimeout(resolve, 500));
+    
+    // Step 4: Process and create Zoho records
+    showNotification("📊 Creating Zoho CRM records...", Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
+    
     const result = await sendToBackend(emailData);
     console.log("Processing result:", result);
 
-    // Display results
+    // Display success results
     displayResults(result);
 
     // Complete the event
@@ -265,9 +272,21 @@ async function processEmail(event) {
   } catch (error) {
     console.error("Error processing email:", error);
     
-    // Show error notification
+    // Show detailed error notification
+    let errorMessage = "❌ Failed to process email";
+    
+    if (error.message.includes('Cannot connect')) {
+      errorMessage = "❌ Cannot connect to server. Please check your connection.";
+    } else if (error.message.includes('Server error')) {
+      errorMessage = "❌ Server error. Please try again later.";
+    } else if (error.message.includes('Zoho')) {
+      errorMessage = `❌ Zoho error: ${error.message}`;
+    } else {
+      errorMessage = `❌ Error: ${error.message}`;
+    }
+    
     showNotification(
-      `Error: ${error.message}`,
+      errorMessage,
       Office.MailboxEnums.ItemNotificationMessageType.ErrorMessage
     );
 

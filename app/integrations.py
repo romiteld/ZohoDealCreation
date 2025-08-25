@@ -9,7 +9,6 @@ import base64
 import uuid
 import logging
 import re
-import asyncpg
 import json
 from typing import Dict, Any, Optional, List, Tuple
 from azure.storage.blob import BlobServiceClient
@@ -17,12 +16,22 @@ from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_t
 import numpy as np
 from datetime import datetime, timezone
 
+# Make asyncpg optional - PostgreSQL support is optional
+try:
+    import asyncpg
+    HAS_ASYNCPG = True
+except ImportError:
+    HAS_ASYNCPG = False
+    asyncpg = None
+
 logger = logging.getLogger(__name__)
 
 class PostgreSQLClient:
     """Client for Azure Cosmos DB for PostgreSQL with vector support."""
     
     def __init__(self, connection_string: str):
+        if not HAS_ASYNCPG:
+            raise ImportError("asyncpg is not installed. PostgreSQL features will be disabled.")
         self.connection_string = connection_string
         self.pool = None
     
@@ -385,8 +394,18 @@ class ZohoClient:
             headers["Authorization"] = f"Zoho-oauthtoken {self._get_access_token()}"
             response = requests.request(method, url, json=data, headers=headers)
         
-        if response.status_code != 200 and response.status_code != 201:
-            logger.error(f"Zoho API error - Status: {response.status_code}, Response: {response.text}")
+        if response.status_code not in [200, 201, 204]:
+            error_msg = f"Zoho API error - Status: {response.status_code}, URL: {url}, Response: {response.text}"
+            logger.error(error_msg)
+            try:
+                error_json = response.json()
+                if 'data' in error_json and isinstance(error_json['data'], list) and error_json['data']:
+                    if 'details' in error_json['data'][0]:
+                        logger.error(f"Zoho error details: {error_json['data'][0]['details']}")
+                    if 'message' in error_json['data'][0]:
+                        logger.error(f"Zoho error message: {error_json['data'][0]['message']}")
+            except:
+                pass
         response.raise_for_status()
         return response.json()
 
@@ -521,7 +540,7 @@ class ZohoClient:
         return None
 
     def create_deal(self, deal_data: Dict[str, Any], internet_message_id: str = None) -> str:
-        """Create Deal with Steve's exact field mapping."""
+        """Create Deal with exact Zoho field mapping."""
         
         # Owner field - skip if not configured (Zoho will use default)
         # In production, this will be set based on the authorized user making the request
@@ -531,38 +550,58 @@ class ZohoClient:
         elif self.default_owner_email:
             owner_field = {"email": self.default_owner_email}
         
+        # Build Deal data with correct Zoho field names
         zoho_deal = {
             "Deal_Name": deal_data.get("deal_name", "Unknown Deal"),
             "Contact_Name": {"id": deal_data["contact_id"]},
             "Account_Name": {"id": deal_data["account_id"]},
-            "Stage": "Lead",
+            "Stage": "Lead",  # Using "Lead" as the initial stage
             "Pipeline": deal_data.get("pipeline", "Sales Pipeline"),
-            "Source": deal_data.get("source", "Email"),
-            "Closing_Date": deal_data.get("closing_date"),
-            "Next_Activity_Date": deal_data.get("next_activity_date"),
-            "Next_Activity_Description": deal_data.get("next_activity_description"),
+            "Source": deal_data.get("source", "Email Inbound"),  # Using proper source value
             "Description": deal_data.get("description", "")
         }
+        
+        # Add optional fields only if they have values
+        if deal_data.get("closing_date"):
+            zoho_deal["Closing_Date"] = deal_data["closing_date"]
+        
+        if deal_data.get("next_activity_date"):
+            zoho_deal["Next_Activity_Date"] = deal_data["next_activity_date"]
+            
+        if deal_data.get("next_activity_description"):
+            zoho_deal["Next_Activity_Description"] = deal_data["next_activity_description"]
         
         # Only add Owner if configured
         if owner_field:
             zoho_deal["Owner"] = owner_field
         
-        if internet_message_id:
-            zoho_deal["Source_Detail"] = f"Email ID: {internet_message_id}"
-        elif deal_data.get("source_detail"):
+        # Handle Source_Detail field
+        if deal_data.get("source_detail"):
             zoho_deal["Source_Detail"] = deal_data["source_detail"]
+        elif internet_message_id:
+            zoho_deal["Source_Detail"] = f"Email ID: {internet_message_id}"
         
-        zoho_deal = {k: v for k, v in zoho_deal.items() if v is not None}
+        # Remove None values
+        zoho_deal = {k: v for k, v in zoho_deal.items() if v is not None and v != ""}
         
         payload = {"data": [zoho_deal]}
         logger.info(f"Creating Deal with payload: {json.dumps(payload, indent=2)}")
-        response = self._make_request("POST", "Deals", payload)
         
-        if response.get("data") and len(response["data"]) > 0:
-            return response["data"][0]["details"]["id"]
-        
-        raise ValueError(f"Failed to create deal: {response}")
+        try:
+            response = self._make_request("POST", "Deals", payload)
+            
+            if response.get("data") and len(response["data"]) > 0:
+                deal_id = response["data"][0]["details"]["id"]
+                logger.info(f"Successfully created Deal with ID: {deal_id}")
+                return deal_id
+            else:
+                logger.error(f"Unexpected response structure when creating deal: {response}")
+                raise ValueError(f"Failed to create deal - unexpected response: {response}")
+                
+        except Exception as e:
+            logger.error(f"Error creating deal: {str(e)}")
+            logger.error(f"Deal data was: {json.dumps(zoho_deal, indent=2)}")
+            raise
 
     def attach_file_to_deal(self, deal_id: str, file_url: str, filename: str):
         """Add file URL as a note to the Deal record."""

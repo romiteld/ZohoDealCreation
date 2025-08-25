@@ -1,0 +1,332 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Processing Results</title>
+
+    <!-- Office JavaScript API -->
+    <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
+
+    <!-- Fluent UI Web Components -->
+    <link rel="stylesheet" href="https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/11.0.0/css/fabric.min.css">
+    
+    <style>
+        body {
+            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f3f2f1;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 4px;
+            padding: 20px;
+            box-shadow: 0 1.6px 3.6px 0 rgba(0,0,0,.132), 0 0.3px 0.9px 0 rgba(0,0,0,.108);
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        
+        h1 {
+            color: #323130;
+            font-size: 28px;
+            font-weight: 600;
+            margin: 0 0 20px 0;
+            border-bottom: 2px solid #0078d4;
+            padding-bottom: 10px;
+        }
+        
+        .section {
+            margin-bottom: 24px;
+            padding: 16px;
+            background: #faf9f8;
+            border-radius: 4px;
+        }
+        
+        .section h2 {
+            color: #323130;
+            font-size: 18px;
+            font-weight: 600;
+            margin: 0 0 12px 0;
+        }
+        
+        .metric {
+            display: inline-block;
+            margin: 8px 16px 8px 0;
+            padding: 8px 12px;
+            background: white;
+            border-radius: 4px;
+            border-left: 3px solid #0078d4;
+        }
+        
+        .metric-label {
+            font-size: 12px;
+            color: #605e5c;
+            text-transform: uppercase;
+        }
+        
+        .metric-value {
+            font-size: 20px;
+            font-weight: 600;
+            color: #323130;
+        }
+        
+        .tag {
+            display: inline-block;
+            padding: 4px 8px;
+            margin: 4px;
+            background: #0078d4;
+            color: white;
+            border-radius: 12px;
+            font-size: 12px;
+        }
+        
+        .action-item {
+            padding: 12px;
+            margin: 8px 0;
+            background: white;
+            border-radius: 4px;
+            border-left: 3px solid #40e0d0;
+        }
+        
+        .action-item strong {
+            color: #0078d4;
+        }
+        
+        .close-button {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            background: #0078d4;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 4px;
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        
+        .close-button:hover {
+            background: #106ebe;
+        }
+        
+        .summary-text {
+            line-height: 1.6;
+            color: #323130;
+        }
+        
+        .attachment-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .attachment-item {
+            padding: 8px;
+            margin: 4px 0;
+            background: white;
+            border-radius: 4px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        
+        .attachment-name {
+            font-weight: 500;
+        }
+        
+        .attachment-size {
+            color: #605e5c;
+            font-size: 12px;
+        }
+        
+        .no-results {
+            text-align: center;
+            padding: 40px;
+            color: #605e5c;
+        }
+    </style>
+</head>
+<body>
+    <button class="close-button" onclick="closeDialog()">Close</button>
+    
+    <div class="container">
+        <h1>Email Processing Results</h1>
+        
+        <div id="resultsContent">
+            <div class="no-results">Loading results...</div>
+        </div>
+    </div>
+
+    <script type="text/javascript">
+        Office.onReady((info) => {
+            loadResults();
+        });
+        
+        function loadResults() {
+            // Get results from localStorage or query parameters
+            const urlParams = new URLSearchParams(window.location.search);
+            const resultId = urlParams.get('resultId');
+            
+            let results = null;
+            
+            if (typeof(Storage) !== "undefined") {
+                const storedResults = localStorage.getItem('lastProcessingResult');
+                if (storedResults) {
+                    try {
+                        results = JSON.parse(storedResults);
+                    } catch (e) {
+                        console.error('Error parsing stored results:', e);
+                    }
+                }
+            }
+            
+            if (results) {
+                displayDetailedResults(results);
+            } else {
+                document.getElementById('resultsContent').innerHTML = 
+                    '<div class="no-results">No results available</div>';
+            }
+        }
+        
+        function displayDetailedResults(results) {
+            const content = document.getElementById('resultsContent');
+            let html = '';
+            
+            // Summary Section
+            if (results.summary) {
+                html += `
+                    <div class="section">
+                        <h2>Summary</h2>
+                        <div class="summary-text">${results.summary}</div>
+                    </div>
+                `;
+            }
+            
+            // Categories/Tags Section
+            if (results.categories && results.categories.length > 0) {
+                html += `
+                    <div class="section">
+                        <h2>Categories</h2>
+                        <div>
+                            ${results.categories.map(cat => `<span class="tag">${cat}</span>`).join('')}
+                        </div>
+                    </div>
+                `;
+            }
+            
+            // Sentiment Analysis Section
+            if (results.sentiment) {
+                const sentimentColor = {
+                    'positive': '#0e700e',
+                    'negative': '#a80000',
+                    'neutral': '#605e5c'
+                }[results.sentiment] || '#323130';
+                
+                html += `
+                    <div class="section">
+                        <h2>Sentiment Analysis</h2>
+                        <div class="metric">
+                            <div class="metric-label">Overall Sentiment</div>
+                            <div class="metric-value" style="color: ${sentimentColor}">${results.sentiment}</div>
+                        </div>
+                        ${results.confidence ? `
+                            <div class="metric">
+                                <div class="metric-label">Confidence</div>
+                                <div class="metric-value">${(results.confidence * 100).toFixed(1)}%</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            
+            // Key Information Section
+            if (results.key_information) {
+                html += `
+                    <div class="section">
+                        <h2>Key Information</h2>
+                        ${Object.entries(results.key_information).map(([key, value]) => `
+                            <div class="action-item">
+                                <strong>${key}:</strong> ${value}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            
+            // Actions Section
+            if (results.actions && results.actions.length > 0) {
+                html += `
+                    <div class="section">
+                        <h2>Suggested Actions</h2>
+                        ${results.actions.map((action, index) => `
+                            <div class="action-item">
+                                <strong>Action ${index + 1}:</strong> ${action}
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+            
+            // Attachments Section
+            if (results.attachments_processed && results.attachments_processed.length > 0) {
+                html += `
+                    <div class="section">
+                        <h2>Processed Attachments</h2>
+                        <ul class="attachment-list">
+                            ${results.attachments_processed.map(att => `
+                                <li class="attachment-item">
+                                    <span class="attachment-name">${att.name}</span>
+                                    <span class="attachment-size">${formatFileSize(att.size)}</span>
+                                </li>
+                            `).join('')}
+                        </ul>
+                    </div>
+                `;
+            }
+            
+            // Metadata Section
+            if (results.processing_time || results.timestamp) {
+                html += `
+                    <div class="section">
+                        <h2>Processing Information</h2>
+                        ${results.processing_time ? `
+                            <div class="metric">
+                                <div class="metric-label">Processing Time</div>
+                                <div class="metric-value">${results.processing_time}ms</div>
+                            </div>
+                        ` : ''}
+                        ${results.timestamp ? `
+                            <div class="metric">
+                                <div class="metric-label">Processed At</div>
+                                <div class="metric-value">${new Date(results.timestamp).toLocaleString()}</div>
+                            </div>
+                        ` : ''}
+                    </div>
+                `;
+            }
+            
+            content.innerHTML = html || '<div class="no-results">No detailed results available</div>';
+        }
+        
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            return Math.round(bytes / Math.pow(k, i) * 100) / 100 + ' ' + sizes[i];
+        }
+        
+        function closeDialog() {
+            if (Office.context.ui) {
+                Office.context.ui.closeContainer();
+            } else {
+                window.close();
+            }
+        }
+    </script>
+</body>
+</html>

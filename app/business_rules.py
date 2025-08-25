@@ -49,7 +49,7 @@ def determine_source(email_body: str, referrer_name: Optional[str]) -> Tuple[str
         return "Reverse Recruiting", "TWAV Platform"
     if "calendly.com" in lower_body:
         return "Website Inbound", "Calendly scheduling"
-    return "Referral", "Unknown"
+    return "Email Inbound", "Direct email contact"
 
 def determine_distribution_network(referrer_name: Optional[str]) -> Optional[str]:
     """

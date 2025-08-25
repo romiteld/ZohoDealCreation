@@ -30,7 +30,7 @@ if [ ! -z "$WEBSITE_INSTANCE_ID" ]; then
         --worker-class uvicorn.workers.UvicornWorker \
         --timeout 120 \
         --graceful-timeout 30 \
-        --keepalive 5 \
+        --keep-alive 5 \
         --max-requests 1000 \
         --max-requests-jitter 50 \
         --preload \
