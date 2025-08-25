@@ -20,6 +20,8 @@ An intelligent email processing system that automatically converts recruitment e
 
 ## 🏗️ Architecture Overview
 
+> **Note**: The system was migrated from Azure App Service to Container Apps in August 2025 to resolve a critical SQLite compatibility issue. Azure App Service Python 3.12 runtime shipped with SQLite 3.31, but ChromaDB (used by CrewAI) requires SQLite 3.35+. This caused 503 Service Unavailable errors. Container Apps with Docker allows us to control the exact Python/SQLite versions needed.
+
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────────┐
 │  Outlook Email  │────▶│  Outlook Add-in  │────▶│   FastAPI App          │
@@ -44,24 +46,23 @@ An intelligent email processing system that automatically converts recruitment e
 ### Azure Resource Organization
 
 **Resource Groups:**
-- **TheWell-App-East**: Application tier resources (East US region)
-  - `well-intake-api` - Main FastAPI application (Azure Web Apps)
-  - Python 3.12 runtime with Gunicorn/Uvicorn
-  - B1 App Service Plan for production workloads
-  
-- **TheWell-Infra-East**: Infrastructure and data tier resources (East US region)
-  - `well-zoho-oauth` - OAuth token management service (Flask on Azure Web Apps)
+- **TheWell-Infra-East**: Infrastructure and Container App resources (East US region)
+  - `well-intake-api` - Main FastAPI application (Azure Container Apps)
+  - `wellintakeregistry` - Azure Container Registry for Docker images
+  - Python 3.11 runtime with Gunicorn/Uvicorn in Docker container
+  - Container Apps Environment with consumption-based scaling
+  - `well-zoho-oauth` - OAuth token management service (Azure Web Apps - Flask)
   - `well-intake-db` - Cosmos DB for PostgreSQL with Citus distributed database
     - PostgreSQL 15 with pgvector extension
     - 2 vCores, 128GB storage on coordinator node
     - Distributed architecture for scalability
-  - Storage Account - Azure Blob Storage for email attachments
+  - `wellintakeattachments` - Azure Blob Storage for email attachments
     - Container: `email-attachments` with private access
     - SAS token authentication for secure access
     - Standard_LRS redundancy
   - Log Analytics Workspace - Application monitoring and diagnostics
     - 30-day retention period
-    - Integration with Azure Web Apps for log streaming
+    - Integration with Container Apps for log streaming
 
 ## 🚀 Quick Start
 
@@ -224,9 +225,9 @@ curl -X GET "http://localhost:8000/test/kevin-sullivan" \
 | Monitoring | Log Analytics Workspace | TheWell-Infra-East | Log Analytics | Application monitoring and diagnostics |
 
 **Production URLs:**
-- Main API: `https://well-intake-api.azurewebsites.net`
+- Main API: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io`
 - OAuth Service: `https://well-zoho-oauth.azurewebsites.net`
-- Manifest: `https://well-intake-api.azurewebsites.net/manifest.xml`
+- Manifest: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/manifest.xml`
 
 #### 2. Main API Deployment (well-intake-api)
 
@@ -342,7 +343,7 @@ az monitor log-analytics query \
 
 ```bash
 # Main API health check
-curl https://well-intake-api.azurewebsites.net/health
+curl https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/health
 
 # OAuth service health check  
 curl https://well-zoho-oauth.azurewebsites.net/health
@@ -358,7 +359,7 @@ az postgres flexible-server show-connection-string \
 
 1. Navigate to Microsoft 365 Admin Center
 2. Go to Integrated Apps → Upload custom apps → Office Add-in
-3. Provide manifest URL: `https://well-intake-api.azurewebsites.net/manifest.xml`
+3. Provide manifest URL: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/manifest.xml`
 4. Add authorized users
 5. The "Send to Zoho" button will appear in Outlook
 
@@ -429,8 +430,20 @@ outlook/
 - **Solution**: Ensure `ZOHO_DEFAULT_OWNER_ID` or `ZOHO_DEFAULT_OWNER_EMAIL` is configured
 
 #### API Key Authentication Failed
-- **Problem**: 403 Invalid API Key
+- **Problem**: 503 Service Unavailable on Azure App Service
 - **Solution**: Verify `.env.local` exists and is loaded with `load_dotenv('.env.local')`
+
+#### SQLite Compatibility Issue (RESOLVED)
+- **Problem**: 503 Service Unavailable errors due to SQLite version incompatibility
+- **Root Cause**: Azure App Service Python 3.12 runtime includes SQLite 3.31, but ChromaDB requires SQLite 3.35+
+- **Solution**: Migrated to Azure Container Apps using Docker with Python 3.11-slim (includes SQLite 3.40+)
+- **Status**: ✅ Resolved - System now runs on Container Apps at `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io`
+
+#### Outlook Add-in Icon Issues (RESOLVED)
+- **Problem**: Network connection error and missing icons in Outlook ribbon
+- **Root Cause**: Icon files referenced in manifest.xml returned 404 errors
+- **Solution**: Created programmatic icon generation with black background and gold "TW" text
+- **Status**: ✅ Resolved - All icons now display correctly in Outlook
 
 ## 📊 Performance Metrics
 
@@ -464,6 +477,6 @@ For support and questions:
 
 ---
 
-**Production URL**: https://well-intake-api.azurewebsites.net
+**Production URL**: https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
 
 **Last Updated**: August 2025

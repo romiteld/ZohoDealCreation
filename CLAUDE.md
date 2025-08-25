@@ -9,9 +9,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Current Status (Updated: 2025-08-25)
 
 ✅ **WORKING**: Full pipeline operational
+- **Migrated to Azure Container Apps** - Resolved SQLite compatibility issues
+- **Icon rendering fixed** - All Outlook Add-in icons now display correctly
 - Zoho Deal creation fixed with correct field mappings
 - Progress notifications implemented in Outlook add-in
-- Deployed to Azure App Service at `https://well-intake-api.azurewebsites.net`
+- Deployed to Azure Container Apps at `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io`
 - OAuth service running at `https://well-zoho-oauth.azurewebsites.net`
 
 ## Critical Constraints
@@ -31,10 +33,11 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Outlook Add-in** (`addin/`): Manifest.xml and JavaScript for Outlook integration
 
 ### External Dependencies
-- **Azure Services**: Cosmos DB for PostgreSQL (distributed Citus), Blob Storage, App Service
+- **Azure Services**: Cosmos DB for PostgreSQL (distributed Citus), Blob Storage, Container Apps, Container Registry
 - **AI Services**: OpenAI GPT-5-mini via CrewAI (temperature=1 required)
 - **CRM**: Zoho CRM API v8 (not v6 as old comments suggest)
 - **Web Research**: Firecrawl API for company validation
+- **Container Runtime**: Docker with Python 3.11-slim base image
 
 ## Essential Commands
 
@@ -58,11 +61,15 @@ pip install -r requirements.txt
 # Manual FastAPI development server
 uvicorn app.main:app --reload --port 8000
 
-# Production deployment (Azure App Service)
-gunicorn --bind=0.0.0.0 --timeout 600 app:app
+# Production deployment (Azure Container Apps)
+gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 2 --worker-class uvicorn.workers.UvicornWorker app.main:app
 
 # OAuth service (Flask)
 python app.py
+
+# Docker Commands for Container Apps
+docker build -t wellintakeregistry.azurecr.io/well-intake-api:v8 .
+docker push wellintakeregistry.azurecr.io/well-intake-api:v8
 ```
 
 ### Testing Commands
@@ -92,8 +99,11 @@ python validate_manifest.py
 # Migrate to optimized versions
 python migrate_to_optimized.py
 
-# Restart Azure App Service
+# Restart Azure App Service (legacy)
 ./restart_app.sh
+
+# Create Outlook Add-in icons
+python create_icons.py
 ```
 
 ## Environment Configuration
@@ -115,8 +125,8 @@ FIRECRAWL_API_KEY=fc-...
 
 # Zoho Integration
 ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth.azurewebsites.net
-CLIENT_ID=1000.L49UYM6D8YHCSFNUF18X5QR8T1MBSX
-CLIENT_SECRET=your_client_secret
+CLIENT_ID=1000.YOUR_CLIENT_ID_HERE
+CLIENT_SECRET=your_client_secret_here
 REDIRECT_URI=https://well-zoho-oauth.azurewebsites.net/callback
 
 # Monitoring
@@ -259,6 +269,22 @@ pytest --cov=app --cov-report=html
   - Success message shows Deal name
   - Error messages include specific details
 
+### ✅ Container Apps Migration Completed
+- **Issue**: 503 Service Unavailable errors due to SQLite version incompatibility with ChromaDB
+- **Fix**: Migrated from Azure App Service to Container Apps using Docker
+  - Created Dockerfile with Python 3.11-slim base image
+  - Added static directory for icon files
+  - Updated to use Azure Container Registry (wellintakeregistry.azurecr.io)
+  - Container Apps URL: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io`
+
+### ✅ Outlook Add-in Icons Fixed
+- **Issue**: Network connection error and missing icons in Outlook ribbon
+- **Fix**: Created programmatic icon generation and serving
+  - Generated 16x16, 32x32, and 80x80 PNG icons with black background and gold "TW" text
+  - Added icon serving routes to FastAPI with proper path validation
+  - Updated Dockerfile to include static directory
+  - All manifest.xml icon URLs now return 200 status
+
 ## Known Issues & Solutions
 
 ### CrewAI Performance
@@ -275,39 +301,57 @@ pytest --cov=app --cov-report=html
 
 ## Azure Deployment
 
-### Production URLs
-- **API Endpoint**: `https://well-intake-api.azurewebsites.net`
-- **Manifest URL**: `https://well-intake-api.azurewebsites.net/manifest.xml`
-- **Commands JS**: `https://well-intake-api.azurewebsites.net/commands.js`
-- **Health Check**: `https://well-intake-api.azurewebsites.net/health`
+### Production URLs (Current - Container Apps)
+- **API Endpoint**: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io`
+- **Manifest URL**: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/manifest.xml`
+- **Commands JS**: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/commands.js`
+- **Health Check**: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/health`
+- **Icons**: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/icon-{16,32,80}.png`
 
-### Azure Resources
-- **Web App**: `well-intake-api` (Canada Central)
-- **Resource Group**: `TheWell-App-East`
-- **App Service Plan**: `daniel.romitelli_asp_3999`
-- **Runtime**: Python 3.12 with Gunicorn/Uvicorn
+### Azure Resources (Current Architecture)
+- **Container App**: `well-intake-api` (East US region)
+- **Container Registry**: `wellintakeregistry.azurecr.io`
+- **Resource Group**: `TheWell-Infra-East`
+- **Environment**: Container Apps Environment with consumption-based scaling
+- **Runtime**: Python 3.11 in Docker container with Gunicorn/Uvicorn
+- **OAuth Service**: `well-zoho-oauth` (Azure Web Apps - Flask)
+- **Database**: Cosmos DB for PostgreSQL with pgvector extension
+- **Blob Storage**: `wellintakeattachments` for email attachments
 
-### Deployment Commands
+### Container Apps Deployment Commands
 ```bash
-# Deploy to Azure using ZIP deployment
-zip -r deploy.zip . -x "zoho/*" "*.pyc" "__pycache__/*" ".env*" "*.git*" "deploy.zip" "test_*.py" "server.log"
-az webapp deploy --resource-group TheWell-App-East --name well-intake-api --src-path deploy.zip --type zip
+# Build and push Docker image
+docker build -t wellintakeregistry.azurecr.io/well-intake-api:v8 .
+docker push wellintakeregistry.azurecr.io/well-intake-api:v8
 
-# Set startup command
-az webapp config set --resource-group TheWell-App-East --name well-intake-api \
-  --startup-file "gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 2 --worker-class uvicorn.workers.UvicornWorker app.main:app"
+# Update Container App with new image
+az containerapp update \
+  --name well-intake-api \
+  --resource-group TheWell-Infra-East \
+  --image wellintakeregistry.azurecr.io/well-intake-api:v8
 
-# View logs
-az webapp log tail --resource-group TheWell-App-East --name well-intake-api
+# View Container App logs
+az containerapp logs show \
+  --name well-intake-api \
+  --resource-group TheWell-Infra-East \
+  --follow
 
-# Restart app
-az webapp restart --resource-group TheWell-App-East --name well-intake-api
+# Scale Container App (if needed)
+az containerapp update \
+  --name well-intake-api \
+  --resource-group TheWell-Infra-East \
+  --min-replicas 1 \
+  --max-replicas 3
 ```
+
+### Legacy App Service (Deprecated)
+- **Web App**: `well-intake-api` (Canada Central) - No longer used
+- **Resource Group**: `TheWell-App-East` - Kept for OAuth service only
 
 ### Outlook Add-in Installation
 1. **Microsoft 365 Admin Center**:
    - Navigate to Integrated Apps → Upload custom apps → Office Add-in
-   - Provide URL: `https://well-intake-api.azurewebsites.net/manifest.xml`
+   - Provide URL: `https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/manifest.xml`
    
 2. **User Authorization**:
    - Add authorized users (yourself, Steve, Brandon)
@@ -336,4 +380,13 @@ The application serves static files for the Outlook Add-in:
 - `/manifest.xml` - Add-in manifest configuration
 - `/commands.js` - JavaScript for add-in functionality
 - `/commands.html`, `/taskpane.html` - UI components
-These are handled by `app/static_files.py` module.
+- `/icon-{16,32,80}.png` - Add-in icons with black background and gold "TW" text
+These are handled by `app/main.py` routes and the static directory.
+
+### Docker Configuration
+The application uses a Docker container for deployment:
+- **Base Image**: python:3.11-slim
+- **Dependencies**: PostgreSQL client, libpq-dev, PIL for icon generation
+- **Port**: 8000 (exposed)
+- **Health Check**: HTTP request to /health endpoint every 30 seconds
+- **Startup Command**: Gunicorn with Uvicorn workers for async support
