@@ -15,12 +15,14 @@ setuptools==70.0.0
 # SQLite3 fix for ChromaDB/CrewAI on Azure
 pysqlite3-binary==0.5.4
 
-# CrewAI (working version)
-crewai==0.30.11
-crewai-tools==0.2.6
+# LangGraph for agent orchestration (replacing CrewAI)
+langgraph==0.2.74
+langchain-core==0.3.29
+langchain-openai==0.2.14
 
-# LangChain (for Tool wrapper)
-langchain==0.1.10
+# CrewAI (deprecated - kept for fallback)
+# crewai==0.30.11
+# crewai-tools==0.2.6
 
 # OpenAI
 openai==1.35.3
@@ -39,3 +41,4 @@ beautifulsoup4==4.12.3
 # Other essentials
 python-multipart==0.0.6
 structlog==23.2.0
+aiohttp==3.9.1

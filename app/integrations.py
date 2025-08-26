@@ -40,6 +40,12 @@ class PostgreSQLClient:
         if not self.pool:
             self.pool = await asyncpg.create_pool(self.connection_string, min_size=2, max_size=10)
     
+    async def test_connection(self):
+        """Test database connection."""
+        await self.init_pool()
+        async with self.pool.acquire() as conn:
+            await conn.fetchval('SELECT 1')
+    
     async def ensure_tables(self):
         """Create tables if they don't exist."""
         await self.init_pool()
@@ -177,7 +183,7 @@ class PostgreSQLClient:
         query = """
         SELECT COUNT(*) as count 
         FROM email_processing_history 
-        WHERE primary_email = $1 AND contact_name = $2
+        WHERE sender_email = $1 AND contact_name = $2
         AND processed_at > NOW() - INTERVAL '30 days'
         """
         
@@ -191,8 +197,8 @@ class PostgreSQLClient:
         
         insert_sql = """
         INSERT INTO email_processing_history (
-            primary_email, contact_name, zoho_deal_id, processing_status
-        ) VALUES ($1, $2, $3, 'success')
+            sender_email, primary_email, contact_name, zoho_deal_id, processing_status
+        ) VALUES ($1, $1, $2, $3, 'success')
         """
         
         async with self.pool.acquire() as conn:
@@ -307,6 +313,11 @@ class AzureBlobStorageClient:
                 container_client.create_container()
         except Exception as e:
             logger.warning(f"Container check/create warning: {e}")
+    
+    def test_connection(self):
+        """Test blob storage connection."""
+        container_client = self.blob_service_client.get_container_client(self.container_name)
+        return container_client.exists()
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     def upload_file(self, filename: str, content_base64: str) -> str:

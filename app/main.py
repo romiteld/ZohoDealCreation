@@ -56,8 +56,10 @@ async def lifespan(app: FastAPI):
             postgres_client = PostgreSQLClient(database_url)
             # Try to connect with a longer timeout
             await asyncio.wait_for(postgres_client.init_pool(), timeout=30.0)
+            # Ensure tables exist
+            await postgres_client.ensure_tables()
             app.state.postgres_client = postgres_client
-            logger.info("PostgreSQL client initialized successfully")
+            logger.info("PostgreSQL client initialized successfully with tables")
         except asyncio.TimeoutError:
             logger.warning("PostgreSQL connection timed out (will continue without deduplication)")
             app.state.postgres_client = None
@@ -164,27 +166,34 @@ async def health_check():
     
     # Check Cosmos DB
     try:
-        if hasattr(app.state, 'postgres_client'):
+        if hasattr(app.state, 'postgres_client') and app.state.postgres_client:
             await app.state.postgres_client.test_connection()
             health_status["services"]["cosmos_db"] = "operational"
-    except:
+        else:
+            health_status["services"]["cosmos_db"] = "not_configured"
+    except Exception as e:
+        logger.warning(f"Cosmos DB health check failed: {e}")
         health_status["services"]["cosmos_db"] = "error"
     
     # Check Zoho
     try:
-        if hasattr(app.state, 'zoho_integration'):
+        if hasattr(app.state, 'zoho_integration') and app.state.zoho_integration:
             app.state.zoho_integration.get_access_token()
             health_status["services"]["zoho"] = "operational"
         else:
             health_status["services"]["zoho"] = "not_initialized"
-    except:
+    except Exception as e:
+        logger.warning(f"Zoho health check failed: {e}")
         health_status["services"]["zoho"] = "error"
     
     # Check Blob Storage
     try:
-        blob_storage.get_container_client()
-        health_status["services"]["blob_storage"] = "operational"
-    except:
+        if blob_storage.test_connection():
+            health_status["services"]["blob_storage"] = "operational"
+        else:
+            health_status["services"]["blob_storage"] = "container_not_found"
+    except Exception as e:
+        logger.warning(f"Blob Storage health check failed: {e}")
         health_status["services"]["blob_storage"] = "error"
     
     return health_status
@@ -210,10 +219,24 @@ async def process_email(request: EmailRequest, req: Request):
         # Extract sender domain
         sender_domain = request.sender_email.split('@')[1] if '@' in request.sender_email else 'unknown.com'
         
-        # Check if CrewAI should be bypassed
+        # Check if we should use LangGraph or legacy CrewAI
+        use_langgraph = os.getenv("USE_LANGGRAPH", "true").lower() == "true"
         bypass_crewai = os.getenv("BYPASS_CREWAI", "false").lower() == "true"
         
-        if bypass_crewai:
+        if use_langgraph:
+            # Use new LangGraph implementation
+            try:
+                logger.info("Using LangGraph for email processing")
+                from app.langgraph_manager import EmailProcessingCrew
+                processor = EmailProcessingCrew(serper_api_key)
+                extracted_data = await processor.run_async(request.body, sender_domain)
+                logger.info(f"Extracted data with LangGraph: {extracted_data}")
+            except Exception as e:
+                logger.warning(f"LangGraph processing failed: {e}, using fallback extractor")
+                from app.langgraph_manager import SimplifiedEmailExtractor
+                extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
+                logger.info(f"Extracted data with fallback: {extracted_data}")
+        elif bypass_crewai:
             logger.info("CrewAI bypassed via feature flag, using simplified extractor")
             from app.crewai_manager import SimplifiedEmailExtractor
             extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
