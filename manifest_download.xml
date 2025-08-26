@@ -8,55 +8,33 @@
     <Version>1.0.0.0</Version>
     <ProviderName>The Well Recruiting Solutions</ProviderName>
     <DefaultLocale>en-US</DefaultLocale>
-    <DisplayName DefaultValue="The Well - Send to Zoho"/>
-    <Description DefaultValue="Process recruitment emails and automatically create candidate records in Zoho CRM."/>
+    <DisplayName DefaultValue="Send to Zoho"/>
+    <Description DefaultValue="Process candidate emails and create records in Zoho CRM with one click."/>
     <IconUrl DefaultValue="https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/icon-32.png"/>
     <HighResolutionIconUrl DefaultValue="https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/icon-80.png"/>
     <SupportUrl DefaultValue="https://thewell.solutions/"/>
     <AppDomains>
         <AppDomain>well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io</AppDomain>
+        <AppDomain>azurecontainerapps.io</AppDomain>
     </AppDomains>
-    <Hosts>
-        <Host Name="Mailbox"/>
-    </Hosts>
-    <Requirements>
-        <Sets DefaultMinVersion="1.1">
-            <Set Name="Mailbox"/>
-        </Sets>
-    </Requirements>
-    <FormSettings>
-        <Form xsi:type="ItemRead">
-            <DesktopSettings>
-                <SourceLocation DefaultValue="https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/placeholder.html"/>
-                <RequestedHeight>250</RequestedHeight>
-            </DesktopSettings>
-        </Form>
-    </FormSettings>
-    <Permissions>ReadWriteItem</Permissions>
-    <Rule xsi:type="RuleCollection" Mode="Or">
-        <Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/>
-    </Rule>
-    <DisableEntityHighlighting>false</DisableEntityHighlighting>
+    <Hosts><Host Name="Mailbox"/></Hosts>
+    <Requirements><Sets DefaultMinVersion="1.3"><Set Name="Mailbox"/></Sets></Requirements>
+    <FormSettings><Form xsi:type="ItemRead"><DesktopSettings><SourceLocation DefaultValue="https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/placeholder.html"/><RequestedHeight>250</RequestedHeight></DesktopSettings></Form></FormSettings>
+    <Permissions>ReadWriteMailbox</Permissions>
+    <Rule xsi:type="RuleCollection" Mode="Or"><Rule xsi:type="ItemIs" ItemType="Message" FormType="Read"/></Rule>
     <VersionOverrides xmlns="http://schemas.microsoft.com/office/mailappversionoverrides" xsi:type="VersionOverridesV1_0">
-        <Requirements>
-            <bt:Sets DefaultMinVersion="1.3">
-                <bt:Set Name="Mailbox"/>
-            </bt:Sets>
-        </Requirements>
+        <Requirements><bt:Sets DefaultMinVersion="1.3"><bt:Set Name="Mailbox"/></bt:Sets></Requirements>
         <Hosts>
             <Host xsi:type="MailHost">
                 <DesktopFormFactor>
-                    <FunctionFile resid="Commands.Url"/>
+                    <FunctionFile resid="FunctionFile.Url"/>
                     <ExtensionPoint xsi:type="MessageReadCommandSurface">
                         <OfficeTab id="TabDefault">
                             <Group id="msgReadGroup">
                                 <Label resid="GroupLabel"/>
                                 <Control xsi:type="Button" id="msgReadOpenButton">
                                     <Label resid="TaskpaneButton.Label"/>
-                                    <Supertip>
-                                        <Title resid="TaskpaneButton.Label"/>
-                                        <Description resid="TaskpaneButton.Tooltip"/>
-                                    </Supertip>
+                                    <Supertip><Title resid="TaskpaneButton.Label"/><Description resid="TaskpaneButton.Tooltip"/></Supertip>
                                     <Icon>
                                         <bt:Image size="16" resid="Icon.16x16"/>
                                         <bt:Image size="32" resid="Icon.32x32"/>
@@ -79,14 +57,14 @@
                 <bt:Image id="Icon.80x80" DefaultValue="https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/icon-80.png"/>
             </bt:Images>
             <bt:Urls>
-                <bt:Url id="Commands.Url" DefaultValue="https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/commands.html"/>
+                <bt:Url id="FunctionFile.Url" DefaultValue="https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/commands.html"/>
             </bt:Urls>
             <bt:ShortStrings>
-                <bt:String id="GroupLabel" DefaultValue="The Well"/>
+                <bt:String id="GroupLabel" DefaultValue="The Well Recruiting"/>
                 <bt:String id="TaskpaneButton.Label" DefaultValue="Send to Zoho"/>
             </bt:ShortStrings>
             <bt:LongStrings>
-                <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Process this email and create candidate records in Zoho CRM"/>
+                <bt:String id="TaskpaneButton.Tooltip" DefaultValue="Sends this email to the intake API to create records in Zoho CRM."/>
             </bt:LongStrings>
         </Resources>
     </VersionOverrides>

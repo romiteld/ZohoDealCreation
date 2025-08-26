@@ -13,7 +13,6 @@ import json
 from typing import Dict, Any, Optional, List, Tuple
 from azure.storage.blob import BlobServiceClient
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
-import numpy as np
 from datetime import datetime, timezone
 
 # Make asyncpg optional - PostgreSQL support is optional

@@ -12,7 +12,7 @@ from typing import Optional
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, status, Header, Request
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from dotenv import load_dotenv
 
@@ -364,6 +364,42 @@ async def get_commands_html():
     if os.path.exists(html_path):
         return FileResponse(html_path, media_type="text/html")
     raise HTTPException(status_code=404, detail="Commands.html not found")
+
+@app.get("/commands.js")
+async def get_commands_js():
+    """Serve Outlook Add-in JavaScript"""
+    js_path = os.path.join(os.path.dirname(__file__), "..", "addin", "commands.js")
+    if os.path.exists(js_path):
+        return FileResponse(js_path, media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="Commands.js not found")
+
+@app.get("/config.js")
+async def get_config_js():
+    """Serve Outlook Add-in configuration JavaScript"""
+    js_path = os.path.join(os.path.dirname(__file__), "..", "addin", "config.js")
+    if os.path.exists(js_path):
+        return FileResponse(js_path, media_type="application/javascript")
+    raise HTTPException(status_code=404, detail="Config.js not found")
+
+@app.get("/placeholder.html")
+async def get_placeholder_html():
+    """Serve placeholder HTML for Outlook Add-in"""
+    # Create a minimal placeholder HTML if it doesn't exist
+    placeholder_content = """<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <title>The Well Recruiting - Send to Zoho</title>
+</head>
+<body>
+    <div style="padding: 20px; font-family: Arial, sans-serif;">
+        <h2>Send to Zoho</h2>
+        <p>Click the "Send to Zoho" button in the ribbon to process this email.</p>
+    </div>
+</body>
+</html>"""
+    return HTMLResponse(content=placeholder_content)
 
 @app.get("/taskpane.html")
 async def get_taskpane():

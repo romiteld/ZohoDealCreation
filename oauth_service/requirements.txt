@@ -1,0 +1,7 @@
+# OAuth Service with Reverse Proxy Requirements
+Flask==3.0.0
+requests==2.31.0
+gunicorn==21.2.0
+httpx==0.25.2
+werkzeug==3.0.0
+python-dotenv==1.0.0

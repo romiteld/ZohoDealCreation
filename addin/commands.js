@@ -5,9 +5,9 @@
 
 /* global Office */
 
-// Configuration for API connection
-const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io';
-const API_KEY = window.API_KEY || ''; // Will be set via deployment configuration
+// Configuration for API connection - Now using OAuth proxy service
+const API_BASE_URL = window.API_BASE_URL || 'https://well-zoho-oauth.azurewebsites.net/api';
+const API_KEY = window.API_KEY || ''; // API key handled server-side by proxy service
 
 Office.onReady(() => {
   // Office is ready - initialization code can go here if needed
@@ -206,18 +206,22 @@ async function sendToBackend(emailData) {
  * @param {Object} result - The processing result from the backend
  */
 function displayResults(result) {
-  // Create a formatted message from the result
-  let message = "✅ Zoho records created successfully!";
+  // Create a user-friendly success message
+  let message = "✓ Successfully sent to Zoho";
   
   if (result.deal_name) {
-    message = `✅ Deal created: ${result.deal_name}`;
+    // Truncate long deal names for better display
+    const dealName = result.deal_name.length > 50 
+      ? result.deal_name.substring(0, 47) + "..." 
+      : result.deal_name;
+    message = `✓ Created: ${dealName}`;
+  } else if (result.message && result.message.includes('success')) {
+    message = "✓ Email processed successfully";
   } else if (result.message) {
-    message = result.message;
-  } else if (result.status === 'success') {
-    message = "✅ Email successfully processed and sent to Zoho CRM";
+    message = `✓ ${result.message}`;
   }
 
-  // Show success notification with details
+  // Show success notification
   showNotification(message, Office.MailboxEnums.ItemNotificationMessageType.InformationalMessage);
 
   // Log details for debugging
@@ -241,29 +245,46 @@ function displayResults(result) {
  * Called when the user clicks the "Send to Zoho" button
  */
 async function processEmail(event) {
+  const startTime = Date.now();
+  let currentStep = 0;
+  const totalSteps = 5;
+  
+  // Progress bar visualization
+  function updateProgress(step, message) {
+    currentStep = step;
+    const progressBlocks = '■'.repeat(currentStep) + '□'.repeat(totalSteps - currentStep);
+    showNotification(
+      `${progressBlocks} ${message}`, 
+      Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator
+    );
+  }
+  
   try {
     // Step 1: Extract email data
-    showNotification("📧 Reading email content...", Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
+    updateProgress(1, "Reading email...");
     const emailData = await extractEmailData();
     console.log("Extracted email data:", emailData);
 
     // Step 2: Check for attachments
-    if (emailData.attachments && emailData.attachments.length > 0) {
-      showNotification(`📎 Processing ${emailData.attachments.length} attachment(s)...`, Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
-    }
-
-    // Step 3: Send to backend for AI processing
-    showNotification("🤖 Analyzing email with AI...", Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
+    updateProgress(2, emailData.attachments && emailData.attachments.length > 0 
+      ? `Found ${emailData.attachments.length} attachment(s)`
+      : "Preparing data");
     
     // Add a slight delay to ensure user sees the message
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Step 3: Send to backend for AI processing
+    updateProgress(3, "Analyzing with AI");
     
     // Step 4: Process and create Zoho records
-    showNotification("📊 Creating Zoho CRM records...", Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator);
+    updateProgress(4, "Creating Zoho records");
     
     const result = await sendToBackend(emailData);
     console.log("Processing result:", result);
 
+    // Step 5: Display results
+    updateProgress(5, "Almost done");
+    
     // Display success results
     displayResults(result);
 
@@ -272,17 +293,21 @@ async function processEmail(event) {
   } catch (error) {
     console.error("Error processing email:", error);
     
-    // Show detailed error notification
-    let errorMessage = "❌ Failed to process email";
+    // Show user-friendly error notification
+    let errorMessage = "Unable to process email";
     
-    if (error.message.includes('Cannot connect')) {
-      errorMessage = "❌ Cannot connect to server. Please check your connection.";
-    } else if (error.message.includes('Server error')) {
-      errorMessage = "❌ Server error. Please try again later.";
+    if (error.message.includes('Cannot connect') || error.message.includes('Failed to fetch')) {
+      errorMessage = "Connection error - Please try again in a moment";
+    } else if (error.message.includes('403') || error.message.includes('Forbidden')) {
+      errorMessage = "Access denied - Please contact your administrator";
+    } else if (error.message.includes('Server error') || error.message.includes('500')) {
+      errorMessage = "Server is temporarily unavailable - Please try again";
     } else if (error.message.includes('Zoho')) {
-      errorMessage = `❌ Zoho error: ${error.message}`;
+      errorMessage = "Zoho connection issue - Please try again";
+    } else if (error.message.includes('timeout')) {
+      errorMessage = "Request timed out - Please try again";
     } else {
-      errorMessage = `❌ Error: ${error.message}`;
+      errorMessage = "Something went wrong - Please try again";
     }
     
     showNotification(
