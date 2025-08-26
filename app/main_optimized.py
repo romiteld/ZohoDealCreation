@@ -111,7 +111,7 @@ app.add_middleware(
         "https://outlook.office.com",
         "https://outlook.office365.com",
         "https://outlook.live.com",
-        "https://well-intake-api.azurewebsites.net",
+        "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
         "http://localhost:8000",
         "http://localhost:3000",
         "*"  # Allow all origins in development
@@ -127,7 +127,7 @@ if os.getenv("ENVIRONMENT") == "production":
     app.add_middleware(
         TrustedHostMiddleware,
         allowed_hosts=[
-            "well-intake-api.azurewebsites.net",
+            "well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
             "*.azurewebsites.net",
             "localhost"
         ]
@@ -208,7 +208,7 @@ def get_crew_manager():
     global _crew_manager
     if not _crew_manager:
         try:
-            from app.crewai_manager_optimized import EmailProcessingCrew
+            from app.crewai_manager import EmailProcessingCrew
             firecrawl_key = os.getenv("FIRECRAWL_API_KEY")
             _crew_manager = EmailProcessingCrew(firecrawl_key)
             logger.info("CrewAI manager initialized")

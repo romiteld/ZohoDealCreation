@@ -23,15 +23,15 @@ async def get_manifest():
         # Replace placeholder URLs with production URLs
         content = content.replace(
             "https://your-static-assets-url.com",
-            "https://well-intake-api.azurewebsites.net/static"
+            "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/static"
         )
         content = content.replace(
             "https://your-domain-for-addin-files.com",
-            "https://well-intake-api.azurewebsites.net"
+            "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io"
         )
         content = content.replace(
             "~remoteAppUrl",
-            "https://well-intake-api.azurewebsites.net"
+            "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io"
         )
         
         return HTMLResponse(content=content, media_type="application/xml")
@@ -48,7 +48,7 @@ async def get_commands():
         # Update API URL to production
         content = content.replace(
             "http://localhost:8000",
-            "https://well-intake-api.azurewebsites.net"
+            "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io"
         )
         
         return HTMLResponse(content=content, media_type="application/javascript")
@@ -130,7 +130,7 @@ async def get_config():
     # Fallback configuration if file doesn't exist
     api_key = os.getenv("API_KEY", "")
     fallback_content = f"""
-    window.API_BASE_URL = 'https://well-intake-api.azurewebsites.net';
+    window.API_BASE_URL = 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io';
     window.API_KEY = '{api_key}';
     """
     return HTMLResponse(content=fallback_content, media_type="application/javascript")

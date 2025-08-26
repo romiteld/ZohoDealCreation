@@ -74,7 +74,7 @@ exec gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 2 --worker-class uvico
     print("\n📋 Next steps:")
     print("1. Deploy to Azure: az webapp deploy --resource-group TheWell-App-East --name well-intake-api --src-path deploy.zip --type zip")
     print("2. Restart app: az webapp restart --resource-group TheWell-App-East --name well-intake-api")
-    print("3. Test endpoint: curl -X GET 'https://well-intake-api.azurewebsites.net/test/kevin-sullivan' -H 'X-API-Key: your-secure-api-key-here'")
+    print("3. Test endpoint: curl -X GET 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/test/kevin-sullivan' -H 'X-API-Key: your-secure-api-key-here'")
     
     return True
 

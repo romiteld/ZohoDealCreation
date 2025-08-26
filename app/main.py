@@ -3,20 +3,8 @@ FastAPI main application using Cosmos DB instead of Chroma/SQLite
 No more SQLite compatibility issues!
 """
 
-# Mock ChromaDB before ANY other imports to prevent issues
-import sys
+# No ChromaDB mocking needed when bypassing CrewAI
 import os
-
-# Mock ChromaDB module
-class MockChromaDB:
-    def __getattr__(self, name):
-        return lambda *args, **kwargs: None
-
-chromadb = MockChromaDB()
-sys.modules['chromadb'] = chromadb
-sys.modules['chromadb.utils'] = chromadb
-sys.modules['chromadb.config'] = chromadb
-
 import logging
 import asyncio
 from datetime import datetime
@@ -133,8 +121,8 @@ blob_storage = AzureBlobStorage(
     container_name=os.getenv("AZURE_CONTAINER_NAME", "email-attachments")
 )
 
-# Initialize CrewAI with Firecrawl
-firecrawl_api_key = os.getenv("FIRECRAWL_API_KEY", "")
+# Initialize CrewAI with SerperDevTool for web search
+serper_api_key = os.getenv("SERPER_API_KEY", "")
 
 @app.get("/")
 async def root():
@@ -184,8 +172,11 @@ async def health_check():
     
     # Check Zoho
     try:
-        zoho_integration.get_access_token()
-        health_status["services"]["zoho"] = "operational"
+        if hasattr(app.state, 'zoho_integration'):
+            app.state.zoho_integration.get_access_token()
+            health_status["services"]["zoho"] = "operational"
+        else:
+            health_status["services"]["zoho"] = "not_initialized"
     except:
         health_status["services"]["zoho"] = "error"
     
@@ -219,17 +210,26 @@ async def process_email(request: EmailRequest, req: Request):
         # Extract sender domain
         sender_domain = request.sender_email.split('@')[1] if '@' in request.sender_email else 'unknown.com'
         
-        # Try to use CrewAI if available, otherwise use fallback
-        try:
-            from app.crewai_manager_optimized import EmailProcessingCrew
-            crew_processor = EmailProcessingCrew(firecrawl_api_key)
-            extracted_data = await crew_processor.run_async(request.body, sender_domain)
-            logger.info(f"Extracted data with CrewAI: {extracted_data}")
-        except Exception as e:
-            logger.warning(f"CrewAI processing failed: {e}, using fallback extractor")
-            from app.crewai_manager_optimized import SimplifiedEmailExtractor
+        # Check if CrewAI should be bypassed
+        bypass_crewai = os.getenv("BYPASS_CREWAI", "false").lower() == "true"
+        
+        if bypass_crewai:
+            logger.info("CrewAI bypassed via feature flag, using simplified extractor")
+            from app.crewai_manager import SimplifiedEmailExtractor
             extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
             logger.info(f"Extracted data with fallback: {extracted_data}")
+        else:
+            # Try to use CrewAI if available, otherwise use fallback
+            try:
+                from app.crewai_manager import EmailProcessingCrew
+                crew_processor = EmailProcessingCrew(serper_api_key)
+                extracted_data = await crew_processor.run_async(request.body, sender_domain)
+                logger.info(f"Extracted data with CrewAI: {extracted_data}")
+            except Exception as e:
+                logger.warning(f"CrewAI processing failed: {e}, using fallback extractor")
+                from app.crewai_manager import SimplifiedEmailExtractor
+                extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
+                logger.info(f"Extracted data with fallback: {extracted_data}")
         
         # Apply business rules
         processed_data = business_rules.process_data(

@@ -4,12 +4,12 @@
  */
 
 // Production configuration
-window.API_BASE_URL = 'https://well-intake-api.azurewebsites.net';
+window.API_BASE_URL = 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io';
 
 // API Key - This should be set during deployment
 // In production, this value should be replaced with the actual API key
 // or loaded from a secure configuration service
-window.API_KEY = ''; // Set this value during deployment
+window.API_KEY = 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384'; // Set this value during deployment
 
 /**
  * Configuration instructions for deployment:

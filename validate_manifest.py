@@ -112,8 +112,8 @@ def validate_manifest(manifest_path):
         
         # Check for production URLs
         all_text = ET.tostring(root, encoding='unicode')
-        if 'well-intake-api.azurewebsites.net' not in all_text:
-            warnings.append("Manifest does not reference production URL (well-intake-api.azurewebsites.net)")
+        if 'well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io' not in all_text:
+            warnings.append("Manifest does not reference production URL (well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io)")
         
         # Display results
         print("\n" + "="*60)
