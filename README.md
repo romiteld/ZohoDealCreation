@@ -1,47 +1,53 @@
 # Well Intake API - Intelligent Email Processing System
 
-[![Python](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![Python](https://img.shields.io/badge/Python-3.11-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104.1-green.svg)](https://fastapi.tiangolo.com/)
-[![Azure](https://img.shields.io/badge/Azure-Deployed-blue.svg)](https://azure.microsoft.com/)
+[![Azure](https://img.shields.io/badge/Azure-Container%20Apps-blue.svg)](https://azure.microsoft.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-0.2.74-orange.svg)](https://github.com/langchain-ai/langgraph)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)]()
 
-An intelligent email processing system that automatically converts recruitment emails into structured CRM records in Zoho. The system includes both AI-powered extraction using CrewAI with GPT-5-mini and a reliable simplified extraction fallback. ChromaDB dependency issues have been resolved through a bypass mechanism, ensuring consistent performance. This system eliminates manual data entry and ensures accurate record creation.
+An intelligent email processing system that automatically converts recruitment emails into structured CRM records in Zoho. The system uses **LangGraph** with GPT-5-mini for AI-powered extraction, providing a robust three-node workflow (extract → research → validate). This eliminates manual data entry and ensures accurate record creation with intelligent fallback mechanisms.
 
 ## 🎯 Key Features
 
-- **🤖 AI-Powered Extraction**: Uses CrewAI with GPT-5-mini to intelligently extract candidate information from unstructured emails
-- **⚡ ChromaDB Bypass**: Resolved dependency conflicts with optional CrewAI bypass for 95% faster processing
+- **🤖 AI-Powered Extraction**: Uses LangGraph with GPT-5-mini for intelligent, multi-step data extraction
+- **🔗 Three-Node Workflow**: Extract → Research (Firecrawl) → Validate pipeline for accuracy
 - **📧 Outlook Integration**: Seamless integration via Outlook Add-in with "Send to Zoho" button  
 - **🔄 Automated CRM Creation**: Automatically creates Accounts, Contacts, and Deals in Zoho CRM
 - **🚫 Duplicate Prevention**: Smart deduplication based on email and company matching
 - **📎 Attachment Handling**: Automatic upload and storage of email attachments to Azure Blob Storage
 - **🏢 Multi-User Support**: Configurable owner assignment for enterprise deployment
-- **⚡ Performance Optimized**: Dual implementation with optimized versions for production use
-- **🔍 Web Research**: Validates company information using Firecrawl API
+- **⚡ High Performance**: Fast processing with structured output and error handling
+- **🔍 Company Validation**: Uses Firecrawl API for real-time company research and validation
 
 ## 🏗️ Architecture Overview
 
-> **Note**: The system was migrated from Azure App Service to Container Apps in August 2025 to resolve a critical SQLite compatibility issue. Azure App Service Python 3.12 runtime shipped with SQLite 3.31, but ChromaDB (used by CrewAI) requires SQLite 3.35+. This caused 503 Service Unavailable errors. Container Apps with Docker allows us to control the exact Python/SQLite versions needed.
+> **Latest Update (August 2025)**: Migrated from CrewAI to **LangGraph** for improved reliability and performance. The system now runs on Azure Container Apps with a Docker-based deployment, eliminating previous dependency conflicts.
 
 ```
 ┌─────────────────┐     ┌──────────────────┐     ┌─────────────────────────┐
 │  Outlook Email  │────▶│  Outlook Add-in  │────▶│   FastAPI App          │
-└─────────────────┘     └──────────────────┘     │ (well-intake-api)      │
+└─────────────────┘     └──────────────────┘     │ (Container Apps)       │
                                                   └───────────┬─────────────┘
                                                               │
         ┌─────────────────────────────────────────────────────┼─────────────────────────────────────────────┐
         │                                                     │                                             │
-  ┌─────▼──────┐                                       ┌─────▼──────────┐                          ┌───────▼────────┐
-  │   CrewAI   │                                       │  Azure Blob    │                          │   Zoho CRM    │
-  │ GPT-5-mini │                                       │   Storage      │                          │   API v8      │
-  └─────┬──────┘                                       └────────────────┘                          └───────┬────────┘
-        │                                                                                                   │
-  ┌─────▼──────────────────┐                                                                      ┌───────▼────────┐
-  │ Cosmos DB PostgreSQL   │                                                                      │  OAuth Service │
-  │ with Citus & pgvector  │                          ┌────────────────┐                          │(well-zoho-     │
-  │ (well-intake-db)       │                          │ Log Analytics  │                          │ oauth)         │
-  └────────────────────────┘                          │   Workspace    │                          └────────────────┘
-                                                       └────────────────┘
+  ┌─────▼──────────┐                                   ┌─────▼──────────┐                          ┌───────▼────────┐
+  │   LangGraph    │                                   │  Azure Blob    │                          │   Zoho CRM    │
+  │  GPT-5-mini    │◄──────┐                          │   Storage      │                          │   API v8      │
+  └─────┬──────────┘       │                          └────────────────┘                          └───────┬────────┘
+        │                  │                                                                               │
+        ▼                  │                                                                               │
+  ┌─────────────┐    ┌─────┴──────┐                                                              ┌───────▼────────┐
+  │  Extract    │───▶│  Research  │                   ┌────────────────┐                          │  OAuth Service │
+  │    Node     │    │ (Firecrawl)│                   │ Cosmos DB      │                          │(well-zoho-     │
+  └─────────────┘    └─────┬──────┘                   │ PostgreSQL     │                          │ oauth)         │
+                           │                           │ with pgvector  │                          └────────────────┘
+                           ▼                           └────────────────┘
+                     ┌─────────────┐
+                     │  Validate   │
+                     │    Node     │
+                     └─────────────┘
 ```
 
 ### Azure Resource Organization
