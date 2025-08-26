@@ -1,13 +1,15 @@
 import os
 import json
 import logging
-from typing import Dict, Optional
+import asyncio
+import re
+import requests
+from typing import Dict, Optional, Any, List
 from crewai import Agent, Task, Crew, Process
-from firecrawl import FirecrawlApp
 from langchain_openai import ChatOpenAI
 from langchain.tools import Tool
 from app.models import ExtractedData
-import re
+from app.custom_llm import ChatOpenAIWithoutStop  # Import our custom LLM
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -16,62 +18,116 @@ load_dotenv()  # Fallback to .env if .env.local doesn't exist
 
 logger = logging.getLogger(__name__)
 
+class SerperSearchTool:
+    """Custom implementation of Serper search tool"""
+    
+    def __init__(self, api_key: str):
+        self.api_key = api_key
+        self.base_url = "https://google.serper.dev/search"
+    
+    def search(self, query: str) -> str:
+        """Perform a web search using Serper API"""
+        try:
+            headers = {
+                'X-API-KEY': self.api_key,
+                'Content-Type': 'application/json'
+            }
+            
+            payload = {
+                'q': query,
+                'num': 5  # Get top 5 results
+            }
+            
+            response = requests.post(self.base_url, json=payload, headers=headers, timeout=10)
+            response.raise_for_status()
+            
+            data = response.json()
+            
+            # Format results for the agent
+            results = []
+            
+            # Add answer box if available
+            if 'answerBox' in data and 'answer' in data['answerBox']:
+                results.append(f"Answer: {data['answerBox']['answer']}")
+            
+            # Add organic search results
+            if 'organic' in data:
+                for item in data['organic'][:3]:  # Top 3 results
+                    title = item.get('title', '')
+                    snippet = item.get('snippet', '')
+                    link = item.get('link', '')
+                    results.append(f"- {title}\n  {snippet}\n  Link: {link}")
+            
+            # Add knowledge graph if available
+            if 'knowledgeGraph' in data:
+                kg = data['knowledgeGraph']
+                if 'title' in kg:
+                    results.append(f"\nKnowledge Graph: {kg['title']}")
+                if 'description' in kg:
+                    results.append(kg['description'])
+            
+            return '\n\n'.join(results) if results else "No results found"
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"Serper API request failed: {e}")
+            return f"Search failed: {str(e)}"
+        except Exception as e:
+            logger.error(f"Unexpected error in Serper search: {e}")
+            return f"Search error: {str(e)}"
+
+
 class EmailProcessingCrew:
-    def __init__(self, firecrawl_api_key: str):
-        self.firecrawl_api_key = firecrawl_api_key
-        self.firecrawl_app = FirecrawlApp(api_key=firecrawl_api_key) if firecrawl_api_key else None
+    def __init__(self, serper_api_key: str = None):
+        # Serper API key from environment if not provided
+        self.serper_api_key = serper_api_key or os.getenv("SERPER_API_KEY")
         
-        # Initialize LLM with GPT-5-mini, avoiding proxy parameter issues
+        # Log Serper API key status
+        if self.serper_api_key:
+            logger.info(f"Serper API key configured (length: {len(self.serper_api_key)})")
+        else:
+            logger.warning("Serper API key not found in environment")
+        
+        # Initialize LLM with GPT-5, using custom class to handle stop parameter
         try:
             api_key = os.getenv("OPENAI_API_KEY")
             if not api_key:
                 logger.error("OPENAI_API_KEY not found in environment")
                 raise ValueError("OPENAI_API_KEY is required")
             
-            # Initialize with minimal parameters to avoid proxy issues
-            self.llm = ChatOpenAI(
-                model="gpt-5-mini",
-                temperature=1,  # Required for gpt-5-mini
+            # Initialize with custom ChatOpenAI class that removes stop parameter
+            model_name = os.getenv("OPENAI_MODEL", "gpt-5")
+            
+            # Use the custom ChatOpenAI wrapper that handles stop parameter removal
+            self.llm = ChatOpenAIWithoutStop(
+                model_name=model_name,  # Use model_name parameter
+                temperature=1,  # Required for GPT-5 models
                 api_key=api_key,
                 max_retries=2,
-                timeout=30
+                timeout=30,
+                streaming=False  # Disable streaming for GPT-5 (requires organization verification)
             )
-            logger.info("LLM initialized successfully with ChatOpenAI")
+            logger.info(f"LLM initialized successfully with ChatOpenAIWithoutStop for model: {model_name}")
         except Exception as e:
             logger.error(f"Failed to initialize ChatOpenAI: {e}")
             raise
         
-        # Create custom tool for web scraping
-        self.web_search_tool = self._create_web_search_tool()
-
-    def _create_web_search_tool(self) -> Optional[Tool]:
-        """Create a custom tool for web scraping using Firecrawl."""
-        if not self.firecrawl_app:
-            return None
-            
-        def search_website(url: str) -> str:
-            """Search and scrape a website for information."""
-            try:
-                # Use firecrawl to scrape the website
-                result = self.firecrawl_app.scrape_url(
-                    url,
-                    params={
-                        'formats': ['markdown'],
-                        'onlyMainContent': True
-                    }
+        # Create web search tool using custom SerperSearchTool
+        try:
+            if self.serper_api_key:
+                # Create custom Serper tool and wrap it with LangChain Tool
+                serper_tool = SerperSearchTool(self.serper_api_key)
+                self.web_search_tool = Tool(
+                    name="search_website",
+                    func=serper_tool.search,
+                    description="Search the web for information about a company or domain. Input should be a search query string."
                 )
-                if result and 'markdown' in result:
-                    return result['markdown'][:2000]  # Limit response size
-                return "No content found"
-            except Exception as e:
-                logger.error(f"Error scraping {url}: {e}")
-                return f"Error accessing website: {str(e)}"
-        
-        return Tool(
-            name="search_website",
-            func=search_website,
-            description="Search and scrape a website for information. Input should be a URL."
-        )
+                logger.info("SerperSearchTool wrapped with LangChain Tool successfully")
+            else:
+                logger.warning("SERPER_API_KEY not configured, web search disabled")
+                self.web_search_tool = None
+        except Exception as e:
+            logger.error(f"Error creating SerperSearchTool: {e}")
+            self.web_search_tool = None
     
     def setup_crew(self) -> Crew:
         extractor = Agent(
@@ -85,15 +141,20 @@ class EmailProcessingCrew:
             llm=self.llm
         )
 
+        # Only add tools if web_search_tool was successfully created
+        researcher_tools = []
+        if self.web_search_tool is not None:
+            researcher_tools = [self.web_search_tool]
+            
         researcher = Agent(
             role='Corporate Intelligence Analyst',
             goal='Verify and find the official company name associated with an email domain using web research.',
             backstory='A skilled web researcher who connects email domains to official corporate entities.',
             verbose=True,
             allow_delegation=False,
-            tools=[self.web_search_tool] if self.web_search_tool else [],
-            max_iter=3,
-            max_execution_time=30,  # 30 seconds timeout
+            tools=researcher_tools,
+            max_iter=5,  # Increased from 3 to prevent timeout
+            max_execution_time=45,  # Increased from 30 seconds
             llm=self.llm
         )
 
@@ -126,9 +187,13 @@ class EmailProcessingCrew:
 
         research_task = Task(
             description="""
+            Take the extraction results from the previous task and verify the company information.
+            
             Review the extracted company_name. If it is null or seems incomplete, use the SENDER DOMAIN `{sender_domain}` to research the official company name.
-            If you have the search_website tool available, use it to search https://{sender_domain} to find the official company name.
-            Return an updated JSON object with all original fields plus the verified `company_name`.
+            If you have the search_website tool available, use it to search for information about {sender_domain}.
+            
+            Return an updated JSON object with all five fields: candidate_name, job_title, location, company_name, referrer_name.
+            Keep all original field values from the extraction unchanged except for company_name if you found a better one through research.
             """,
             expected_output='A complete JSON object with a verified company_name and all other extracted fields.',
             agent=researcher,
@@ -137,11 +202,18 @@ class EmailProcessingCrew:
         
         validation_task = Task(
             description="""
-            Take the JSON from the previous task and return it EXACTLY as is.
-            Do NOT add any new fields. Do NOT change the structure.
-            Simply return the same JSON object with these 5 fields: candidate_name, job_title, location, company_name, referrer_name.
+            Take the JSON data from the research task and validate it.
+            
+            Clean and standardize the data, then return a JSON object with EXACTLY these 5 fields:
+            - candidate_name: The full name of the candidate
+            - job_title: The job title or position
+            - location: The geographical location
+            - company_name: The company name (verified or original)
+            - referrer_name: The person who sent the email
+            
+            Use null for any missing values. Do not add any other fields.
             """,
-            expected_output='The exact same JSON object with the 5 required fields.',
+            expected_output='A clean JSON object with exactly 5 fields: candidate_name, job_title, location, company_name, referrer_name.',
             agent=validator,
             context=[research_task]
         )
@@ -151,7 +223,8 @@ class EmailProcessingCrew:
             tasks=[extract_task, research_task, validation_task],
             process=Process.sequential,
             verbose=True,
-            memory=False  # Disabled for performance - was causing 5-10s delays per task
+            memory=False,  # Disabled for performance - was causing 5-10s delays per task
+            stream=False  # Disable streaming at crew level for GPT-5
         )
 
     def run(self, email_body: str, sender_domain: str) -> ExtractedData:
@@ -176,3 +249,28 @@ class EmailProcessingCrew:
         except (json.JSONDecodeError, TypeError) as e:
             logger.error(f"Failed to decode or validate crew result: {e}\nRaw result: {result_str}")
             return ExtractedData()
+    
+    async def run_async(self, email_body: str, sender_domain: str) -> ExtractedData:
+        """Async wrapper for the run method."""
+        loop = asyncio.get_event_loop()
+        return await loop.run_in_executor(None, self.run, email_body, sender_domain)
+
+
+class SimplifiedEmailExtractor:
+    """Fallback email extractor when CrewAI is not available."""
+    
+    @staticmethod
+    def extract(email_body: str, sender_email: str) -> ExtractedData:
+        """Extract basic information from email using pattern matching."""
+        # Extract sender domain for company inference
+        domain = sender_email.split('@')[1] if '@' in sender_email else ''
+        company_name = domain.split('.')[0].title() if domain else None
+        
+        # Basic extraction logic (fallback when AI fails)
+        return ExtractedData(
+            candidate_name=None,
+            job_title=None,
+            location=None,
+            company_name=company_name,
+            referrer_name=None
+        )
