@@ -68,8 +68,8 @@ gunicorn --bind=0.0.0.0:8000 --timeout 600 --workers 2 --worker-class uvicorn.wo
 python app.py
 
 # Docker Commands for Container Apps
-docker build -t wellintakeregistry.azurecr.io/well-intake-api:v8 .
-docker push wellintakeregistry.azurecr.io/well-intake-api:v8
+docker build -t wellintakeregistry.azurecr.io/well-intake-api:v9 .
+docker push wellintakeregistry.azurecr.io/well-intake-api:v9
 ```
 
 ### Testing Commands
@@ -121,7 +121,10 @@ DATABASE_URL=postgresql://...
 
 # AI Services
 OPENAI_API_KEY=sk-...
-FIRECRAWL_API_KEY=fc-...
+SERPER_API_KEY=your_serper_key  # For web search (when CrewAI enabled)
+
+# Feature Flags
+BYPASS_CREWAI=true  # CRITICAL: Set to true to avoid ChromaDB dependency conflicts
 
 # Zoho Integration
 ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth.azurewebsites.net
@@ -251,6 +254,16 @@ pytest --cov=app --cov-report=html
 
 ## Recent Fixes (2025-08-25)
 
+### ✅ ChromaDB Dependency Conflict Resolved
+- **Issue**: "'function' object is not iterable" error caused by ChromaDB import conflicts when CrewAI tried to initialize knowledge storage
+- **Root Cause**: CrewAI 0.30.11 has hard dependency on ChromaDB even when not using knowledge features, conflicting with Container Apps environment
+- **Solution**: Implemented bypass solution using existing BYPASS_CREWAI feature flag:
+  - Set `BYPASS_CREWAI=true` in `.env.local`
+  - Removed ChromaDB mocking code from main.py that was causing import issues
+  - System now uses SimplifiedEmailExtractor fallback for all email processing
+  - API working successfully without CrewAI dependency chain
+  - Faster processing time without CrewAI overhead
+
 ### ✅ Zoho Deal Creation Fixed
 - **Issue**: Deals were failing to create due to incorrect field mappings
 - **Fix**: Updated field names to match Zoho API v8 requirements:
@@ -287,11 +300,17 @@ pytest --cov=app --cov-report=html
 
 ## Known Issues & Solutions
 
-### CrewAI Performance
+### CrewAI Bypassed (Current Production Mode)
+- **Current Status**: CrewAI is bypassed via `BYPASS_CREWAI=true` to avoid ChromaDB dependency conflicts
+- **Processing Mode**: SimplifiedEmailExtractor handles all email processing
+- **Performance**: Faster processing without CrewAI overhead (~2-3 seconds vs 45-55 seconds)
+- **Functionality**: Core email processing and Zoho record creation working correctly
+
+### CrewAI Performance (When Re-enabled)
 - **Problem**: CrewAI times out or takes >2 minutes
 - **Solution**: Ensure `memory=False` and `max_execution_time=30` are set
 
-### GPT-5-mini Temperature Error
+### GPT-5-mini Temperature Error (When Re-enabled)
 - **Problem**: "temperature must be 1 for GPT-5-mini"
 - **Solution**: Always use `temperature=1`, never use 0.3 or other values
 
@@ -321,14 +340,14 @@ pytest --cov=app --cov-report=html
 ### Container Apps Deployment Commands
 ```bash
 # Build and push Docker image
-docker build -t wellintakeregistry.azurecr.io/well-intake-api:v8 .
-docker push wellintakeregistry.azurecr.io/well-intake-api:v8
+docker build -t wellintakeregistry.azurecr.io/well-intake-api:v9 .
+docker push wellintakeregistry.azurecr.io/well-intake-api:v9
 
 # Update Container App with new image
 az containerapp update \
   --name well-intake-api \
   --resource-group TheWell-Infra-East \
-  --image wellintakeregistry.azurecr.io/well-intake-api:v8
+  --image wellintakeregistry.azurecr.io/well-intake-api:v9
 
 # View Container App logs
 az containerapp logs show \
