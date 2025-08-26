@@ -3,11 +3,9 @@ import json
 import logging
 import asyncio
 import re
-import requests
 from typing import Dict, Optional, Any, List
 from crewai import Agent, Task, Crew, Process
 from langchain_openai import ChatOpenAI
-from langchain.tools import Tool
 from app.models import ExtractedData
 from app.custom_llm import ChatOpenAIWithoutStop  # Import our custom LLM
 from dotenv import load_dotenv
@@ -18,62 +16,14 @@ load_dotenv()  # Fallback to .env if .env.local doesn't exist
 
 logger = logging.getLogger(__name__)
 
-class SerperSearchTool:
-    """Custom implementation of Serper search tool"""
-    
-    def __init__(self, api_key: str):
-        self.api_key = api_key
-        self.base_url = "https://google.serper.dev/search"
-    
-    def search(self, query: str) -> str:
-        """Perform a web search using Serper API"""
-        try:
-            headers = {
-                'X-API-KEY': self.api_key,
-                'Content-Type': 'application/json'
-            }
-            
-            payload = {
-                'q': query,
-                'num': 5  # Get top 5 results
-            }
-            
-            response = requests.post(self.base_url, json=payload, headers=headers, timeout=10)
-            response.raise_for_status()
-            
-            data = response.json()
-            
-            # Format results for the agent
-            results = []
-            
-            # Add answer box if available
-            if 'answerBox' in data and 'answer' in data['answerBox']:
-                results.append(f"Answer: {data['answerBox']['answer']}")
-            
-            # Add organic search results
-            if 'organic' in data:
-                for item in data['organic'][:3]:  # Top 3 results
-                    title = item.get('title', '')
-                    snippet = item.get('snippet', '')
-                    link = item.get('link', '')
-                    results.append(f"- {title}\n  {snippet}\n  Link: {link}")
-            
-            # Add knowledge graph if available
-            if 'knowledgeGraph' in data:
-                kg = data['knowledgeGraph']
-                if 'title' in kg:
-                    results.append(f"\nKnowledge Graph: {kg['title']}")
-                if 'description' in kg:
-                    results.append(kg['description'])
-            
-            return '\n\n'.join(results) if results else "No results found"
-            
-        except requests.exceptions.RequestException as e:
-            logger.error(f"Serper API request failed: {e}")
-            return f"Search failed: {str(e)}"
-        except Exception as e:
-            logger.error(f"Unexpected error in Serper search: {e}")
-            return f"Search error: {str(e)}"
+# Import proper CrewAI tools
+try:
+    from crewai_tools import SerperDevTool
+    CREWAI_TOOLS_AVAILABLE = True
+    logger.info("crewai_tools imported successfully")
+except ImportError:
+    logger.warning("crewai_tools not available, web search will be disabled")
+    CREWAI_TOOLS_AVAILABLE = False
 
 
 class EmailProcessingCrew:
@@ -111,22 +61,20 @@ class EmailProcessingCrew:
             logger.error(f"Failed to initialize ChatOpenAI: {e}")
             raise
         
-        # Create web search tool using custom SerperSearchTool
+        # Create web search tool using proper CrewAI SerperDevTool
         try:
-            if self.serper_api_key:
-                # Create custom Serper tool and wrap it with LangChain Tool
-                serper_tool = SerperSearchTool(self.serper_api_key)
-                self.web_search_tool = Tool(
-                    name="search_website",
-                    func=serper_tool.search,
-                    description="Search the web for information about a company or domain. Input should be a search query string."
-                )
-                logger.info("SerperSearchTool wrapped with LangChain Tool successfully")
+            if CREWAI_TOOLS_AVAILABLE and self.serper_api_key:
+                # Use the proper CrewAI SerperDevTool
+                self.web_search_tool = SerperDevTool()
+                logger.info("SerperDevTool initialized successfully for CrewAI")
             else:
-                logger.warning("SERPER_API_KEY not configured, web search disabled")
+                if not CREWAI_TOOLS_AVAILABLE:
+                    logger.warning("crewai_tools package not available, web search disabled")
+                else:
+                    logger.warning("SERPER_API_KEY not configured, web search disabled")
                 self.web_search_tool = None
         except Exception as e:
-            logger.error(f"Error creating SerperSearchTool: {e}")
+            logger.error(f"Error creating SerperDevTool: {e}")
             self.web_search_tool = None
     
     def setup_crew(self) -> Crew:
@@ -164,8 +112,8 @@ class EmailProcessingCrew:
             backstory='A meticulous data quality expert ensuring all information meets strict formatting standards before system integration.',
             verbose=True,
             allow_delegation=False,
-            max_iter=2,
-            max_execution_time=30,  # 30 seconds timeout
+            max_iter=3,
+            max_execution_time=45,  # Increased from 30 seconds
             llm=self.llm
         )
 
