@@ -102,27 +102,48 @@ async function extractAndPreview() {
         const item = Office.context.mailbox.item;
         currentEmailData = await extractEmailData(item);
         
-        // Send to backend for AI extraction (preview only)
-        const extractionResponse = await fetch(`${API_BASE_URL}/preview/email`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
-            },
-            body: JSON.stringify({
-                sender_email: currentEmailData.from?.emailAddress || '',
-                sender_name: currentEmailData.from?.displayName || '',
-                subject: currentEmailData.subject || '',
-                body: currentEmailData.body || '',
-                preview_only: true  // Don't create records yet
-            })
-        });
-        
-        if (!extractionResponse.ok) {
-            // If preview endpoint doesn't exist, use local extraction
+        // Try to use backend AI extraction first, fall back to local if it fails
+        try {
+            const extractionResponse = await fetch(`${API_BASE_URL}/intake/email`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
+                },
+                body: JSON.stringify({
+                    sender_email: currentEmailData.from?.emailAddress || '',
+                    sender_name: currentEmailData.from?.displayName || '',
+                    subject: currentEmailData.subject || '',
+                    body: currentEmailData.body || '',
+                    dry_run: true  // Don't create Zoho records during preview
+                })
+            });
+            
+            if (extractionResponse.ok) {
+                const response = await extractionResponse.json();
+                // Map the response to our expected format
+                extractedData = {
+                    candidateName: response.candidate_name || '',
+                    candidateEmail: response.candidate_email || '',
+                    candidatePhone: response.phone || '',
+                    linkedinUrl: response.linkedin_url || '',
+                    jobTitle: response.job_title || '',
+                    location: response.location || '',
+                    firmName: response.company_name || '',
+                    referrerName: response.referrer_name || currentEmailData.from?.displayName || '',
+                    referrerEmail: currentEmailData.from?.emailAddress || '',
+                    notes: response.notes || '',
+                    calendlyUrl: response.calendly_url || '',
+                    source: response.source || 'Email Inbound'
+                };
+            } else {
+                // Fall back to local extraction
+                extractedData = performLocalExtraction(currentEmailData);
+            }
+        } catch (error) {
+            console.error('AI extraction failed, using local extraction:', error);
+            // Fall back to local extraction
             extractedData = performLocalExtraction(currentEmailData);
-        } else {
-            extractedData = await extractionResponse.json();
         }
         
         // Store original extracted data for comparison
