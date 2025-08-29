@@ -23,6 +23,20 @@ except ImportError:
     HAS_ASYNCPG = False
     asyncpg = None
 
+# Import enhanced database features if available
+try:
+    from .database_enhancements import (
+        EnhancedPostgreSQLClient,
+        CostAwareVectorSearch,
+        CONTEXT_WINDOWS
+    )
+    HAS_ENHANCED_DB = True
+except ImportError:
+    HAS_ENHANCED_DB = False
+    EnhancedPostgreSQLClient = None
+    CostAwareVectorSearch = None
+    CONTEXT_WINDOWS = None
+
 logger = logging.getLogger(__name__)
 
 class PostgreSQLClient:
@@ -33,6 +47,15 @@ class PostgreSQLClient:
             raise ImportError("asyncpg is not installed. PostgreSQL features will be disabled.")
         self.connection_string = connection_string
         self.pool = None
+        
+        # Initialize enhanced client if available
+        self.enhanced_client = None
+        if HAS_ENHANCED_DB:
+            try:
+                self.enhanced_client = EnhancedPostgreSQLClient(connection_string)
+                logger.info("Enhanced PostgreSQL client initialized with 400K context support")
+            except Exception as e:
+                logger.warning(f"Could not initialize enhanced client: {e}")
     
     async def init_pool(self):
         """Initialize connection pool."""
@@ -280,6 +303,12 @@ class PostgreSQLClient:
     
     async def search_similar_emails(self, query_embedding: List[float], limit: int = 5) -> List[Dict]:
         """Find similar emails using vector search."""
+        # Use enhanced client if available for better performance
+        if self.enhanced_client:
+            return await self.enhanced_client.search_similar_contexts(
+                query_embedding, limit=limit, threshold=0.7
+            )
+        
         await self.init_pool()
         
         search_sql = """
@@ -295,6 +324,39 @@ class PostgreSQLClient:
         async with self.pool.acquire() as conn:
             rows = await conn.fetch(search_sql, query_embedding, limit)
             return [dict(row) for row in rows]
+    
+    async def store_large_context(self, content: str, model_tier: str, total_tokens: int) -> Optional[str]:
+        """Store large context using enhanced client if available."""
+        if self.enhanced_client:
+            return await self.enhanced_client.store_large_context(
+                content, model_tier, total_tokens
+            )
+        return None
+    
+    async def track_cost(self, model_tier: str, input_tokens: int, output_tokens: int, 
+                         cost: float, success: bool = True) -> Optional[str]:
+        """Track model usage costs using enhanced client."""
+        if self.enhanced_client:
+            return await self.enhanced_client.track_model_cost(
+                model_tier, input_tokens, output_tokens,
+                total_cost=cost, success=success
+            )
+        return None
+    
+    async def store_enhanced_correction(self, field_name: str, original: str, 
+                                       corrected: str, domain: str) -> Optional[str]:
+        """Store correction pattern with enhanced features."""
+        if self.enhanced_client:
+            return await self.enhanced_client.store_correction_pattern(
+                field_name, original, corrected, domain=domain
+            )
+        return None
+    
+    async def get_cost_analytics(self) -> Dict[str, Any]:
+        """Get comprehensive cost analytics."""
+        if self.enhanced_client:
+            return await self.enhanced_client.get_cost_analytics()
+        return {}
 
 class AzureBlobStorageClient:
     """Handles uploading files to Azure Blob Storage."""

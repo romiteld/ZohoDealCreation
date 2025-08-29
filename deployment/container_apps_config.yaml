@@ -1,0 +1,522 @@
+# Azure Container Apps Configuration
+# Enterprise-grade configuration with monitoring, security, and scaling
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: well-intake-api
+  namespace: production
+  labels:
+    app: well-intake-api
+    environment: production
+    version: "2.0.0"
+
+spec:
+  # Zero-downtime deployment configuration
+  replicas: 2
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  
+  selector:
+    matchLabels:
+      app: well-intake-api
+  
+  template:
+    metadata:
+      labels:
+        app: well-intake-api
+        azure.workload.identity/use: "true"
+    
+    spec:
+      serviceAccountName: well-intake-api-sa
+      
+      containers:
+      - name: well-intake-api
+        image: wellintakeregistry.azurecr.io/well-intake-api:latest
+        
+        # Resource limits and requests
+        resources:
+          requests:
+            cpu: "0.5"
+            memory: "512Mi"
+          limits:
+            cpu: "2"
+            memory: "2Gi"
+        
+        # Health checks for zero-downtime deployment
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+            httpHeaders:
+            - name: X-Health-Check
+              value: liveness
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+          successThreshold: 1
+        
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8000
+            httpHeaders:
+            - name: X-Health-Check
+              value: readiness
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+          successThreshold: 1
+        
+        startupProbe:
+          httpGet:
+            path: /health/startup
+            port: 8000
+          initialDelaySeconds: 0
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 30
+          successThreshold: 1
+        
+        # Environment variables with Key Vault references
+        env:
+        # Core configuration
+        - name: ENVIRONMENT
+          value: "production"
+        
+        - name: USE_LANGGRAPH
+          value: "true"
+        
+        - name: USE_MANAGED_IDENTITY
+          value: "true"
+        
+        # Key Vault configuration
+        - name: KEY_VAULT_URL
+          value: "https://well-intake-kv.vault.azure.net/"
+        
+        # Application Insights
+        - name: APPLICATIONINSIGHTS_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: appinsights-connection-string
+        
+        - name: LOG_ANALYTICS_WORKSPACE_ID
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: log-analytics-workspace-id
+        
+        # OpenAI configuration (from Key Vault)
+        - name: OPENAI_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: openai-api-key
+        
+        - name: OPENAI_MODEL
+          value: "gpt-4o-mini"  # NEVER CHANGE THIS
+        
+        # Database configuration (from Key Vault)
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: database-url
+        
+        # Azure Storage (from Key Vault)
+        - name: AZURE_STORAGE_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: storage-connection-string
+        
+        - name: AZURE_CONTAINER_NAME
+          value: "email-attachments"
+        
+        # Redis for caching and rate limiting
+        - name: REDIS_CONNECTION_STRING
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: redis-connection-string
+        
+        # Zoho configuration (from Key Vault)
+        - name: ZOHO_OAUTH_SERVICE_URL
+          value: "https://well-zoho-oauth.azurewebsites.net"
+        
+        - name: ZOHO_DEFAULT_OWNER_EMAIL
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: zoho-default-owner-email
+        
+        # API Keys (from Key Vault)
+        - name: FIRECRAWL_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: firecrawl-api-key
+        
+        - name: SERPER_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: well-intake-secrets
+              key: serper-api-key
+        
+        # Security configuration
+        - name: API_KEY_ROTATION_DAYS
+          value: "30"
+        
+        - name: API_KEY_LENGTH
+          value: "32"
+        
+        - name: RATE_LIMIT_ENABLED
+          value: "true"
+        
+        - name: RATE_LIMIT_REQUESTS
+          value: "100"
+        
+        - name: RATE_LIMIT_PERIOD
+          value: "60"
+        
+        # Performance tuning
+        - name: WORKERS
+          value: "4"
+        
+        - name: WORKER_CONNECTIONS
+          value: "1000"
+        
+        - name: KEEPALIVE
+          value: "60"
+        
+        - name: TIMEOUT
+          value: "30"
+        
+        ports:
+        - containerPort: 8000
+          protocol: TCP
+          name: http
+        
+        # Volume mounts
+        volumeMounts:
+        - name: secrets
+          mountPath: /app/secrets
+          readOnly: true
+        - name: tmp
+          mountPath: /tmp
+      
+      # Volumes
+      volumes:
+      - name: secrets
+        csi:
+          driver: secrets-store.csi.k8s.io
+          readOnly: true
+          volumeAttributes:
+            secretProviderClass: well-intake-secrets
+      - name: tmp
+        emptyDir: {}
+
+---
+# Horizontal Pod Autoscaler
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: well-intake-api-hpa
+  namespace: production
+
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: well-intake-api
+  
+  minReplicas: 2
+  maxReplicas: 10
+  
+  metrics:
+  # CPU-based scaling
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  
+  # Memory-based scaling
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  
+  # Custom metrics from Application Insights
+  - type: External
+    external:
+      metric:
+        name: email_processing_duration_seconds
+        selector:
+          matchLabels:
+            app: well-intake-api
+      target:
+        type: AverageValue
+        averageValue: "5"  # Scale up if avg processing > 5 seconds
+  
+  - type: External
+    external:
+      metric:
+        name: gpt_latency_seconds
+        selector:
+          matchLabels:
+            app: well-intake-api
+      target:
+        type: AverageValue
+        averageValue: "3"  # Scale up if GPT latency > 3 seconds
+  
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # Wait 5 minutes before scaling down
+      policies:
+      - type: Percent
+        value: 50
+        periodSeconds: 60
+      - type: Pods
+        value: 1
+        periodSeconds: 60
+      selectPolicy: Min
+    
+    scaleUp:
+      stabilizationWindowSeconds: 30  # Scale up quickly
+      policies:
+      - type: Percent
+        value: 100
+        periodSeconds: 30
+      - type: Pods
+        value: 2
+        periodSeconds: 30
+      selectPolicy: Max
+
+---
+# Service configuration
+apiVersion: v1
+kind: Service
+metadata:
+  name: well-intake-api-service
+  namespace: production
+  annotations:
+    service.beta.kubernetes.io/azure-load-balancer-internal: "true"
+    service.beta.kubernetes.io/azure-load-balancer-health-probe-request-path: "/health"
+
+spec:
+  type: LoadBalancer
+  selector:
+    app: well-intake-api
+  
+  ports:
+  - name: http
+    port: 80
+    targetPort: 8000
+    protocol: TCP
+  
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 10800  # 3 hours
+
+---
+# Ingress configuration with SSL and WAF
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: well-intake-api-ingress
+  namespace: production
+  annotations:
+    kubernetes.io/ingress.class: azure/application-gateway
+    appgw.ingress.kubernetes.io/ssl-redirect: "true"
+    appgw.ingress.kubernetes.io/backend-protocol: "http"
+    appgw.ingress.kubernetes.io/cookie-based-affinity: "true"
+    appgw.ingress.kubernetes.io/request-timeout: "30"
+    appgw.ingress.kubernetes.io/connection-draining: "true"
+    appgw.ingress.kubernetes.io/connection-draining-timeout: "30"
+    appgw.ingress.kubernetes.io/waf-policy-for-path: "/subscriptions/{subscription-id}/resourceGroups/TheWell-Infra-East/providers/Microsoft.Network/applicationGatewayWebApplicationFirewallPolicies/well-intake-waf"
+
+spec:
+  tls:
+  - hosts:
+    - well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
+    secretName: well-intake-tls
+  
+  rules:
+  - host: well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: well-intake-api-service
+            port:
+              number: 80
+
+---
+# Network Policy for security
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: well-intake-api-netpol
+  namespace: production
+
+spec:
+  podSelector:
+    matchLabels:
+      app: well-intake-api
+  
+  policyTypes:
+  - Ingress
+  - Egress
+  
+  ingress:
+  - from:
+    - podSelector:
+        matchLabels:
+          app: application-gateway
+    - namespaceSelector:
+        matchLabels:
+          name: ingress-basic
+    ports:
+    - protocol: TCP
+      port: 8000
+  
+  egress:
+  # Allow DNS
+  - to:
+    - namespaceSelector: {}
+      podSelector:
+        matchLabels:
+          k8s-app: kube-dns
+    ports:
+    - protocol: UDP
+      port: 53
+  
+  # Allow HTTPS to external services
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 443
+  
+  # Allow PostgreSQL
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 5432
+  
+  # Allow Redis
+  - to:
+    - podSelector: {}
+    ports:
+    - protocol: TCP
+      port: 6379
+    - protocol: TCP
+      port: 6380  # SSL
+
+---
+# Secret Provider Class for Key Vault integration
+apiVersion: secrets-store.csi.x-k8s.io/v1
+kind: SecretProviderClass
+metadata:
+  name: well-intake-secrets
+  namespace: production
+
+spec:
+  provider: azure
+  
+  parameters:
+    usePodIdentity: "false"
+    useVMManagedIdentity: "true"
+    userAssignedIdentityID: "{client-id-of-managed-identity}"
+    keyvaultName: "well-intake-kv"
+    cloudName: "AzurePublicCloud"
+    objects: |
+      array:
+        - |
+          objectName: openai-api-key
+          objectType: secret
+          objectAlias: openai-api-key
+        - |
+          objectName: database-url
+          objectType: secret
+          objectAlias: database-url
+        - |
+          objectName: storage-connection-string
+          objectType: secret
+          objectAlias: storage-connection-string
+        - |
+          objectName: redis-connection-string
+          objectType: secret
+          objectAlias: redis-connection-string
+        - |
+          objectName: firecrawl-api-key
+          objectType: secret
+          objectAlias: firecrawl-api-key
+        - |
+          objectName: serper-api-key
+          objectType: secret
+          objectAlias: serper-api-key
+        - |
+          objectName: zoho-default-owner-email
+          objectType: secret
+          objectAlias: zoho-default-owner-email
+        - |
+          objectName: appinsights-connection-string
+          objectType: secret
+          objectAlias: appinsights-connection-string
+        - |
+          objectName: log-analytics-workspace-id
+          objectType: secret
+          objectAlias: log-analytics-workspace-id
+    tenantId: "{azure-tenant-id}"
+  
+  secretObjects:
+  - secretName: well-intake-secrets
+    type: Opaque
+    data:
+    - objectName: openai-api-key
+      key: openai-api-key
+    - objectName: database-url
+      key: database-url
+    - objectName: storage-connection-string
+      key: storage-connection-string
+    - objectName: redis-connection-string
+      key: redis-connection-string
+    - objectName: firecrawl-api-key
+      key: firecrawl-api-key
+    - objectName: serper-api-key
+      key: serper-api-key
+    - objectName: zoho-default-owner-email
+      key: zoho-default-owner-email
+    - objectName: appinsights-connection-string
+      key: appinsights-connection-string
+    - objectName: log-analytics-workspace-id
+      key: log-analytics-workspace-id
+
+---
+# Pod Disruption Budget for high availability
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: well-intake-api-pdb
+  namespace: production
+
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: well-intake-api

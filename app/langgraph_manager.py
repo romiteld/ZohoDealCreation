@@ -19,6 +19,10 @@ from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 from langgraph.types import Send
 
+# Cache imports
+from app.redis_cache_manager import get_cache_manager
+from app.cache_strategies import get_strategy_manager
+
 # Load environment variables
 load_dotenv('.env.local')
 load_dotenv()
@@ -35,6 +39,7 @@ class EmailProcessingState(TypedDict):
     validation_result: Optional[Dict[str, Any]]
     final_output: Optional[ExtractedData]
     messages: Annotated[list, add_messages]
+    learning_hints: Optional[str]  # Historical corrections to guide extraction
 
 
 class ExtractionOutput(BaseModel):
@@ -44,6 +49,9 @@ class ExtractionOutput(BaseModel):
     location: Optional[str] = Field(default=None, description="Geographical location for the role")
     company_guess: Optional[str] = Field(default=None, description="Company name mentioned in email")
     referrer_name: Optional[str] = Field(default=None, description="Name of the person sending the email")
+    phone: Optional[str] = Field(default=None, description="Phone number if present")
+    email: Optional[str] = Field(default=None, description="Email address of the candidate if different from sender")
+    calendly_url: Optional[str] = Field(default=None, description="Calendly link if present")
 
 
 class CompanyResearch(BaseModel):
@@ -68,19 +76,93 @@ class EmailProcessingWorkflow:
         logger.info("LangGraph workflow compiled successfully")
     
     async def extract_information(self, state: EmailProcessingState) -> Dict:
-        """First node: Extract key information from email"""
+        """First node: Extract key information from email with learning enhancements"""
         logger.info("---EXTRACTION AGENT---")
         
-        system_prompt = """You are a Senior Data Analyst specializing in recruitment email analysis.
-        Extract key recruitment details from the email with extreme accuracy.
-        Focus on identifying:
-        1. Candidate name - the person being referred for the job
-        2. Job title - the specific position mentioned
-        3. Location - city and state if available
-        4. Company name - any company explicitly mentioned
-        5. Referrer name - the person sending the email
+        email_content = state['email_content']
+        sender_domain = state['sender_domain']
         
-        Be precise and avoid assumptions."""
+        # Initialize learning services for enhanced extraction
+        correction_service = None
+        learning_analytics = None
+        prompt_variant = None
+        enhanced_prompt = None
+        
+        try:
+            from app.correction_learning import CorrectionLearningService
+            from app.learning_analytics import LearningAnalytics
+            
+            # Initialize correction service with Azure AI Search
+            correction_service = CorrectionLearningService(None, use_azure_search=True)
+            
+            # Initialize learning analytics and select prompt variant
+            learning_analytics = LearningAnalytics(
+                search_manager=correction_service.search_manager,
+                enable_ab_testing=True
+            )
+            
+            # Select prompt variant for A/B testing
+            prompt_variant = learning_analytics.select_prompt_variant(email_domain=sender_domain)
+            
+            # Get enhanced prompt with historical corrections
+            base_prompt = prompt_variant.prompt_template if prompt_variant else ""
+            enhanced_prompt = await correction_service.generate_enhanced_prompt(
+                base_prompt=base_prompt,
+                email_domain=sender_domain,
+                email_content=email_content[:1000]
+            )
+            
+            logger.info(f"Using prompt variant: {prompt_variant.variant_name if prompt_variant else 'default'}")
+            
+        except Exception as e:
+            logger.warning(f"Could not initialize learning services: {e}")
+        
+        # Check cache first
+        try:
+            cache_manager = await get_cache_manager()
+            cached_result = await cache_manager.get_cached_extraction(
+                email_content, 
+                extraction_type="full"
+            )
+            
+            if cached_result:
+                # Use cached result
+                extraction_result = cached_result.get("result", {})
+                logger.info(f"Using CACHED extraction: {extraction_result}")
+                
+                return {
+                    "extraction_result": extraction_result,
+                    "messages": [{"role": "assistant", "content": f"Cached extraction: {extraction_result}"}]
+                }
+        except Exception as e:
+            logger.warning(f"Cache check failed, proceeding without cache: {e}")
+        
+        # Get learning hints if available
+        learning_hints = state.get('learning_hints', '')
+        
+        # Use enhanced prompt if available, otherwise fall back to default
+        if enhanced_prompt:
+            system_prompt = enhanced_prompt
+        else:
+            system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis.
+            Extract key recruitment details from the email with extreme accuracy.
+            
+            CRITICAL RULES:
+            - ONLY extract information that is EXPLICITLY stated in the email
+            - If information is not present, return null/None - NEVER make it up
+            - For referrer_name: ONLY extract if someone explicitly says "referred by [name]"
+            - If the sender is introducing themselves, they are NOT a referrer
+            
+            Focus on identifying:
+            1. Candidate name - the person being referred for the job (not the sender)
+            2. Job title - the specific position mentioned
+            3. Location - city and state if available
+            4. Company name - any company explicitly mentioned
+            5. Referrer name - ONLY if explicitly stated as "referred by" or "referral from"
+            
+            {learning_hints}
+            
+            Be precise and NEVER assume or invent information."""
         
         user_prompt = f"""Analyze this recruitment email and extract the key details:
         
@@ -119,7 +201,56 @@ class EmailProcessingWorkflow:
             )
             
             result = json.loads(response.choices[0].message.content)
-            logger.info(f"Extraction completed: {result}")
+            logger.info(f"Extraction completed (NEW): {result}")
+            
+            # Track extraction metrics if learning analytics is available
+            if learning_analytics:
+                try:
+                    import time
+                    processing_time = int((time.time() - state.get('start_time', time.time())) * 1000)
+                    
+                    metric = await learning_analytics.track_extraction(
+                        email_domain=sender_domain,
+                        extraction_result=result,
+                        processing_time_ms=processing_time,
+                        prompt_variant_id=prompt_variant.variant_id if prompt_variant else None,
+                        used_template=bool(correction_service and correction_service.search_manager and 
+                                         await correction_service.search_manager.get_company_template(sender_domain)),
+                        pattern_matches=0  # Will be calculated if needed
+                    )
+                    
+                    logger.info(f"Tracked extraction metrics: confidence={metric.overall_confidence:.2f}" if metric else "Metrics tracked")
+                except Exception as e:
+                    logger.warning(f"Could not track extraction metrics: {e}")
+            
+            # Cache the result
+            try:
+                cache_manager = await get_cache_manager()
+                strategy_manager = get_strategy_manager()
+                
+                # Determine caching strategy
+                should_cache, ttl, pattern_key = strategy_manager.should_cache(
+                    email_content,
+                    sender_domain,
+                    result
+                )
+                
+                if should_cache:
+                    await cache_manager.cache_extraction(
+                        email_content,
+                        result,
+                        extraction_type="full",
+                        ttl=ttl
+                    )
+                    logger.info(f"Cached extraction with TTL: {ttl}")
+                    
+                    # Also cache pattern if identified
+                    if pattern_key:
+                        await cache_manager.cache_pattern(pattern_key, result)
+                        logger.info(f"Cached pattern: {pattern_key}")
+                        
+            except Exception as e:
+                logger.warning(f"Failed to cache extraction: {e}")
             
             return {
                 "extraction_result": result,
@@ -196,13 +327,26 @@ class EmailProcessingWorkflow:
         extracted = state.get('extraction_result', {})
         research = state.get('company_research', {})
         
+        # Extract phone from Calendly URL if present
+        phone = extracted.get('phone')
+        calendly_url = extracted.get('calendly_url')
+        if not phone and calendly_url:
+            # Try to extract phone from Calendly URL parameters
+            import re
+            phone_match = re.search(r'phone=([0-9\-\+\(\)\s]+)', calendly_url)
+            if phone_match:
+                phone = phone_match.group(1)
+                logger.info(f"Extracted phone from Calendly: {phone}")
+        
         # Merge extraction with research
         validated_data = {
             "candidate_name": extracted.get('candidate_name'),
             "job_title": extracted.get('job_title'),
             "location": extracted.get('location'),
             "company_name": research.get('company_name') or extracted.get('company_guess'),
-            "referrer_name": extracted.get('referrer_name')
+            "referrer_name": extracted.get('referrer_name'),
+            "phone": phone,
+            "email": extracted.get('email')
         }
         
         # Clean and standardize
@@ -249,8 +393,8 @@ class EmailProcessingWorkflow:
         # Compile the workflow
         return workflow.compile()
     
-    async def process_email(self, email_body: str, sender_domain: str) -> ExtractedData:
-        """Main entry point to process an email"""
+    async def process_email(self, email_body: str, sender_domain: str, learning_hints: str = None) -> ExtractedData:
+        """Main entry point to process an email with optional learning hints"""
         
         logger.info(f"Starting LangGraph email processing for domain: {sender_domain}")
         
@@ -262,7 +406,8 @@ class EmailProcessingWorkflow:
             "company_research": None,
             "validation_result": None,
             "final_output": None,
-            "messages": []
+            "messages": [],
+            "learning_hints": learning_hints or ""
         }
         
         try:

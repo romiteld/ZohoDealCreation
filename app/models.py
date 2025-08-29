@@ -1,5 +1,5 @@
 from pydantic import BaseModel, Field
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 
 # --- API Data Contracts ---
 
@@ -16,6 +16,8 @@ class EmailPayload(BaseModel):
     attachments: List[AttachmentPayload] = []
     raw_email: Optional[str] = Field(None, description="Raw email content for metadata extraction")
     reply_to: Optional[str] = Field(None, description="Reply-To header if different from sender")
+    user_corrections: Optional[Dict[str, Any]] = Field(None, description="User corrections to AI extraction")
+    ai_extraction: Optional[Dict[str, Any]] = Field(None, description="Original AI extraction for learning")
 
 class ExtractedData(BaseModel):
     candidate_name: Optional[str] = Field(None, description="The full name of the candidate.")

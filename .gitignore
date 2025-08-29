@@ -119,3 +119,67 @@ instance/
 # Azure Functions
 local.settings.json
 .python_packages/
+
+# ====================================
+# FILES TO CLEAN UP - Added 2025-08-29
+# ====================================
+
+# Demo and test files (no longer needed)
+demo_*.py
+test_production_*.py
+verify_*.py
+fix_*.py
+cleanup_and_reprocess.py
+process_new_deals*.py
+zoho_cleanup*.py
+zoho_delete*.py
+zoho_fix*.py
+create_kathy*.py
+run_demo.py
+
+# Old manifest versions
+TheWell-SendToZoho-Minimal.xml
+manifest_download.xml
+
+# Old app versions in app/ directory
+app/main_optimized.py
+app/main_cosmosdb.py
+app/main_minimal.py
+app/integrations_optimized.py
+app/crewai_manager*.py
+app/chromadb_mock.py
+app/sqlite_patcher.py
+app/custom_llm.py
+app/firecrawl_research.py
+app/vector_store.py
+app/error_handlers.py
+app/static_files.py
+
+# Old Flask app
+app.py
+
+# Temporary scripts
+create_icons.py
+validate_manifest.py
+
+# Command documentation (keep in repo but ignore changes)
+azure_cli_outlook_commands.sh
+m365_troubleshoot_commands.md
+outlook_troubleshoot_commands.md
+troubleshoot_addin.sh
+
+# Test files for add-in
+test_addin_proxy.js
+test_full_addin_flow.js
+test_proxy_node.js
+
+# Server logs
+server.log
+server_minimal.log
+
+# Temporary directories
+New Deals/
+"New Deals/"
+
+# Keep PROXY_FIX_SUMMARY.md for reference but ignore changes
+PROXY_FIX_SUMMARY.md

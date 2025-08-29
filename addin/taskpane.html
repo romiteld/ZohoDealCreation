@@ -1,384 +1,489 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <meta charset="UTF-8" />
-    <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=Edge">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title>Email Processor</title>
-
+    <title>Send to Zoho - Review & Edit</title>
+    
     <!-- Office JavaScript API -->
     <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
-
-    <!-- Fluent UI Web Components -->
-    <link rel="stylesheet" href="https://static2.sharepointonline.com/files/fabric/office-ui-fabric-core/11.0.0/css/fabric.min.css">
+    
+    <!-- Bootstrap for better styling -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.1.3/dist/css/bootstrap.min.css" rel="stylesheet">
     
     <style>
         body {
-            font-family: "Segoe UI", Tahoma, Geneva, Verdana, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 0;
             margin: 0;
-            padding: 20px;
-            background-color: #f3f2f1;
-        }
-        
-        .container {
-            background: white;
-            border-radius: 4px;
-            padding: 20px;
-            box-shadow: 0 1.6px 3.6px 0 rgba(0,0,0,.132), 0 0.3px 0.9px 0 rgba(0,0,0,.108);
-        }
-        
-        h1 {
-            color: #323130;
-            font-size: 24px;
-            font-weight: 600;
-            margin: 0 0 20px 0;
-        }
-        
-        .email-info {
-            background: #faf9f8;
-            border-radius: 4px;
-            padding: 12px;
-            margin-bottom: 20px;
-        }
-        
-        .info-row {
+            height: 100vh;
             display: flex;
-            margin-bottom: 8px;
+            flex-direction: column;
         }
         
-        .info-label {
-            font-weight: 600;
-            color: #605e5c;
-            min-width: 80px;
-        }
-        
-        .info-value {
-            color: #323130;
-            word-break: break-word;
-        }
-        
-        .button-container {
-            display: flex;
-            gap: 10px;
-            margin-bottom: 20px;
-        }
-        
-        .ms-Button {
-            background: #0078d4;
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            border: none;
-            padding: 10px 20px;
-            border-radius: 4px;
+            padding: 15px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .header h4 {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        
+        .header .subtitle {
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 5px;
+        }
+        
+        .content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #f8f9fa;
+        }
+        
+        .preview-section {
+            background: white;
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .section-title {
             font-size: 14px;
             font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
+            color: #495057;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
         }
         
-        .ms-Button:hover {
-            background: #106ebe;
-        }
-        
-        .ms-Button:disabled {
-            background: #a19f9d;
-            cursor: not-allowed;
-        }
-        
-        .ms-Button--secondary {
-            background: #edebe9;
-            color: #323130;
-        }
-        
-        .ms-Button--secondary:hover {
-            background: #e1dfdd;
-        }
-        
-        .results-container {
-            background: #f3f2f1;
-            border-radius: 4px;
-            padding: 12px;
-            margin-top: 20px;
-            max-height: 300px;
-            overflow-y: auto;
-        }
-        
-        .results-container h2 {
-            color: #323130;
+        .section-title .icon {
+            margin-right: 8px;
             font-size: 16px;
-            font-weight: 600;
-            margin: 0 0 12px 0;
         }
         
-        .result-item {
+        .form-label {
+            font-size: 12px;
+            color: #6c757d;
+            margin-bottom: 4px;
+            font-weight: 500;
+        }
+        
+        .form-control, .form-select {
+            font-size: 13px;
+            padding: 6px 10px;
+        }
+        
+        .form-control:focus {
+            border-color: #667eea;
+            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        }
+        
+        .alert-info {
+            font-size: 12px;
+            padding: 10px;
+            margin-bottom: 15px;
+            background: #e8f4fd;
+            border: 1px solid #bee5eb;
+            border-radius: 6px;
+        }
+        
+        .extracted-indicator {
+            display: inline-block;
+            background: #28a745;
+            color: white;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 5px;
+        }
+        
+        .edited-indicator {
+            display: inline-block;
+            background: #ffc107;
+            color: #212529;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 3px;
+            margin-left: 5px;
+        }
+        
+        .footer {
+            padding: 15px;
             background: white;
-            padding: 8px;
-            margin-bottom: 8px;
-            border-radius: 4px;
-            border-left: 3px solid #0078d4;
+            border-top: 1px solid #dee2e6;
+            display: flex;
+            gap: 10px;
         }
         
-        .loading {
+        .btn {
+            font-size: 14px;
+            padding: 8px 16px;
+            border-radius: 6px;
+            font-weight: 500;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border: none;
+        }
+        
+        .btn-primary:hover {
+            background: linear-gradient(135deg, #5a67d8 0%, #6b42a0 100%);
+        }
+        
+        .progress-container {
             display: none;
-            text-align: center;
             padding: 20px;
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 15px;
         }
         
-        .loading.active {
-            display: block;
+        .progress {
+            height: 25px;
+            border-radius: 12px;
+            overflow: hidden;
+            background: #e9ecef;
         }
         
-        .spinner {
-            border: 3px solid #f3f2f1;
-            border-top: 3px solid #0078d4;
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto;
+        .progress-bar {
+            background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+            transition: width 0.3s ease;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            font-weight: 600;
         }
         
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+        .step-list {
+            margin-top: 15px;
+        }
+        
+        .step-item {
+            display: flex;
+            align-items: center;
+            padding: 8px;
+            margin-bottom: 5px;
+            border-radius: 6px;
+            font-size: 13px;
+            transition: all 0.3s ease;
+        }
+        
+        .step-item.active {
+            background: #f0f3ff;
+            font-weight: 500;
+        }
+        
+        .step-item.completed {
+            color: #28a745;
+        }
+        
+        .step-item .step-icon {
+            margin-right: 10px;
+            font-size: 16px;
+        }
+        
+        .spinner-border {
+            width: 16px;
+            height: 16px;
+            border-width: 2px;
+            margin-right: 10px;
         }
         
         .error-message {
-            background: #fde7e9;
-            color: #a80000;
-            padding: 12px;
-            border-radius: 4px;
-            margin-top: 12px;
-            border-left: 3px solid #a80000;
+            background: #f8d7da;
+            color: #721c24;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 15px;
+            display: none;
         }
         
         .success-message {
-            background: #dff6dd;
-            color: #0e700e;
-            padding: 12px;
+            background: #d4edda;
+            color: #155724;
+            padding: 10px;
+            border-radius: 6px;
+            font-size: 13px;
+            margin-bottom: 15px;
+            display: none;
+        }
+        
+        .attachments-list {
+            font-size: 12px;
+            padding: 8px;
+            background: #f8f9fa;
             border-radius: 4px;
-            margin-top: 12px;
-            border-left: 3px solid #0e700e;
+            margin-top: 10px;
+        }
+        
+        .attachment-item {
+            display: flex;
+            align-items: center;
+            padding: 4px 0;
+        }
+        
+        .attachment-item .icon {
+            margin-right: 8px;
+            color: #6c757d;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>Email Processor</h1>
+    <div class="header">
+        <h4>Send to Zoho CRM</h4>
+        <div class="subtitle">Review and edit extracted information before sending</div>
+    </div>
+    
+    <div class="content" id="mainContent">
+        <!-- Initial loading state -->
+        <div id="loadingState" class="text-center py-5">
+            <div class="spinner-border text-primary mb-3" role="status"></div>
+            <div>Extracting email information...</div>
+        </div>
         
-        <div class="email-info" id="emailInfo">
-            <div class="info-row">
-                <span class="info-label">Subject:</span>
-                <span class="info-value" id="emailSubject">Loading...</span>
+        <!-- Preview/Edit Form (hidden initially) -->
+        <div id="previewForm" style="display: none;">
+            <div class="alert alert-info">
+                <strong>📋 Review extracted data:</strong> The AI has extracted the following information from the email. 
+                You can edit the fields directly, use natural language corrections, or add custom fields.
             </div>
-            <div class="info-row">
-                <span class="info-label">From:</span>
-                <span class="info-value" id="emailFrom">Loading...</span>
+            
+            <!-- Natural Language Corrections -->
+            <div class="preview-section" id="correctionsSection">
+                <div class="section-title">
+                    <span class="icon">✏️</span>
+                    Quick Corrections
+                    <small class="text-muted ms-2">(Tell me what to fix)</small>
+                </div>
+                <div class="mb-3">
+                    <textarea class="form-control" id="correctionPrompt" rows="2" 
+                             placeholder="e.g., 'The candidate name is John Smith, not Jon Smyth' or 'Add phone number 555-1234' or 'The location should be remote'"></textarea>
+                    <small class="form-text text-muted">
+                        Describe corrections in natural language and click Apply
+                    </small>
+                </div>
+                <div class="d-flex gap-2">
+                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnApplyCorrections">
+                        <span class="icon">🤖</span> Apply Corrections
+                    </button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSuggestFixes">
+                        <span class="icon">💡</span> Suggest Common Fixes
+                    </button>
+                </div>
+                <!-- Quick fix suggestions -->
+                <div id="quickFixes" class="mt-2" style="display: none;">
+                    <small class="text-muted">Common corrections for this domain:</small>
+                    <div id="fixSuggestions" class="mt-1"></div>
+                </div>
             </div>
-            <div class="info-row">
-                <span class="info-label">Date:</span>
-                <span class="info-value" id="emailDate">Loading...</span>
+            
+            <!-- Candidate Section -->
+            <div class="preview-section">
+                <div class="section-title">
+                    <span class="icon">👤</span>
+                    Candidate Information
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Candidate Name *</label>
+                        <input type="text" class="form-control" id="candidateName" required>
+                        <span id="candidateNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Email</label>
+                        <input type="email" class="form-control" id="candidateEmail">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Phone</label>
+                        <input type="tel" class="form-control" id="candidatePhone">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">LinkedIn URL</label>
+                        <input type="url" class="form-control" id="linkedinUrl" placeholder="https://linkedin.com/in/...">
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Job Details Section -->
+            <div class="preview-section">
+                <div class="section-title">
+                    <span class="icon">💼</span>
+                    Job Details
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Job Title *</label>
+                        <input type="text" class="form-control" id="jobTitle" required>
+                        <span id="jobTitleIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Location</label>
+                        <input type="text" class="form-control" id="location">
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Firm/Company</label>
+                        <input type="text" class="form-control" id="firmName">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Source</label>
+                        <select class="form-select" id="source">
+                            <option value="Email Inbound">Email Inbound</option>
+                            <option value="Referral">Referral</option>
+                            <option value="Reverse Recruiting">Reverse Recruiting</option>
+                            <option value="Website Inbound">Website Inbound</option>
+                        </select>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Referrer Section -->
+            <div class="preview-section">
+                <div class="section-title">
+                    <span class="icon">🤝</span>
+                    Referrer Information
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Referrer Name</label>
+                        <input type="text" class="form-control" id="referrerName">
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Referrer Email</label>
+                        <input type="email" class="form-control" id="referrerEmail" readonly>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Additional Information -->
+            <div class="preview-section">
+                <div class="section-title">
+                    <span class="icon">📝</span>
+                    Additional Information
+                    <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="btnAddField">
+                        + Add Field
+                    </button>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Notes</label>
+                    <textarea class="form-control" id="notes" rows="3" placeholder="Any additional notes or context..."></textarea>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label">Calendly URL</label>
+                    <input type="url" class="form-control" id="calendlyUrl" placeholder="https://calendly.com/...">
+                </div>
+                <!-- Container for custom fields -->
+                <div id="customFieldsContainer"></div>
+            </div>
+            
+            <!-- Custom Field Modal -->
+            <div id="addFieldModal" class="modal" style="display: none;">
+                <div class="modal-content" style="background: white; padding: 20px; border-radius: 8px; max-width: 400px; margin: 50px auto;">
+                    <h5>Add Custom Field</h5>
+                    <div class="mb-3">
+                        <label class="form-label">Field Name</label>
+                        <input type="text" class="form-control" id="newFieldName" placeholder="e.g., Salary Range">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Field Type</label>
+                        <select class="form-select" id="newFieldType">
+                            <option value="text">Text</option>
+                            <option value="number">Number</option>
+                            <option value="email">Email</option>
+                            <option value="url">URL</option>
+                            <option value="date">Date</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Default Value (optional)</label>
+                        <input type="text" class="form-control" id="newFieldValue">
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button type="button" class="btn btn-primary" id="btnConfirmAddField">Add</button>
+                        <button type="button" class="btn btn-secondary" id="btnCancelAddField">Cancel</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Attachments -->
+            <div class="preview-section" id="attachmentsSection" style="display: none;">
+                <div class="section-title">
+                    <span class="icon">📎</span>
+                    Attachments
+                </div>
+                <div class="attachments-list" id="attachmentsList">
+                    <!-- Populated dynamically -->
+                </div>
             </div>
         </div>
         
-        <div class="button-container">
-            <button class="ms-Button" id="processButton" onclick="processCurrentEmail()">
-                Process Email
-            </button>
-            <button class="ms-Button ms-Button--secondary" id="refreshButton" onclick="refreshEmailInfo()">
-                Refresh
-            </button>
-        </div>
-        
-        <div class="loading" id="loadingIndicator">
-            <div class="spinner"></div>
-            <p>Processing email...</p>
-        </div>
-        
-        <div id="messageContainer"></div>
-        
-        <div class="results-container" id="resultsContainer" style="display: none;">
-            <h2>Processing Results</h2>
-            <div id="resultsContent"></div>
+        <!-- Progress Section (hidden initially) -->
+        <div id="progressSection" style="display: none;">
+            <div class="progress-container" style="display: block;">
+                <h5 class="mb-3">Processing Email</h5>
+                <div class="progress">
+                    <div class="progress-bar" id="progressBar" role="progressbar" style="width: 0%">0%</div>
+                </div>
+                <div class="step-list" id="stepList">
+                    <div class="step-item" data-step="1">
+                        <span class="step-icon">📧</span>
+                        <span>Reading email content</span>
+                    </div>
+                    <div class="step-item" data-step="2">
+                        <span class="step-icon">🤖</span>
+                        <span>AI processing & extraction</span>
+                    </div>
+                    <div class="step-item" data-step="3">
+                        <span class="step-icon">☁️</span>
+                        <span>Uploading attachments</span>
+                    </div>
+                    <div class="step-item" data-step="4">
+                        <span class="step-icon">🔍</span>
+                        <span>Checking for duplicates</span>
+                    </div>
+                    <div class="step-item" data-step="5">
+                        <span class="step-icon">✍️</span>
+                        <span>Creating Zoho records</span>
+                    </div>
+                    <div class="step-item" data-step="6">
+                        <span class="step-icon">✅</span>
+                        <span>Complete</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="error-message" id="errorMessage"></div>
+            <div class="success-message" id="successMessage"></div>
         </div>
     </div>
-
-    <script type="text/javascript">
-        const API_BASE_URL = window.API_BASE_URL || 'http://localhost:8000';
-        
-        Office.onReady((info) => {
-            if (info.host === Office.HostType.Outlook) {
-                loadEmailInfo();
-            }
-        });
-        
-        function loadEmailInfo() {
-            const item = Office.context.mailbox.item;
-            
-            document.getElementById('emailSubject').textContent = item.subject || '(No subject)';
-            document.getElementById('emailFrom').textContent = item.from ? item.from.emailAddress : 'Unknown';
-            
-            if (item.dateTimeCreated) {
-                const date = new Date(item.dateTimeCreated);
-                document.getElementById('emailDate').textContent = date.toLocaleString();
-            }
-        }
-        
-        function refreshEmailInfo() {
-            loadEmailInfo();
-            clearMessages();
-            document.getElementById('resultsContainer').style.display = 'none';
-        }
-        
-        function showLoading(show) {
-            const loading = document.getElementById('loadingIndicator');
-            const processButton = document.getElementById('processButton');
-            
-            if (show) {
-                loading.classList.add('active');
-                processButton.disabled = true;
-            } else {
-                loading.classList.remove('active');
-                processButton.disabled = false;
-            }
-        }
-        
-        function showMessage(message, type = 'error') {
-            const container = document.getElementById('messageContainer');
-            container.innerHTML = `<div class="${type}-message">${message}</div>`;
-        }
-        
-        function clearMessages() {
-            document.getElementById('messageContainer').innerHTML = '';
-        }
-        
-        function displayResults(results) {
-            const container = document.getElementById('resultsContainer');
-            const content = document.getElementById('resultsContent');
-            
-            content.innerHTML = '';
-            
-            // Display different types of results based on what the backend returns
-            if (results.summary) {
-                const summaryDiv = document.createElement('div');
-                summaryDiv.className = 'result-item';
-                summaryDiv.innerHTML = `<strong>Summary:</strong> ${results.summary}`;
-                content.appendChild(summaryDiv);
-            }
-            
-            if (results.categories) {
-                const categoriesDiv = document.createElement('div');
-                categoriesDiv.className = 'result-item';
-                categoriesDiv.innerHTML = `<strong>Categories:</strong> ${results.categories.join(', ')}`;
-                content.appendChild(categoriesDiv);
-            }
-            
-            if (results.sentiment) {
-                const sentimentDiv = document.createElement('div');
-                sentimentDiv.className = 'result-item';
-                sentimentDiv.innerHTML = `<strong>Sentiment:</strong> ${results.sentiment}`;
-                content.appendChild(sentimentDiv);
-            }
-            
-            if (results.actions) {
-                const actionsDiv = document.createElement('div');
-                actionsDiv.className = 'result-item';
-                actionsDiv.innerHTML = '<strong>Suggested Actions:</strong>';
-                const actionsList = document.createElement('ul');
-                results.actions.forEach(action => {
-                    const li = document.createElement('li');
-                    li.textContent = action;
-                    actionsList.appendChild(li);
-                });
-                actionsDiv.appendChild(actionsList);
-                content.appendChild(actionsDiv);
-            }
-            
-            if (results.raw_response) {
-                const rawDiv = document.createElement('div');
-                rawDiv.className = 'result-item';
-                rawDiv.innerHTML = `<strong>Response:</strong> ${JSON.stringify(results, null, 2)}`;
-                content.appendChild(rawDiv);
-            }
-            
-            container.style.display = 'block';
-        }
-        
-        async function processCurrentEmail() {
-            try {
-                clearMessages();
-                showLoading(true);
-                
-                const item = Office.context.mailbox.item;
-                
-                // Extract email data
-                const emailData = await extractEmailData(item);
-                
-                // Send to backend
-                const response = await fetch(`${API_BASE_URL}/process-email`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json'
-                    },
-                    body: JSON.stringify(emailData)
-                });
-                
-                if (!response.ok) {
-                    const error = await response.json().catch(() => ({}));
-                    throw new Error(error.detail || `Server error: ${response.status}`);
-                }
-                
-                const results = await response.json();
-                
-                showMessage('Email processed successfully!', 'success');
-                displayResults(results);
-                
-            } catch (error) {
-                console.error('Error processing email:', error);
-                showMessage(error.message);
-            } finally {
-                showLoading(false);
-            }
-        }
-        
-        function extractEmailData(item) {
-            return new Promise((resolve, reject) => {
-                const emailData = {
-                    subject: item.subject,
-                    from: item.from ? {
-                        displayName: item.from.displayName,
-                        emailAddress: item.from.emailAddress
-                    } : null,
-                    to: item.to ? item.to.map(r => ({
-                        displayName: r.displayName,
-                        emailAddress: r.emailAddress
-                    })) : [],
-                    dateTimeCreated: item.dateTimeCreated,
-                    itemId: item.itemId
-                };
-                
-                // Get body
-                item.body.getAsync(
-                    Office.CoercionType.Text,
-                    (result) => {
-                        if (result.status === Office.AsyncResultStatus.Succeeded) {
-                            emailData.body = result.value;
-                            
-                            // Get attachments metadata
-                            emailData.attachments = item.attachments ? 
-                                item.attachments.map(a => ({
-                                    name: a.name,
-                                    size: a.size,
-                                    contentType: a.contentType
-                                })) : [];
-                            
-                            resolve(emailData);
-                        } else {
-                            reject(new Error('Failed to get email body'));
-                        }
-                    }
-                );
-            });
-        }
-    </script>
+    
+    <div class="footer" id="footer" style="display: none;">
+        <button type="button" class="btn btn-secondary" id="btnCancel">Cancel</button>
+        <button type="button" class="btn btn-primary flex-fill" id="btnSend">
+            Send to Zoho CRM
+        </button>
+        <button type="button" class="btn btn-primary flex-fill" id="btnClose" style="display: none;">
+            Close
+        </button>
+    </div>
+    
+    <!-- Include the taskpane JavaScript -->
+    <script src="config.js"></script>
+    <script src="taskpane.js"></script>
 </body>
 </html>

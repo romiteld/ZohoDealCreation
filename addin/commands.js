@@ -5,9 +5,9 @@
 
 /* global Office */
 
-// Configuration for API connection - Now using OAuth proxy service
-const API_BASE_URL = window.API_BASE_URL || 'https://well-zoho-oauth.azurewebsites.net/api';
-const API_KEY = window.API_KEY || ''; // API key handled server-side by proxy service
+// Configuration for API connection - Now using Container Apps deployment
+const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io';
+const API_KEY = window.API_KEY || 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
 
 Office.onReady(() => {
   // Office is ready - initialization code can go here if needed
@@ -162,6 +162,173 @@ async function extractEmailData() {
 }
 
 /**
+ * Attempts to establish WebSocket connection for streaming
+ * @param {Object} emailData - The extracted email data
+ * @returns {Promise<WebSocket|null>} WebSocket connection or null if unavailable
+ */
+async function tryWebSocketConnection(emailData) {
+  try {
+    // First negotiate connection
+    const apiKey = API_KEY || window.API_KEY || '';
+    const negotiateResponse = await fetch(`${API_BASE_URL}/stream/negotiate`, {
+      headers: {
+        ...(apiKey ? { 'X-API-Key': apiKey } : {})
+      }
+    });
+
+    if (!negotiateResponse.ok) {
+      console.log('WebSocket negotiate failed, falling back to standard API');
+      return null;
+    }
+
+    const negotiateData = await negotiateResponse.json();
+    
+    // Try to establish WebSocket connection
+    const wsUrl = negotiateData.url.startsWith('/')
+      ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${negotiateData.url}`
+      : negotiateData.url;
+
+    const ws = new WebSocket(wsUrl);
+    
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        ws.close();
+        resolve(null);
+      }, 5000); // 5 second timeout
+
+      ws.onopen = () => {
+        clearTimeout(timeout);
+        console.log('WebSocket connected for streaming');
+        resolve(ws);
+      };
+
+      ws.onerror = () => {
+        clearTimeout(timeout);
+        console.log('WebSocket error, falling back to standard API');
+        resolve(null);
+      };
+    });
+  } catch (error) {
+    console.log('WebSocket setup failed:', error);
+    return null;
+  }
+}
+
+/**
+ * Process email with WebSocket streaming for real-time updates
+ * @param {WebSocket} ws - WebSocket connection
+ * @param {Object} emailData - The extracted email data
+ * @param {Function} onProgress - Progress callback
+ * @returns {Promise<Object>} Processing result
+ */
+async function processWithWebSocket(ws, emailData, onProgress) {
+  return new Promise((resolve, reject) => {
+    let extractedFields = {};
+    let finalResult = null;
+    let fieldBuffer = '';
+    let lastUpdateTime = Date.now();
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        
+        switch (data.type) {
+          case 'extraction_start':
+            onProgress(3, 'AI Processing', 'Starting extraction...');
+            break;
+            
+          case 'extraction_token':
+            // Stream individual tokens for real-time display
+            fieldBuffer += data.data.token;
+            
+            // Update UI periodically (every 100ms)
+            if (Date.now() - lastUpdateTime > 100) {
+              onProgress(3, 'AI Processing', `Extracting: ${fieldBuffer.slice(-50)}...`);
+              lastUpdateTime = Date.now();
+            }
+            break;
+            
+          case 'extraction_field':
+            // Show extracted field immediately
+            const field = data.data.field;
+            const value = data.data.value;
+            extractedFields[field] = value;
+            
+            const fieldName = field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            onProgress(3, 'AI Processing', `Found ${fieldName}: ${value}`);
+            break;
+            
+          case 'research_start':
+            onProgress(4, 'Company Research', 'Searching company information...');
+            break;
+            
+          case 'research_result':
+            if (data.data.status === 'complete') {
+              const company = data.data.result?.company_name || 'Unknown';
+              onProgress(4, 'Company Research', `Found: ${company}`);
+            }
+            break;
+            
+          case 'validation_start':
+            onProgress(5, 'Validating Data', 'Cleaning and standardizing...');
+            break;
+            
+          case 'zoho_start':
+            onProgress(6, 'Creating Records', 'Sending to Zoho CRM...');
+            break;
+            
+          case 'zoho_progress':
+            onProgress(6, 'Creating Records', data.data.message || 'Processing...');
+            break;
+            
+          case 'complete':
+            finalResult = data.data.result;
+            ws.close();
+            resolve(finalResult);
+            break;
+            
+          case 'error':
+            ws.close();
+            reject(new Error(data.data.error || 'Processing error'));
+            break;
+        }
+      } catch (error) {
+        console.error('WebSocket message error:', error);
+      }
+    };
+
+    ws.onerror = (error) => {
+      console.error('WebSocket error:', error);
+      reject(new Error('WebSocket connection error'));
+    };
+
+    ws.onclose = () => {
+      if (!finalResult) {
+        reject(new Error('WebSocket connection closed unexpectedly'));
+      }
+    };
+
+    // Send email data for processing
+    ws.send(JSON.stringify({
+      type: 'process_email',
+      data: {
+        sender_email: emailData.from?.emailAddress || '',
+        sender_name: emailData.from?.displayName || '',
+        subject: emailData.subject || '',
+        body: emailData.body || '',
+        attachments: (emailData.attachments || [])
+          .filter(att => att.content && att.format === 'base64')
+          .map(att => ({ 
+            filename: att.name, 
+            content_base64: att.content, 
+            content_type: att.contentType 
+          }))
+      }
+    }));
+  });
+}
+
+/**
  * Sends email data to the FastAPI backend for processing
  * @param {Object} emailData - The extracted email data
  * @returns {Promise<Object>} Processing result from the backend
@@ -247,43 +414,101 @@ function displayResults(result) {
 async function processEmail(event) {
   const startTime = Date.now();
   let currentStep = 0;
-  const totalSteps = 5;
+  const totalSteps = 7;
   
-  // Progress bar visualization
-  function updateProgress(step, message) {
+  // Enhanced progress visualization with emojis and percentages
+  function updateProgress(step, message, subMessage = null) {
     currentStep = step;
-    const progressBlocks = '■'.repeat(currentStep) + '□'.repeat(totalSteps - currentStep);
+    const percentage = Math.round((currentStep / totalSteps) * 100);
+    const progressBlocks = '▓'.repeat(currentStep) + '░'.repeat(totalSteps - currentStep);
+    
+    // Add status emoji based on step
+    const statusEmoji = {
+      1: '📧', // Reading email
+      2: '📎', // Attachments
+      3: '🔍', // Analyzing
+      4: '🤖', // AI Processing
+      5: '☁️', // Uploading
+      6: '✍️', // Creating records
+      7: '✅'  // Complete
+    }[currentStep] || '⏳';
+    
+    const fullMessage = subMessage 
+      ? `${statusEmoji} ${progressBlocks} ${percentage}% - ${message}\n${subMessage}`
+      : `${statusEmoji} ${progressBlocks} ${percentage}% - ${message}`;
+    
     showNotification(
-      `${progressBlocks} ${message}`, 
+      fullMessage, 
       Office.MailboxEnums.ItemNotificationMessageType.ProgressIndicator
     );
   }
   
   try {
     // Step 1: Extract email data
-    updateProgress(1, "Reading email...");
+    updateProgress(1, "Reading email content");
     const emailData = await extractEmailData();
     console.log("Extracted email data:", emailData);
+    
+    // Show sender info
+    const senderInfo = emailData.from?.displayName || emailData.from?.emailAddress || 'Unknown';
+    updateProgress(1, "Reading email", `From: ${senderInfo}`);
+    await new Promise(resolve => setTimeout(resolve, 200));
 
     // Step 2: Check for attachments
-    updateProgress(2, emailData.attachments && emailData.attachments.length > 0 
-      ? `Found ${emailData.attachments.length} attachment(s)`
-      : "Preparing data");
-    
-    // Add a slight delay to ensure user sees the message
-    await new Promise(resolve => setTimeout(resolve, 300));
+    const attachmentCount = emailData.attachments?.length || 0;
+    updateProgress(2, 
+      attachmentCount > 0 ? "Processing attachments" : "No attachments",
+      attachmentCount > 0 ? `${attachmentCount} file(s) detected` : null
+    );
+    await new Promise(resolve => setTimeout(resolve, 200));
 
-    // Step 3: Send to backend for AI processing
-    updateProgress(3, "Analyzing with AI");
+    // Step 3: Analyze email content
+    updateProgress(3, "Analyzing email content", "Extracting candidate information");
+    await new Promise(resolve => setTimeout(resolve, 300));
     
-    // Step 4: Process and create Zoho records
-    updateProgress(4, "Creating Zoho records");
+    // Try to establish WebSocket connection for streaming
+    const ws = await tryWebSocketConnection(emailData);
     
-    const result = await sendToBackend(emailData);
+    let result;
+    if (ws) {
+      // Use WebSocket for real-time streaming updates
+      console.log("Using WebSocket for streaming updates");
+      
+      result = await processWithWebSocket(ws, emailData, (step, message, subMessage) => {
+        updateProgress(step, message, subMessage);
+      });
+    } else {
+      // Fallback to standard API
+      console.log("Using standard API (no WebSocket available)");
+      
+      // Step 4: AI Processing (this happens during sendToBackend)
+      updateProgress(4, "AI Processing", "Using GPT-5-mini to extract data");
+      
+      // Step 5: Upload attachments if any
+      if (attachmentCount > 0) {
+        updateProgress(5, "Uploading attachments", "Storing in Azure Blob Storage");
+      } else {
+        updateProgress(5, "Preparing data", "Formatting for Zoho CRM");
+      }
+      
+      // Send to backend (AI processing + Zoho creation happens here)
+      result = await sendToBackend(emailData);
+    }
+    
     console.log("Processing result:", result);
 
-    // Step 5: Display results
-    updateProgress(5, "Almost done");
+    // Step 6: Creating Zoho records
+    updateProgress(6, "Creating Zoho records", 
+      result.deal_name ? `Deal: ${result.deal_name.substring(0, 30)}...` : "Account, Contact & Deal"
+    );
+    await new Promise(resolve => setTimeout(resolve, 300));
+
+    // Step 7: Complete
+    const elapsedTime = ((Date.now() - startTime) / 1000).toFixed(1);
+    updateProgress(7, "Complete!", `Processed in ${elapsedTime} seconds`);
+    
+    // Wait briefly to show completion
+    await new Promise(resolve => setTimeout(resolve, 500));
     
     // Display success results
     displayResults(result);
