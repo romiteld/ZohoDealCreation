@@ -21,7 +21,7 @@ from dotenv import load_dotenv
 load_dotenv('.env.local')
 
 # Container Apps URL (new deployment)
-CONTAINER_URL = "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io"
+CONTAINER_URL = "https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io"
 
 # Old App Services URL (should NOT be used)
 OLD_APP_SERVICE_URL = "https://well-intake-api.azurewebsites.net"
@@ -100,7 +100,7 @@ class DeploymentTester:
                     manifest_info["version"] = manifest_version.text
                 
                 # Check all URLs in manifest
-                container_count = response.text.count('well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io')
+                container_count = response.text.count('well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io')
                 old_service_count = response.text.count('well-intake-api.azurewebsites.net')
                 
                 manifest_info["uses_container_urls"] = container_count > 0 and old_service_count == 0

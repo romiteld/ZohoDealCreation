@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 from urllib.parse import urlparse
 
 # Base URL for the Container Apps deployment
-BASE_URL = "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io"
+BASE_URL = "https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io"
 API_KEY = "e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384"
 
 def test_manifest():
@@ -41,14 +41,14 @@ def test_manifest():
             print(f"  Found {len(urls)} URLs in manifest")
             
             # Verify all URLs use Container Apps domain
-            container_app_urls = [u for u in urls if 'salmonsmoke-78b2d936' in u]
+            container_app_urls = [u for u in urls if 'orangedesert-c768ae6e' in u]
             print(f"  Container Apps URLs: {len(container_app_urls)}/{len(urls)}")
             
             if len(container_app_urls) == len(urls):
                 print("  ✓ All URLs correctly point to Container Apps")
             else:
                 print("  ✗ Some URLs don't point to Container Apps")
-                other_urls = [u for u in urls if 'salmonsmoke-78b2d936' not in u]
+                other_urls = [u for u in urls if 'orangedesert-c768ae6e' not in u]
                 for url in other_urls[:3]:  # Show first 3
                     print(f"    - {url}")
                     

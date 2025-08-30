@@ -1,6 +1,11 @@
+# ====================================
 # Python
+# ====================================
 __pycache__/
 *.py[cod]
+*.pyc
+*.pyo
+*.pyd
 *$py.class
 *.so
 *.egg
@@ -30,7 +35,10 @@ env/
 .env.local
 .env.production
 .env.development
+.env.sample
 *.env
+# Exception: Allow template file for documentation
+!.env.local.template
 
 # IDE
 .vscode/
@@ -63,6 +71,7 @@ test_startup_report.json
 *.tmp
 *.bak
 *.backup
+*.old
 temp/
 tmp/
 
@@ -183,3 +192,21 @@ New Deals/
 
 # Keep PROXY_FIX_SUMMARY.md for reference but ignore changes
 PROXY_FIX_SUMMARY.md
+
+# ====================================
+# Node.js
+# ====================================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+lerna-debug.log*
+.npm
+.yarn-integrity
+
+# ====================================
+# Voice UI specific
+# ====================================
+voice-ui/node_modules/
+voice-ui/temp/
+voice-ui/*.log

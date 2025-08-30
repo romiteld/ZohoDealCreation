@@ -103,7 +103,14 @@ class SecurityConfig:
     
     def _get_or_create_local_key(self) -> bytes:
         """Get or create local encryption key."""
-        key_file = ".encryption_key"
+        # Store encryption key in a secure location outside the repo
+        key_file = os.path.join(os.path.expanduser("~"), ".well_intake", "encryption.key")
+        key_dir = os.path.dirname(key_file)
+        
+        # Create directory if it doesn't exist
+        if not os.path.exists(key_dir):
+            os.makedirs(key_dir, mode=0o700)
+        
         if os.path.exists(key_file):
             with open(key_file, "rb") as f:
                 return f.read()

@@ -1,0 +1,41 @@
+# Development requirements
+# Install with: pip install -r requirements.txt -r requirements-dev.txt
+
+# Testing
+pytest==8.3.4
+pytest-asyncio==0.25.2
+pytest-cov==6.0.0
+httpx==0.28.1
+
+# Code quality
+black==24.11.0
+flake8==7.1.1
+mypy==1.14.1
+pylint==3.3.3
+isort==5.13.2
+
+# Security scanning
+bandit==1.8.0
+safety==3.3.0
+
+# Documentation
+sphinx==8.2.1
+sphinx-rtd-theme==3.0.3
+
+# Development tools
+ipython==8.32.0
+ipdb==0.13.13
+pre-commit==4.0.1
+
+# Performance profiling
+memory-profiler==0.61.0
+line-profiler==4.2.0
+
+# API testing
+locust==2.34.2
+
+# Docker/Container tools
+docker==7.1.0
+
+# Azure CLI helpers
+azure-cli-core==2.67.0

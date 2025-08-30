@@ -349,11 +349,11 @@ metadata:
 spec:
   tls:
   - hosts:
-    - well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
+    - well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io
     secretName: well-intake-tls
   
   rules:
-  - host: well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
+  - host: well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io
     http:
       paths:
       - path: /

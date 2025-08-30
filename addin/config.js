@@ -4,7 +4,7 @@
  */
 
 // Production configuration - Using Container Apps deployment
-window.API_BASE_URL = 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/api';
+window.API_BASE_URL = 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/api';
 
 // API Key - This should be set during deployment
 // In production, this value should be replaced with the actual API key

@@ -30,7 +30,7 @@ ZOHO_TOKEN_URL = "https://accounts.zoho.com/oauth/v2/token"
 ZOHO_API_DOMAIN = "https://www.zohoapis.com"
 
 # Proxy Configuration
-MAIN_API_URL = os.environ.get('MAIN_API_URL', 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io')
+MAIN_API_URL = os.environ.get('MAIN_API_URL', 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io')
 MAIN_API_KEY = os.environ.get('API_KEY', '')  # Using API_KEY from .env.local
 PROXY_TIMEOUT = int(os.environ.get('PROXY_TIMEOUT', '30'))
 PROXY_CHUNK_SIZE = int(os.environ.get('PROXY_CHUNK_SIZE', '8192'))

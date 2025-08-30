@@ -10,7 +10,7 @@ import json
 from datetime import datetime
 
 # Production API search endpoint
-AZURE_API_URL = "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io"
+AZURE_API_URL = "https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io"
 
 print("\n" + "="*70)
 print("CHECKING WHAT'S IN ZOHO RIGHT NOW")

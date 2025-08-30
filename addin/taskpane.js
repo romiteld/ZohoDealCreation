@@ -4,7 +4,7 @@
  */
 
 // Configuration
-const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io';
+const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io';
 const API_KEY = window.API_KEY || 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
 
 // Global variables
