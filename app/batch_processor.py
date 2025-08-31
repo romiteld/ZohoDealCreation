@@ -223,7 +223,7 @@ class BatchEmailProcessor:
                             }
                         ],
                         temperature=self.temperature,  # MUST be 1 for GPT-5-mini
-                        max_tokens=self.max_tokens,
+                        max_completion_tokens=self.max_tokens,
                         response_format={"type": "json_object"}
                     )
                     

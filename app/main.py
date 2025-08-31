@@ -199,7 +199,7 @@ async def lifespan(app: FastAPI):
         logger.info("Zoho integration initialized with PostgreSQL caching")
     
     # Initialize Service Bus manager if connection string is available
-    service_bus_conn = os.getenv("SERVICE_BUS_CONNECTION_STRING")
+    service_bus_conn = os.getenv("SERVICE_BUS_CONNECTION_STRING") or os.getenv("AZURE_SERVICE_BUS_CONNECTION_STRING")
     if service_bus_conn:
         try:
             from app.service_bus_manager import ServiceBusManager

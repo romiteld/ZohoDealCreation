@@ -213,10 +213,19 @@ class CompanyResearchService:
             return {}
         
         try:
-            # Build search query
+            # Build search query - include potential personal domain
             search_query = candidate_name
-            if company_name:
-                search_query = f"{candidate_name} {company_name}"
+            # Try to construct potential personal domain (e.g., "Jerry Fetta" -> "jerryfetta.com")
+            potential_domain = None
+            if candidate_name:
+                name_parts = candidate_name.lower().split()
+                if len(name_parts) >= 2:
+                    # Try firstname+lastname.com pattern
+                    potential_domain = f"{name_parts[0]}{name_parts[-1]}.com"
+                    search_query = f"{candidate_name} OR site:{potential_domain}"
+            
+            if company_name and company_name not in ['Unknown', 'N/A']:
+                search_query = f"{search_query} {company_name}"
             
             logger.info(f"Searching for candidate info: {search_query}")
             
@@ -225,13 +234,15 @@ class CompanyResearchService:
                 "Content-Type": "application/json"
             }
             
-            # Search for candidate information
+            # Search for candidate information - prioritize personal websites
             search_data = {
-                "query": f"{search_query} LinkedIn OR contact OR email",
+                "query": f"{search_query} LinkedIn OR contact OR email OR website OR portfolio",
                 "limit": 5,
+                "sources": ["web"],  # v2 API - specify web search
                 "scrapeOptions": {
                     "formats": ["markdown"],
-                    "onlyMainContent": True
+                    "onlyMainContent": True,
+                    "waitFor": 2000  # Wait for dynamic content
                 }
             }
             
@@ -260,13 +271,39 @@ class CompanyResearchService:
         
         extracted_info = {}
         
-        if not search_results.get("data"):
+        # v2 API returns results in data.web array
+        web_results = []
+        if search_results.get("data"):
+            if isinstance(search_results["data"], dict):
+                web_results = search_results["data"].get("web", [])
+            elif isinstance(search_results["data"], list):
+                # Fallback for v1 API format
+                web_results = search_results["data"]
+        
+        if not web_results:
+            logger.warning("No web results found in Firecrawl search response")
             return extracted_info
         
         # Process search results
-        for result in search_results["data"][:5]:
+        for result in web_results[:5]:
             url = result.get("url", "")
             content = result.get("markdown", "")
+            
+            # Check for personal website (e.g., jerryfetta.com)
+            if candidate_name and "website" not in extracted_info:
+                name_parts = candidate_name.lower().split()
+                if len(name_parts) >= 2:
+                    potential_domain = f"{name_parts[0]}{name_parts[-1]}.com"
+                    if potential_domain in url.lower():
+                        extracted_info["website"] = url
+                        logger.info(f"Found personal website: {url}")
+                        
+                        # Try to infer email from personal domain
+                        if "email" not in extracted_info:
+                            # Common patterns: firstname@domain, first.last@domain, etc.
+                            potential_email = f"{name_parts[0]}@{potential_domain}"
+                            extracted_info["email"] = potential_email
+                            logger.info(f"Inferred email from domain: {potential_email}")
             
             # Check for LinkedIn URL
             if "linkedin.com/in/" in url and "linkedin_url" not in extracted_info:
@@ -280,10 +317,27 @@ class CompanyResearchService:
                 emails = re.findall(email_pattern, content)
                 for email in emails:
                     # Skip generic emails
-                    if not any(x in email.lower() for x in ['noreply', 'support', 'info', 'admin']):
-                        extracted_info["email"] = email
-                        logger.info(f"Found email: {email}")
-                        break
+                    if not any(x in email.lower() for x in ['noreply', 'support', 'info', 'admin', 'contact']):
+                        # Check if this might be the candidate's personal email
+                        if candidate_name:
+                            name_parts = candidate_name.lower().split()
+                            # Check if email matches candidate name pattern
+                            if any(part in email.lower() for part in name_parts):
+                                extracted_info["email"] = email
+                                logger.info(f"Found candidate email: {email}")
+                                
+                                # If email domain matches candidate name, also set as website
+                                email_domain = email.split('@')[1] if '@' in email else None
+                                if email_domain and "website" not in extracted_info:
+                                    # Check if domain contains candidate's name
+                                    if any(part in email_domain.lower() for part in name_parts):
+                                        extracted_info["website"] = f"https://{email_domain}"
+                                        logger.info(f"Inferred website from email domain: {extracted_info['website']}")
+                                break
+                        else:
+                            extracted_info["email"] = email
+                            logger.info(f"Found email: {email}")
+                            break
             
             # Extract phone from content
             if "phone" not in extracted_info:
@@ -300,16 +354,22 @@ class CompanyResearchService:
                         logger.info(f"Found phone: {phones[0]}")
                         break
             
-            # Extract company website
+            # Extract company/personal website from content - skip if we already have one
             if "website" not in extracted_info and candidate_name.lower() in content.lower():
-                # Look for company website mentions
-                url_pattern = r'https?://(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})'
+                # Look for website mentions in content
+                import re
+                url_pattern = r'https?://[a-zA-Z0-9-]+(?:\.[a-zA-Z0-9-]+)+(?:/[^"\s]*)?'
                 urls = re.findall(url_pattern, content)
                 for found_url in urls:
-                    if not any(x in found_url for x in ['linkedin.com', 'facebook.com', 'twitter.com']):
-                        extracted_info["website"] = f"https://{found_url}"
-                        logger.info(f"Found website: {extracted_info['website']}")
-                        break
+                    # Skip social media and CDN URLs
+                    skip_domains = ['linkedin.com', 'facebook.com', 'twitter.com', 'instagram.com', 
+                                   'youtube.com', 'static.licdn', 'cdn.', 'images.', 'assets.']
+                    if not any(x in found_url.lower() for x in skip_domains):
+                        # Don't overwrite if it's just a domain fragment
+                        if '.' in found_url and len(found_url) > 10:
+                            extracted_info["website"] = found_url
+                            logger.info(f"Found website in content: {found_url}")
+                            break
         
         return extracted_info
     

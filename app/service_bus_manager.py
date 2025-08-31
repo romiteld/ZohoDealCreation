@@ -79,8 +79,8 @@ class ServiceBusManager:
             connection_string: Azure Service Bus connection string
             queue_name: Name of the main processing queue
         """
-        self.connection_string = connection_string or os.getenv("SERVICE_BUS_CONNECTION_STRING")
-        self.queue_name = queue_name or os.getenv("SERVICE_BUS_QUEUE_NAME", "email-batch-queue")
+        self.connection_string = connection_string or os.getenv("SERVICE_BUS_CONNECTION_STRING") or os.getenv("AZURE_SERVICE_BUS_CONNECTION_STRING")
+        self.queue_name = queue_name or os.getenv("SERVICE_BUS_QUEUE_NAME") or os.getenv("AZURE_SERVICE_BUS_QUEUE_NAME", "email-batch-queue")
         self.dead_letter_queue = f"{self.queue_name}/$deadletterqueue"
         
         if not self.connection_string:

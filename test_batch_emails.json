@@ -1,0 +1,16 @@
+[
+  {
+    "sender_email": "recruiter@example.com",
+    "sender_name": "John Recruiter",
+    "subject": "Great candidate for Senior Advisor role",
+    "body": "Hi Team,\n\nI'd like to introduce Sarah Johnson for the Senior Financial Advisor position in Chicago. She has 12 years of experience at Morgan Stanley and is looking for new opportunities.\n\nBest regards,\nJohn",
+    "attachments": []
+  },
+  {
+    "sender_email": "referrer@wellpartners.com",
+    "sender_name": "Lisa Wong",
+    "subject": "Referral - Michael Chen",
+    "body": "Hello,\n\nMichael Chen would be perfect for your Wealth Manager opening in San Francisco. He's currently at Goldman Sachs with 8 years of experience.\n\nReferrer: Lisa Wong\n\nThanks",
+    "attachments": []
+  }
+]

@@ -382,15 +382,22 @@ class EmailProcessingWorkflow:
                     research_domain = domain_match.group(1)
                     logger.info(f"Using candidate website for research: {research_domain}")
             
-            # Priority 2: Use candidate's email domain
+            # Priority 2: Use candidate's email domain (skip generic domains)
             if not research_domain and candidate_email and '@' in candidate_email:
-                research_domain = candidate_email.split('@')[1]
-                logger.info(f"Using candidate email domain for research: {research_domain}")
+                email_domain = candidate_email.split('@')[1]
+                # Skip generic email domains for company research
+                generic_domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com', 'icloud.com']
+                if email_domain not in generic_domains:
+                    research_domain = email_domain
+                    logger.info(f"Using candidate email domain for research: {research_domain}")
+                else:
+                    logger.info(f"Skipping generic email domain: {email_domain}")
             
             # Search for candidate information if we have a name
             candidate_info = {}
             if candidate_name:
                 logger.info(f"Searching for candidate information: {candidate_name}")
+                # If we have a name like "Jerry Fetta", also search for domain like "jerryfetta.com"
                 candidate_info = await research_service.search_candidate_info(candidate_name, company_guess)
                 
                 # Update extracted info with found data
@@ -415,6 +422,13 @@ class EmailProcessingWorkflow:
                     email_domain=sender_domain,
                     company_guess=company_guess
                 )
+            
+            # If we found a website through candidate search, use it for company info
+            if candidate_info.get('website'):
+                # Extract company name from personal website if it's there
+                logger.info(f"Using candidate website for company info: {candidate_info['website']}")
+                # Update research result with website
+                research_result['website'] = candidate_info['website']
             
             # Merge candidate info into research result
             research_result.update(candidate_info)
