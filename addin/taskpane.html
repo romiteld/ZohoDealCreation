@@ -6,6 +6,28 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Send to Zoho - Review & Edit</title>
     
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 
+            https://appsforoffice.microsoft.com 
+            https://cdn.jsdelivr.net 
+            'unsafe-inline';
+        style-src 'self' 
+            https://cdn.jsdelivr.net 
+            'unsafe-inline';
+        img-src 'self' 
+            data: 
+            https:;
+        connect-src 'self' 
+            https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io 
+            https://appsforoffice.microsoft.com;
+        font-src 'self' 
+            https://cdn.jsdelivr.net 
+            data:;
+        frame-ancestors 'none';
+    ">
+    
     <!-- Office JavaScript API -->
     <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     

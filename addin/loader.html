@@ -5,6 +5,18 @@
     <meta http-equiv="X-UA-Compatible" content="IE=Edge">
     <title>The Well Recruiting - Email Intake</title>
     
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 
+            https://appsforoffice.microsoft.com 
+            'unsafe-inline';
+        connect-src 'self' 
+            https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io 
+            https://appsforoffice.microsoft.com;
+        frame-ancestors 'none';
+    ">
+    
     <!-- Office JavaScript API -->
     <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
     

@@ -1,15 +1,28 @@
 /**
  * Configuration file for the Outlook Add-in
- * This file should be customized during deployment with the actual API key
+ * 
+ * IMPORTANT: API credentials are stored in .env.local file
+ * The API key should NEVER be exposed in client-side code in production.
+ * 
+ * For production deployment:
+ * 1. API key is stored in .env.local (not committed to version control)
+ * 2. Consider implementing a server-side proxy to add API key headers
+ * 3. Or use Azure AD authentication for more secure access
  */
 
 // Production configuration - Using Container Apps deployment
-window.API_BASE_URL = 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/api';
+window.API_BASE_URL = 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io';
 
-// API Key - This should be set during deployment
-// In production, this value should be replaced with the actual API key
-// or loaded from a secure configuration service
-window.API_KEY = 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384'; // Set this value during deployment
+// API Key - Retrieved from .env.local during build/deployment
+// WARNING: In production, this should be handled server-side
+// The value below will be empty by default for security
+window.API_KEY = ''; // This should be injected from .env.local during deployment
+
+// Note: Since browser JavaScript cannot directly access .env.local,
+// you need either:
+// 1. A build process that injects the value from .env.local
+// 2. A server-side proxy that adds the API key header
+// 3. Azure AD authentication for the add-in
 
 /**
  * Configuration instructions for deployment:

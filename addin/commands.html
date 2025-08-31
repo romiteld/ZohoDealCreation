@@ -5,17 +5,24 @@
     <meta http-equiv="X-UA-Compatible" content="IE=Edge" />
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Email Processor Commands</title>
+    
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content="
+        default-src 'self';
+        script-src 'self' 
+            https://appsforoffice.microsoft.com 
+            'unsafe-inline';
+        connect-src 'self' 
+            https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io 
+            https://appsforoffice.microsoft.com;
+        frame-ancestors 'none';
+    ">
 
     <!-- Office JavaScript API -->
     <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 
-    <!-- Load environment configuration -->
-    <script type="text/javascript">
-        // Load API base URL from environment or use default
-        // Using Container Apps deployment for all API calls
-        window.API_BASE_URL = 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/api';
-        window.API_KEY = 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
-    </script>
+    <!-- Configuration - Load this first -->
+    <script type="text/javascript" src="config.js"></script>
 
     <!-- Commands implementation -->
     <script type="text/javascript" src="commands.js"></script>
