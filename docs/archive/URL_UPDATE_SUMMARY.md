@@ -19,8 +19,8 @@ Updated all references from the old Container App URL to the new one:
 
 ### 2. Environment Configuration Files
 - `/home/romiteld/outlook/.env.local`
-  - Updated DATABASE_URL to: `postgresql://welldbadmin:W3llRecruit2025DB!@well-intake-db.postgres.database.azure.com:5432/wellintake?sslmode=require`
-  - Updated AZURE_REDIS_CONNECTION_STRING to: `rediss://:Iw3WTZkjuRKq2QBoq4fpSizQRMTaoXyUdAzCaO0n92U=@well-intake-cache-v2.redis.cache.windows.net:6380`
+  - Updated DATABASE_URL to: `postgresql://[REDACTED]@well-intake-db.postgres.database.azure.com:5432/wellintake?sslmode=require`
+  - Updated AZURE_REDIS_CONNECTION_STRING to: `rediss://:[REDACTED]@well-intake-cache-v2.redis.cache.windows.net:6380`
 
 - `/home/romiteld/outlook/voice-ui/.env.local`
   - Updated API_ENDPOINT
@@ -75,12 +75,12 @@ Updated all references from the old Container App URL to the new one:
 ## Connection String Updates
 
 ### Database (PostgreSQL)
-- **Old**: `postgresql://citus:W3llRecruit2025DB!@c-well-intake-db.kaj3v6jxajtw66.postgres.cosmos.azure.com:5432/citus?sslmode=require`
-- **New**: `postgresql://welldbadmin:W3llRecruit2025DB!@well-intake-db.postgres.database.azure.com:5432/wellintake?sslmode=require`
+- **Old**: `postgresql://[REDACTED]@c-well-intake-db.kaj3v6jxajtw66.postgres.cosmos.azure.com:5432/citus?sslmode=require`
+- **New**: `postgresql://[REDACTED]@well-intake-db.postgres.database.azure.com:5432/wellintake?sslmode=require`
 
 ### Redis Cache
-- **Old**: `rediss://:cLpmf0n5Yr5JFx6QWaO3pI7f6oWwsf9GYAzCaEXsBQI=@well-intake-cache.redis.cache.windows.net:6380`
-- **New**: `rediss://:Iw3WTZkjuRKq2QBoq4fpSizQRMTaoXyUdAzCaO0n92U=@well-intake-cache-v2.redis.cache.windows.net:6380`
+- **Old**: `rediss://:[REDACTED]@well-intake-cache.redis.cache.windows.net:6380`
+- **New**: `rediss://:[REDACTED]@well-intake-cache-v2.redis.cache.windows.net:6380`
 
 ## Notes
 
