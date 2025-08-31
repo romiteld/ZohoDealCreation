@@ -95,12 +95,16 @@ function updateFieldIndicator(fieldId) {
  */
 async function extractAndPreview() {
     try {
-        // Show loading state
+        // Show loading state with more accurate message
         showLoadingState(true);
+        updateLoadingMessage('Reading email content...');
         
         // Extract email data
         const item = Office.context.mailbox.item;
         currentEmailData = await extractEmailData(item);
+        
+        // Update loading message for AI extraction
+        updateLoadingMessage('AI is analyzing the email (this may take 5-10 seconds)...');
         
         // Try to use backend AI extraction first, fall back to local if it fails
         try {
@@ -408,6 +412,22 @@ function formatFileSize(bytes) {
  */
 function showLoadingState(show) {
     document.getElementById('loadingState').style.display = show ? 'block' : 'none';
+    // Also hide/show the form and footer
+    document.getElementById('previewForm').style.display = show ? 'none' : 'block';
+    document.getElementById('footer').style.display = show ? 'none' : 'flex';
+}
+
+/**
+ * Update loading message
+ */
+function updateLoadingMessage(message) {
+    const loadingElement = document.getElementById('loadingState');
+    if (loadingElement) {
+        const loadingText = loadingElement.querySelector('.loading-text') || loadingElement.querySelector('p');
+        if (loadingText) {
+            loadingText.textContent = message;
+        }
+    }
 }
 
 /**
@@ -630,7 +650,19 @@ function showError(message) {
  */
 function handleCancel() {
     if (confirm('Are you sure you want to cancel? Any edits will be lost.')) {
-        Office.context.ui.messageParent(JSON.stringify({ action: 'cancel' }));
+        // Try to close the taskpane
+        if (window.parent && window.parent !== window) {
+            // If in an iframe, try to message parent
+            try {
+                Office.context.ui.messageParent(JSON.stringify({ action: 'cancel' }));
+            } catch (e) {
+                // If messageParent fails, try to close the window
+                window.close();
+            }
+        } else {
+            // Direct window close
+            window.close();
+        }
     }
 }
 
@@ -638,7 +670,19 @@ function handleCancel() {
  * Handle Close button
  */
 function handleClose() {
-    Office.context.ui.messageParent(JSON.stringify({ action: 'close' }));
+    // Try to close the taskpane
+    if (window.parent && window.parent !== window) {
+        // If in an iframe, try to message parent
+        try {
+            Office.context.ui.messageParent(JSON.stringify({ action: 'close' }));
+        } catch (e) {
+            // If messageParent fails, try to close the window
+            window.close();
+        }
+    } else {
+        // Direct window close
+        window.close();
+    }
 }
 
 /**

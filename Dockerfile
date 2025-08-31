@@ -20,10 +20,13 @@ RUN pip install --user --no-cache-dir --upgrade pip && \
 # Production stage
 FROM python:3.11-slim
 
+# Create non-root user first
+RUN useradd -m -u 1000 appuser
+
 # Set environment variables
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PATH=/root/.local/bin:$PATH
+    PATH=/home/appuser/.local/bin:$PATH
 
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -34,17 +37,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Set working directory
 WORKDIR /app
 
-# Copy Python packages from builder
-COPY --from=builder /root/.local /root/.local
+# Copy Python packages from builder to appuser's home
+COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 
 # Copy application code
-COPY app/ ./app/
-COPY addin/ ./addin/
-COPY static/ ./static/
+COPY --chown=appuser:appuser app/ ./app/
+COPY --chown=appuser:appuser addin/ ./addin/
+COPY --chown=appuser:appuser static/ ./static/
 
-# Create non-root user for security
-RUN useradd -m -u 1000 appuser && \
-    mkdir -p /app/logs && \
+# Create logs directory
+RUN mkdir -p /app/logs && \
     chown -R appuser:appuser /app
 
 # Switch to non-root user

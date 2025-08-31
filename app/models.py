@@ -25,9 +25,16 @@ class ExtractedData(BaseModel):
     location: Optional[str] = Field(None, description="The location for the role (e.g., Fort Wayne, Indiana).")
     company_name: Optional[str] = Field(None, description="The official name of the candidate's firm.")
     referrer_name: Optional[str] = Field(None, description="The full name of the person who made the referral.")
+    referrer_email: Optional[str] = Field(None, description="Email address of the referrer.")
+    email: Optional[str] = Field(None, description="Email address of the candidate.")
     website: Optional[str] = Field(None, description="Company website URL.")
     phone: Optional[str] = Field(None, description="Contact phone number.")
+    linkedin_url: Optional[str] = Field(None, description="LinkedIn profile URL.")
+    calendly_url: Optional[str] = Field(None, description="Calendly scheduling link.")
+    notes: Optional[str] = Field(None, description="Additional notes or context from the email.")
     industry: Optional[str] = Field(None, description="Company industry or sector.")
+    source: Optional[str] = Field(None, description="Lead source (e.g., Referral, Email Inbound).")
+    source_detail: Optional[str] = Field(None, description="Additional source details (e.g., referrer name for Source field).")
 
 class ProcessingResult(BaseModel):
     status: str

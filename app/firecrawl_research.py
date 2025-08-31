@@ -200,6 +200,119 @@ class CompanyResearchService:
         self.firecrawl = FirecrawlResearcher()
         logger.info("Company research service initialized")
     
+    async def search_candidate_info(self, candidate_name: str, company_name: Optional[str] = None) -> Dict[str, Any]:
+        """
+        Search for candidate's LinkedIn, company website, and contact information
+        
+        Returns:
+            Dict with linkedin_url, website, email, phone, company_name
+        """
+        
+        if not self.firecrawl.api_key:
+            logger.warning("Firecrawl API key not available for candidate search")
+            return {}
+        
+        try:
+            # Build search query
+            search_query = candidate_name
+            if company_name:
+                search_query = f"{candidate_name} {company_name}"
+            
+            logger.info(f"Searching for candidate info: {search_query}")
+            
+            headers = {
+                "Authorization": f"Bearer {self.firecrawl.api_key}",
+                "Content-Type": "application/json"
+            }
+            
+            # Search for candidate information
+            search_data = {
+                "query": f"{search_query} LinkedIn OR contact OR email",
+                "limit": 5,
+                "scrapeOptions": {
+                    "formats": ["markdown"],
+                    "onlyMainContent": True
+                }
+            }
+            
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    f"{self.firecrawl.base_url}/search",
+                    headers=headers,
+                    json=search_data,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status == 200:
+                        result = await response.json()
+                        return self._extract_candidate_info(result, candidate_name)
+                    else:
+                        logger.warning(f"Firecrawl candidate search failed: {response.status}")
+        
+        except asyncio.TimeoutError:
+            logger.warning("Firecrawl candidate search timed out")
+        except Exception as e:
+            logger.error(f"Firecrawl candidate search error: {e}")
+        
+        return {}
+    
+    def _extract_candidate_info(self, search_results: Dict, candidate_name: str) -> Dict[str, Any]:
+        """Extract candidate information from search results"""
+        
+        extracted_info = {}
+        
+        if not search_results.get("data"):
+            return extracted_info
+        
+        # Process search results
+        for result in search_results["data"][:5]:
+            url = result.get("url", "")
+            content = result.get("markdown", "")
+            
+            # Check for LinkedIn URL
+            if "linkedin.com/in/" in url and "linkedin_url" not in extracted_info:
+                extracted_info["linkedin_url"] = url
+                logger.info(f"Found LinkedIn: {url}")
+            
+            # Extract email from content
+            if "email" not in extracted_info:
+                import re
+                email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
+                emails = re.findall(email_pattern, content)
+                for email in emails:
+                    # Skip generic emails
+                    if not any(x in email.lower() for x in ['noreply', 'support', 'info', 'admin']):
+                        extracted_info["email"] = email
+                        logger.info(f"Found email: {email}")
+                        break
+            
+            # Extract phone from content
+            if "phone" not in extracted_info:
+                import re
+                phone_patterns = [
+                    r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b',  # US phone
+                    r'\b\(\d{3}\)\s*\d{3}[-.]?\d{4}\b',  # US phone with parens
+                    r'\b\d{3}\.\d{3}\.\d{4}\b'  # US phone with dots
+                ]
+                for pattern in phone_patterns:
+                    phones = re.findall(pattern, content)
+                    if phones:
+                        extracted_info["phone"] = phones[0]
+                        logger.info(f"Found phone: {phones[0]}")
+                        break
+            
+            # Extract company website
+            if "website" not in extracted_info and candidate_name.lower() in content.lower():
+                # Look for company website mentions
+                url_pattern = r'https?://(?:www\.)?([a-zA-Z0-9-]+\.[a-zA-Z]{2,})'
+                urls = re.findall(url_pattern, content)
+                for found_url in urls:
+                    if not any(x in found_url for x in ['linkedin.com', 'facebook.com', 'twitter.com']):
+                        extracted_info["website"] = f"https://{found_url}"
+                        logger.info(f"Found website: {extracted_info['website']}")
+                        break
+        
+        return extracted_info
+    
     async def research_company(self, 
                               email_domain: str,
                               company_guess: Optional[str] = None) -> Dict[str, Any]:

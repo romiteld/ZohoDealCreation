@@ -48,10 +48,13 @@ class ExtractionOutput(BaseModel):
     job_title: Optional[str] = Field(default=None, description="Specific role or position")
     location: Optional[str] = Field(default=None, description="Geographical location for the role")
     company_guess: Optional[str] = Field(default=None, description="Company name mentioned in email")
-    referrer_name: Optional[str] = Field(default=None, description="Name of the person sending the email")
+    referrer_name: Optional[str] = Field(default=None, description="Name of the person sending the email or forwarder")
+    referrer_email: Optional[str] = Field(default=None, description="Email address of the referrer")
     phone: Optional[str] = Field(default=None, description="Phone number if present")
     email: Optional[str] = Field(default=None, description="Email address of the candidate if different from sender")
+    linkedin_url: Optional[str] = Field(default=None, description="LinkedIn profile URL if present")
     calendly_url: Optional[str] = Field(default=None, description="Calendly link if present")
+    notes: Optional[str] = Field(default=None, description="Additional context or notes from the email")
 
 
 class CompanyResearch(BaseModel):
@@ -75,12 +78,79 @@ class EmailProcessingWorkflow:
         self.graph = self._build_workflow()
         logger.info("LangGraph workflow compiled successfully")
     
+    def preprocess_forwarded_email(self, email_content: str) -> tuple[str, bool, Optional[str]]:
+        """
+        Preprocess email to identify forwarded content and extract forwarder info
+        Returns: (processed_content, is_forwarded, forwarder_name)
+        """
+        import re
+        
+        # Log the first 500 chars to debug
+        logger.info(f"Email content preview (first 500 chars): {email_content[:500]}")
+        
+        # Common forwarding patterns - more comprehensive list
+        forward_patterns = [
+            r'-----\s*Original Message\s*-----',
+            r'---------- Forwarded message ---------',
+            r'Begin forwarded message:',
+            r'From:.*\nSent:.*\nTo:.*\nSubject:',
+            r'From:.*\nDate:.*\nSubject:',  # Simplified pattern
+            r'On .+ wrote:',
+            r'> From:.*\n> Date:.*\n> Subject:',
+            r'_+\s*\nFrom:',  # Underline separator before From
+            r'\*From:\*',  # Bold From: in markdown
+            r'From:\s+\S+@\S+',  # Simple From: with email
+        ]
+        
+        is_forwarded = False
+        forwarder_name = None
+        
+        # Check if email is forwarded
+        for pattern in forward_patterns:
+            match = re.search(pattern, email_content, re.IGNORECASE | re.MULTILINE)
+            if match:
+                is_forwarded = True
+                logger.info(f"Detected forwarded email with pattern: {pattern}")
+                logger.info(f"Match found at position {match.start()}: {match.group()[:100]}")
+                break
+        
+        # If forwarded, try to identify the forwarder from the top of the email
+        if is_forwarded:
+            # Look for sender info at the beginning before the forward marker
+            lines = email_content.split('\n')[:10]  # Check first 10 lines
+            for line in lines:
+                # Look for patterns like "From: Name <email>" or just names before the forward
+                from_match = re.match(r'^From:\s*([^<\n]+)', line, re.IGNORECASE)
+                if from_match:
+                    potential_name = from_match.group(1).strip()
+                    # Clean up the name (remove email if present)
+                    potential_name = re.sub(r'\s*<.*>', '', potential_name).strip()
+                    if potential_name and not '@' in potential_name:
+                        forwarder_name = potential_name
+                        logger.info(f"Identified forwarder: {forwarder_name}")
+                        break
+        
+        # Add clear markers to help AI understand structure
+        if is_forwarded:
+            processed_content = f"[FORWARDED EMAIL DETECTED]\n[FORWARDER: {forwarder_name or 'Unknown'}]\n\n{email_content}"
+        else:
+            processed_content = email_content
+        
+        return processed_content, is_forwarded, forwarder_name
+    
     async def extract_information(self, state: EmailProcessingState) -> Dict:
         """First node: Extract key information from email with learning enhancements"""
         logger.info("---EXTRACTION AGENT---")
         
         email_content = state['email_content']
         sender_domain = state['sender_domain']
+        
+        # Preprocess for forwarded emails
+        processed_content, is_forwarded, forwarder_name = self.preprocess_forwarded_email(email_content)
+        if is_forwarded:
+            logger.info(f"Processing forwarded email. Forwarder: {forwarder_name}")
+            # Use processed content for extraction
+            email_content = processed_content
         
         # Initialize learning services for enhanced extraction
         correction_service = None
@@ -147,18 +217,38 @@ class EmailProcessingWorkflow:
             system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis.
             Extract key recruitment details from the email with extreme accuracy.
             
-            CRITICAL RULES:
+            CRITICAL RULES FOR FORWARDED EMAILS:
+            - Check if this is a forwarded email (look for "-----Original Message-----", "From:", "Date:", "Subject:", "Begin forwarded message:", etc.)
+            - For FORWARDED emails:
+              * The person who forwarded the email (top of email) is typically the REFERRER
+              * The CANDIDATE information is in the FORWARDED PORTION (the original message)
+              * Look for who is being discussed as a potential hire/candidate in the forwarded content
+              * The sender of the ORIGINAL forwarded message may be introducing a candidate
+            
+            IMPORTANT DISTINCTIONS:
+            - REFERRER: The person who forwarded/sent you this opportunity (often Steve, Daniel, etc.)
+            - CANDIDATE: The actual person being considered for a position (the subject of the discussion)
+            - Do NOT confuse the person sending the referral with the candidate being referred
+            
+            EXTRACTION RULES:
             - ONLY extract information that is EXPLICITLY stated in the email
             - If information is not present, return null/None - NEVER make it up
-            - For referrer_name: ONLY extract if someone explicitly says "referred by [name]"
-            - If the sender is introducing themselves, they are NOT a referrer
+            - candidate_name: The person being discussed as a potential hire (NOT the referrer)
+            - referrer_name: The person who forwarded the email or made the introduction
+            - email: The CANDIDATE's email address (not the referrer's)
+            - company_name: The CANDIDATE's company (not the recruiting firm)
+            
+            EXAMPLES OF CORRECT EXTRACTION:
+            - If Kathy sends an email about Jerry Fetta: candidate=Jerry Fetta, referrer=Kathy
+            - If Steve forwards an email about a consultant: referrer=Steve, candidate=[person discussed in email]
             
             Focus on identifying:
-            1. Candidate name - the person being referred for the job (not the sender)
-            2. Job title - the specific position mentioned
-            3. Location - city and state if available
-            4. Company name - any company explicitly mentioned
-            5. Referrer name - ONLY if explicitly stated as "referred by" or "referral from"
+            1. Candidate name - WHO is being referred for a position (look in forwarded content)
+            2. Job title - what position is being discussed
+            3. Location - where the opportunity is located
+            4. Company name - the CANDIDATE's current company (if mentioned)
+            5. Referrer name - who sent/forwarded this opportunity to you
+            6. Contact details - the CANDIDATE's phone, email, LinkedIn (not the referrer's)
             
             {learning_hints}
             
@@ -169,6 +259,7 @@ class EmailProcessingWorkflow:
         EMAIL CONTENT:
         {state['email_content']}
         
+        IMPORTANT: If this is a forwarded email, make sure to extract information from the forwarded/original message portion.
         Extract and return the information in the required JSON format."""
         
         try:
@@ -270,6 +361,9 @@ class EmailProcessingWorkflow:
         
         extracted = state.get('extraction_result', {})
         company_guess = extracted.get('company_guess')
+        candidate_name = extracted.get('candidate_name')
+        candidate_email = extracted.get('email')
+        candidate_website = extracted.get('website')
         sender_domain = state['sender_domain']
         
         # Use Firecrawl research service
@@ -277,11 +371,53 @@ class EmailProcessingWorkflow:
             from app.firecrawl_research import CompanyResearchService
             research_service = CompanyResearchService()
             
-            # Research the company using multiple strategies
-            research_result = await research_service.research_company(
-                email_domain=sender_domain,
-                company_guess=company_guess
-            )
+            # Determine what to research
+            research_domain = None
+            
+            # Priority 1: Use candidate's website if available
+            if candidate_website:
+                import re
+                domain_match = re.search(r'https?://(?:www\.)?([^/]+)', candidate_website)
+                if domain_match:
+                    research_domain = domain_match.group(1)
+                    logger.info(f"Using candidate website for research: {research_domain}")
+            
+            # Priority 2: Use candidate's email domain
+            if not research_domain and candidate_email and '@' in candidate_email:
+                research_domain = candidate_email.split('@')[1]
+                logger.info(f"Using candidate email domain for research: {research_domain}")
+            
+            # Search for candidate information if we have a name
+            candidate_info = {}
+            if candidate_name:
+                logger.info(f"Searching for candidate information: {candidate_name}")
+                candidate_info = await research_service.search_candidate_info(candidate_name, company_guess)
+                
+                # Update extracted info with found data
+                if candidate_info:
+                    logger.info(f"Found candidate info via Firecrawl: {candidate_info}")
+                    # Use found website for company research if available
+                    if candidate_info.get('website') and not research_domain:
+                        import re
+                        domain_match = re.search(r'https?://(?:www\.)?([^/]+)', candidate_info['website'])
+                        if domain_match:
+                            research_domain = domain_match.group(1)
+            
+            # Research the company using the best available domain
+            if research_domain:
+                research_result = await research_service.research_company(
+                    email_domain=research_domain,
+                    company_guess=company_guess
+                )
+            else:
+                # Fallback to sender domain
+                research_result = await research_service.research_company(
+                    email_domain=sender_domain,
+                    company_guess=company_guess
+                )
+            
+            # Merge candidate info into research result
+            research_result.update(candidate_info)
             
             logger.info(f"Research completed with Firecrawl: {research_result}")
             
@@ -338,15 +474,37 @@ class EmailProcessingWorkflow:
                 phone = phone_match.group(1)
                 logger.info(f"Extracted phone from Calendly: {phone}")
         
-        # Merge extraction with research
+        # Determine source based on business rules
+        source = "Email Inbound"  # Default
+        source_detail = None
+        
+        if extracted.get('referrer_name') or extracted.get('referrer_email'):
+            source = "Referral"
+            source_detail = extracted.get('referrer_name')
+        elif calendly_url:
+            source = "Website Inbound"
+        
+        # Merge extraction with research - use Firecrawl data to fill missing fields
         validated_data = {
             "candidate_name": extracted.get('candidate_name'),
             "job_title": extracted.get('job_title'),
             "location": extracted.get('location'),
             "company_name": research.get('company_name') or extracted.get('company_guess'),
             "referrer_name": extracted.get('referrer_name'),
-            "phone": phone,
-            "email": extracted.get('email')
+            "referrer_email": extracted.get('referrer_email'),
+            # Prioritize extracted email, fallback to Firecrawl research
+            "email": extracted.get('email') or research.get('email'),
+            # Prioritize extracted phone, fallback to Firecrawl research
+            "phone": phone or research.get('phone'),
+            # Prioritize extracted LinkedIn, fallback to Firecrawl research
+            "linkedin_url": extracted.get('linkedin_url') or research.get('linkedin_url'),
+            "calendly_url": calendly_url,
+            "notes": extracted.get('notes'),
+            # Use Firecrawl website if found
+            "website": research.get('website') or research.get('company_domain'),
+            "industry": research.get('industry'),  # From research if available
+            "source": source,
+            "source_detail": source_detail
         }
         
         # Clean and standardize
@@ -355,8 +513,13 @@ class EmailProcessingWorkflow:
                 # Clean whitespace and standardize
                 validated_data[key] = value.strip()
                 # Capitalize names properly
-                if key in ['candidate_name', 'referrer_name', 'company_name']:
+                if key in ['candidate_name', 'referrer_name', 'company_name', 'source_detail']:
                     validated_data[key] = ' '.join(word.capitalize() for word in value.split())
+                # Clean URLs
+                if key in ['linkedin_url', 'calendly_url', 'website']:
+                    # Ensure URLs are properly formatted
+                    if value and not value.startswith(('http://', 'https://')):
+                        validated_data[key] = f"https://{value}"
         
         logger.info(f"Validation completed: {validated_data}")
         
