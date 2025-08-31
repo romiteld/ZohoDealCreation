@@ -6,7 +6,7 @@
            xsi:type="MailApp">
   
   <Id>d2422753-f7f6-4a4a-9e1e-7512f37a50e5</Id>
-  <Version>1.1.0.8</Version>
+  <Version>1.1.0.9</Version>
   <ProviderName>The Well Recruiting Solutions</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="The Well - Send to Zoho"/>
