@@ -276,13 +276,39 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         response = await call_next(request)
         response.headers["X-Content-Type-Options"] = "nosniff"
-        response.headers["X-Frame-Options"] = "DENY"
+        
+        # Allow framing for Outlook Add-in endpoints
+        add_in_paths = ["/manifest.xml", "/commands.html", "/commands.js", "/taskpane.html", 
+                       "/taskpane.js", "/placeholder.html", "/loader.html", "/config.js",
+                       "/icon-16.png", "/icon-32.png", "/icon-80.png"]
+        if not any(request.url.path.startswith(path) for path in add_in_paths):
+            # Only set X-Frame-Options for non-add-in endpoints
+            response.headers["X-Frame-Options"] = "SAMEORIGIN"
+        else:
+            # For add-in endpoints, allow framing from Office domains
+            if "X-Frame-Options" in response.headers:
+                del response.headers["X-Frame-Options"]
+            
         response.headers["X-XSS-Protection"] = "1; mode=block"
         response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
         response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
-        # Content Security Policy - adjust as needed for your application
-        response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com; style-src 'self' 'unsafe-inline';"
+        
+        # Adjust CSP for add-in endpoints
+        if any(request.url.path.startswith(path) for path in add_in_paths):
+            # More permissive CSP for add-in pages
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com; "
+                "style-src 'self' 'unsafe-inline' https://*.office.com; "
+                "img-src 'self' data: https://*.office.com https://*.microsoft.com; "
+                "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com; "
+                "frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com;"
+            )
+        else:
+            # Standard CSP for API endpoints
+            response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com; style-src 'self' 'unsafe-inline';"
+        
         return response
 
 # Add security headers middleware

@@ -6,18 +6,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Email Processor Commands</title>
     
-    <!-- Content Security Policy -->
-    <meta http-equiv="Content-Security-Policy" content="
-        default-src 'self';
-        script-src 'self' 
-            https://appsforoffice.microsoft.com 
-            'unsafe-inline';
-        connect-src 'self' 
-            https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io 
-            https://appsforoffice.microsoft.com;
-        frame-ancestors 'none';
-    ">
-
+    <!-- Office add-ins run in a secure sandbox - CSP headers can interfere with Office.js -->
+    <!-- Removed CSP meta tag to allow Office.js to load all required resources -->
+    
     <!-- Office JavaScript API -->
     <script type="text/javascript" src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script>
 
