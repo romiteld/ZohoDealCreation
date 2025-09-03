@@ -15,8 +15,8 @@ window.API_BASE_URL = 'https://well-intake-api.orangedesert-c768ae6e.eastus.azur
 
 // API Key - Retrieved from .env.local during build/deployment
 // WARNING: In production, this should be handled server-side
-// The value below will be empty by default for security
-window.API_KEY = ''; // This should be injected from .env.local during deployment
+// The value below is from .env.local for development
+window.API_KEY = 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
 
 // Note: Since browser JavaScript cannot directly access .env.local,
 // you need either:
