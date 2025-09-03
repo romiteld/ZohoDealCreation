@@ -280,7 +280,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         # Allow framing for Outlook Add-in endpoints
         add_in_paths = ["/manifest.xml", "/commands.html", "/commands.js", "/taskpane.html", 
                        "/taskpane.js", "/placeholder.html", "/loader.html", "/config.js",
-                       "/icon-16.png", "/icon-32.png", "/icon-80.png"]
+                       "/icon-16.png", "/icon-32.png", "/icon-64.png", "/icon-80.png", "/icon-128.png",
+                       "/addin/manifest.xml", "/addin/commands.html", "/addin/commands.js", 
+                       "/addin/taskpane.html", "/addin/taskpane.js", "/addin/config.js",
+                       "/addin/icon-16.png", "/addin/icon-32.png", "/addin/icon-64.png", "/addin/icon-80.png", "/addin/icon-128.png"]
         if not any(request.url.path.startswith(path) for path in add_in_paths):
             # Only set X-Frame-Options for non-add-in endpoints
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -299,7 +302,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # More permissive CSP for add-in pages
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com https://ajax.aspnetcdn.com; "
                 "style-src 'self' 'unsafe-inline' https://*.office.com; "
                 "img-src 'self' data: https://*.office.com https://*.microsoft.com; "
                 "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com; "
@@ -1842,7 +1845,7 @@ async def process_email_internal(email_payload: EmailRequest, zoho_integration):
 @app.get("/icon-{size}.png")
 async def get_icon(size: int):
     """Serve icon files for Outlook Add-in"""
-    if size not in [16, 32, 80]:
+    if size not in [16, 32, 64, 80, 128]:
         raise HTTPException(status_code=404, detail="Invalid icon size")
     
     # Try multiple path resolutions for container compatibility
