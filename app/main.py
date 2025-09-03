@@ -251,14 +251,15 @@ ALLOWED_ORIGINS = [
     # Azure Container Apps domains
     "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
     "https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io",
-    "https://*.azurecontainerapps.io",
     
     # Microsoft Office domains
     "https://outlook.office.com",
     "https://outlook.office365.com",
     "https://outlook.live.com",
-    "https://*.office.com",
-    "https://*.office365.com",
+    "https://outlook.office365-ppe.com",
+    "https://outlook-sdf.office.com",
+    "https://outlook.office365.us",
+    "https://outlook.office365.cn",
     
     # Development environments (remove in production)
     "http://localhost:3000",

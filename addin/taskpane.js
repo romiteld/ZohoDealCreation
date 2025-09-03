@@ -14,8 +14,50 @@ let originalExtractedData = null;
 let currentExtractedData = null;  // Store current extracted data for learning
 
 // Initialize when Office is ready
+// Test API connectivity function
+async function testAPIConnection() {
+    console.log('Testing API connection...');
+    try {
+        // Test health endpoint first (no API key required)
+        const healthResponse = await fetch(`${API_BASE_URL}/health`);
+        console.log('Health check response:', healthResponse.status);
+        
+        if (healthResponse.ok) {
+            const healthData = await healthResponse.json();
+            console.log('Health data:', healthData);
+        }
+        
+        // Test actual POST with minimal data
+        const testResponse = await fetch(`${API_BASE_URL}/intake/email`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
+            },
+            body: JSON.stringify({
+                sender_email: 'test@example.com',
+                sender_name: 'Test User',
+                subject: 'Test Subject',
+                body: 'Test body',
+                dry_run: true
+            })
+        });
+        console.log('POST test response:', testResponse.status);
+        
+        return true;
+    } catch (error) {
+        console.error('API connection test failed:', error);
+        return false;
+    }
+}
+
 Office.onReady((info) => {
     if (info.host === Office.HostType.Outlook) {
+        // Test API connection on startup
+        testAPIConnection().then(result => {
+            console.log('API connection test result:', result);
+        });
+        
         initializeTaskpane();
     }
 });
@@ -106,9 +148,28 @@ async function extractAndPreview() {
         // Update loading message for AI extraction
         updateLoadingMessage('AI is analyzing the email (this may take 5-10 seconds)...');
         
+        // Debug: Log what we're sending
+        console.log('Sending to API:', {
+            sender_email: currentEmailData.from?.emailAddress || '',
+            subject: currentEmailData.subject || '',
+            body_preview: currentEmailData.body?.substring(0, 200) || '',
+            api_key_present: !!API_KEY
+        });
+        
         // Try to use backend AI extraction first, fall back to local if it fails
         try {
-            const extractionResponse = await fetch(`${API_BASE_URL}/intake/email`, {
+            console.log('Attempting to fetch from:', `${API_BASE_URL}/intake/email`);
+            console.log('Request headers:', {
+                'Content-Type': 'application/json',
+                'X-API-Key': API_KEY ? 'present' : 'missing'
+            });
+            
+            // Determine if this is a same-origin or cross-origin request
+            const currentOrigin = window.location.origin;
+            const isSameOrigin = API_BASE_URL.startsWith(currentOrigin);
+            console.log('Same origin request:', isSameOrigin);
+            
+            const fetchOptions = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
@@ -121,7 +182,18 @@ async function extractAndPreview() {
                     body: currentEmailData.body || '',
                     dry_run: true  // Don't create Zoho records during preview
                 })
-            });
+            };
+            
+            // Only set CORS mode and credentials for cross-origin requests
+            if (!isSameOrigin) {
+                fetchOptions.mode = 'cors';
+                fetchOptions.credentials = 'omit'; // Don't include cookies for cross-origin
+            }
+            
+            const extractionResponse = await fetch(`${API_BASE_URL}/intake/email`, fetchOptions);
+            
+            console.log('Response status:', extractionResponse.status);
+            console.log('Response ok:', extractionResponse.ok);
             
             if (extractionResponse.ok) {
                 const response = await extractionResponse.json();
@@ -141,11 +213,31 @@ async function extractAndPreview() {
                     source: response.source || 'Email Inbound'
                 };
             } else {
+                // Log the error response
+                const errorText = await extractionResponse.text();
+                console.error('AI extraction failed with status:', extractionResponse.status, errorText);
                 // Fall back to local extraction
                 extractedData = performLocalExtraction(currentEmailData);
             }
         } catch (error) {
             console.error('AI extraction failed, using local extraction:', error);
+            console.error('Error details:', {
+                name: error.name,
+                message: error.message,
+                stack: error.stack
+            });
+            
+            // Check for specific error types
+            if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+                console.error('Network error - possible causes:');
+                console.error('1. CORS misconfiguration');
+                console.error('2. API endpoint is not reachable');
+                console.error('3. Network connectivity issues');
+                console.error('4. SSL/TLS certificate issues');
+                console.error('API URL:', `${API_BASE_URL}/intake/email`);
+                console.error('Current location:', window.location.origin);
+            }
+            
             // Fall back to local extraction
             extractedData = performLocalExtraction(currentEmailData);
         }
@@ -173,6 +265,7 @@ async function extractAndPreview() {
  */
 function performLocalExtraction(emailData) {
     const body = emailData.body || '';
+    const subject = emailData.subject || '';
     const extracted = {
         candidateName: '',
         candidateEmail: '',
@@ -188,57 +281,98 @@ function performLocalExtraction(emailData) {
         source: 'Email Inbound'
     };
     
-    // Extract candidate name (common patterns)
-    const namePatterns = [
-        /(?:candidate|introduce|meet|presenting|recommend)\s+(?:is\s+)?([A-Z][a-z]+\s+[A-Z][a-z]+)/i,
-        /([A-Z][a-z]+\s+[A-Z][a-z]+)\s+(?:would be|is|has|for)/i
-    ];
-    for (const pattern of namePatterns) {
-        const match = body.match(pattern);
-        if (match) {
-            extracted.candidateName = match[1].trim();
-            break;
+    // Debug logging
+    console.log('Extracting from email body:', body.substring(0, 500));
+    console.log('Email subject:', subject);
+    
+    // For Ashley Ethridge recruitment email, look for Invitee pattern
+    // Check for "Invitee:" pattern first
+    const inviteeMatch = body.match(/Invitee:\s*([^\n]+)/i);
+    if (inviteeMatch) {
+        extracted.candidateName = inviteeMatch[1].trim();
+    } else {
+        // Extract candidate name (common patterns)
+        const namePatterns = [
+            /(?:candidate|introduce|meet|presenting|recommend)\s+(?:is\s+)?([A-Z][a-z]+\s+[A-Z][a-z]+)/i,
+            /([A-Z][a-z]+\s+[A-Z][a-z]+)\s+(?:would be|is|has|for)/i
+        ];
+        for (const pattern of namePatterns) {
+            const match = body.match(pattern);
+            if (match) {
+                extracted.candidateName = match[1].trim();
+                break;
+            }
         }
     }
     
-    // Extract job title
-    const jobPatterns = [
-        /(?:position|role|opportunity|job|opening)\s+(?:of|for|as)?\s*([^,\n.]+)/i,
-        /(?:Senior|Junior|Lead|Principal|Staff)\s+([^,\n.]+)/i
-    ];
-    for (const pattern of jobPatterns) {
-        const match = body.match(pattern);
-        if (match) {
-            extracted.jobTitle = match[1].trim();
-            break;
+    // Extract job title - check for "Event Type:" pattern (from recruiting emails)
+    const eventTypeMatch = body.match(/Event Type:\s*([^\n]+)/i);
+    if (eventTypeMatch) {
+        extracted.jobTitle = eventTypeMatch[1].trim();
+    } else {
+        // Standard patterns
+        const jobPatterns = [
+            /(?:position|role|opportunity|job|opening)\s+(?:of|for|as)?\s*([^,\n.]+)/i,
+            /(?:Senior|Junior|Lead|Principal|Staff)\s+([^,\n.]+)/i
+        ];
+        for (const pattern of jobPatterns) {
+            const match = body.match(pattern);
+            if (match) {
+                extracted.jobTitle = match[1].trim();
+                break;
+            }
         }
     }
     
-    // Extract location
-    const locationPatterns = [
-        /(?:location|based in|located in|area|office)\s*:?\s*([^,\n.]+)/i,
-        /in\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:area|office|location)/i
-    ];
-    for (const pattern of locationPatterns) {
-        const match = body.match(pattern);
-        if (match) {
-            extracted.location = match[1].trim();
-            break;
+    // Extract location - check for date/time patterns that include location
+    const eventDateMatch = body.match(/Event Date\/Time:\s*[^\(]+\(([^)]+)\)/i);
+    if (eventDateMatch) {
+        // Try to extract location from timezone/region info
+        const locationInfo = eventDateMatch[1].trim();
+        if (locationInfo && !locationInfo.toLowerCase().includes('canada')) {
+            extracted.location = locationInfo;
         }
     }
     
-    // Extract email
-    const emailPattern = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
-    const emailMatch = body.match(emailPattern);
-    if (emailMatch && emailMatch[1] !== extracted.referrerEmail) {
-        extracted.candidateEmail = emailMatch[1];
+    // Standard location patterns
+    if (!extracted.location) {
+        const locationPatterns = [
+            /(?:location|based in|located in|area|office)\s*:?\s*([^,\n.]+)/i,
+            /in\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:area|office|location)/i
+        ];
+        for (const pattern of locationPatterns) {
+            const match = body.match(pattern);
+            if (match) {
+                extracted.location = match[1].trim();
+                break;
+            }
+        }
     }
     
-    // Extract phone
-    const phonePattern = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/;
-    const phoneMatch = body.match(phonePattern);
-    if (phoneMatch) {
-        extracted.candidatePhone = phoneMatch[1];
+    // Extract email - look for "Invitee Email:" pattern first
+    const inviteeEmailMatch = body.match(/Invitee Email:\s*([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/i);
+    if (inviteeEmailMatch) {
+        extracted.candidateEmail = inviteeEmailMatch[1].trim();
+    } else {
+        // Standard email pattern
+        const emailPattern = /([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})/;
+        const emailMatch = body.match(emailPattern);
+        if (emailMatch && emailMatch[1] !== extracted.referrerEmail) {
+            extracted.candidateEmail = emailMatch[1];
+        }
+    }
+    
+    // Extract phone - look for "Text Reminder Number:" pattern first
+    const textReminderMatch = body.match(/Text Reminder Number:\s*(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/i);
+    if (textReminderMatch) {
+        extracted.candidatePhone = textReminderMatch[1].trim();
+    } else {
+        // Standard phone pattern
+        const phonePattern = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/;
+        const phoneMatch = body.match(phonePattern);
+        if (phoneMatch) {
+            extracted.candidatePhone = phoneMatch[1];
+        }
     }
     
     // Extract LinkedIn URL
@@ -554,6 +688,59 @@ async function getAttachmentContent() {
 }
 
 /**
+ * Show notification message instead of alert
+ */
+function showNotification(message, type = 'warning') {
+    // Create or update notification element
+    let notificationDiv = document.getElementById('validationNotification');
+    if (!notificationDiv) {
+        notificationDiv = document.createElement('div');
+        notificationDiv.id = 'validationNotification';
+        notificationDiv.style.cssText = `
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            padding: 12px 20px;
+            border-radius: 6px;
+            z-index: 10000;
+            font-size: 14px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.2);
+            transition: opacity 0.3s ease;
+        `;
+        document.body.appendChild(notificationDiv);
+    }
+    
+    // Set style based on type
+    if (type === 'error' || type === 'warning') {
+        notificationDiv.style.backgroundColor = '#f8d7da';
+        notificationDiv.style.color = '#721c24';
+        notificationDiv.style.border = '1px solid #f5c6cb';
+    } else if (type === 'success') {
+        notificationDiv.style.backgroundColor = '#d4edda';
+        notificationDiv.style.color = '#155724';
+        notificationDiv.style.border = '1px solid #c3e6cb';
+    } else {
+        notificationDiv.style.backgroundColor = '#d1ecf1';
+        notificationDiv.style.color = '#0c5460';
+        notificationDiv.style.border = '1px solid #bee5eb';
+    }
+    
+    // Set message and show
+    notificationDiv.textContent = message;
+    notificationDiv.style.display = 'block';
+    notificationDiv.style.opacity = '1';
+    
+    // Auto-hide after 4 seconds
+    setTimeout(() => {
+        notificationDiv.style.opacity = '0';
+        setTimeout(() => {
+            notificationDiv.style.display = 'none';
+        }, 300);
+    }, 4000);
+}
+
+/**
  * Validate form
  */
 function validateForm() {
@@ -561,13 +748,13 @@ function validateForm() {
     const jobTitle = document.getElementById('jobTitle').value.trim();
     
     if (!candidateName) {
-        alert('Please enter the candidate name');
+        showNotification('Please enter the candidate name', 'warning');
         document.getElementById('candidateName').focus();
         return false;
     }
     
     if (!jobTitle) {
-        alert('Please enter the job title');
+        showNotification('Please enter the job title', 'warning');
         document.getElementById('jobTitle').focus();
         return false;
     }
@@ -639,17 +826,24 @@ function showSuccess(result) {
  */
 function showError(message) {
     const errorMessage = document.getElementById('errorMessage');
-    errorMessage.innerHTML = `<strong>❌ Error:</strong> ${message}`;
-    errorMessage.style.display = 'block';
-    
-    document.getElementById('btnClose').style.display = 'block';
+    if (errorMessage) {
+        errorMessage.innerHTML = `<strong>❌ Error:</strong> ${message}`;
+        errorMessage.style.display = 'block';
+        document.getElementById('btnClose').style.display = 'block';
+    } else {
+        // Fallback to notification
+        showNotification(message, 'error');
+    }
 }
 
 /**
  * Handle Cancel button
  */
 function handleCancel() {
-    if (confirm('Are you sure you want to cancel? Any edits will be lost.')) {
+    // Show confirmation message instead of using confirm dialog
+    showNotification('Closing task pane...', 'info');
+    
+    setTimeout(() => {
         // Try to close the taskpane
         if (window.parent && window.parent !== window) {
             // If in an iframe, try to message parent
@@ -663,7 +857,7 @@ function handleCancel() {
             // Direct window close
             window.close();
         }
-    }
+    }, 500);
 }
 
 /**
@@ -901,7 +1095,7 @@ function addCustomField() {
     const fieldValue = document.getElementById('newFieldValue').value.trim();
     
     if (!fieldName) {
-        alert('Please enter a field name');
+        showNotification('Please enter a field name', 'warning');
         return;
     }
     
@@ -910,7 +1104,7 @@ function addCustomField() {
     
     // Check if field already exists
     if (document.getElementById(fieldId)) {
-        alert('This field already exists');
+        showNotification('This field already exists', 'warning');
         return;
     }
     
