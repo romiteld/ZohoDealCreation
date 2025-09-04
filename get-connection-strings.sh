@@ -14,7 +14,8 @@ echo ""
 
 # PostgreSQL
 echo "# PostgreSQL Database"
-echo "DATABASE_URL=postgresql://welldbadmin:W3llRecruit2025DB!@well-intake-db-0903.postgres.database.azure.com:5432/wellintake?sslmode=require"
+echo "DATABASE_URL=postgresql://[USERNAME]:[PASSWORD]@well-intake-db-0903.postgres.database.azure.com:5432/wellintake?sslmode=require"
+echo "# Note: Get actual credentials from Azure Portal or Key Vault"
 echo ""
 
 # Redis Cache
