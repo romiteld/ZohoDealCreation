@@ -22,28 +22,58 @@ An intelligent email processing system that automatically converts recruitment e
 - **⚡ High Performance**: Fast processing (2-3 seconds) with structured output and error handling
 - **🔍 Company Validation**: Uses Firecrawl API for real-time company research and validation
 - **🛡️ Enhanced Security**: Rate limiting, circuit breaker pattern, and automatic API key injection
+- **🚀 CI/CD Pipeline**: GitHub Actions for automatic version increment and cache busting
+- **💾 Redis Caching**: Intelligent caching with automatic invalidation on deployment
+- **📊 Manifest Analytics**: Track version adoption, cache performance, and error rates
 
 ## 🏗️ Architecture Overview
 
-> **Latest Update (August 2025)**: 
+> **Latest Updates (September 2025)**: 
 > - Migrated from CrewAI to **LangGraph** for improved reliability and performance
 > - Added **OAuth Reverse Proxy Service** for centralized authentication and security
+> - Implemented **Manifest Cache Busting** with GitHub Actions CI/CD pipeline
+> - Added **Redis caching** with automatic invalidation on deployment
 > - System runs on Azure Container Apps with Docker-based deployment
 
-### System Architecture
+### System Architecture with Cache Busting
 
 ```
-┌──────────────────┐
-│  Outlook Email   │
-└────────┬─────────┘
-         │
-         ▼
+┌─────────────────────────────────────────────────────┐
+│                  GitHub Repository                   │
+│                                                      │
+│  ┌──────────────────────────────────────────────┐  │
+│  │         GitHub Actions Workflow              │  │
+│  │                                              │  │
+│  │  Triggers on:                                │  │
+│  │  • manifest.xml changes                      │  │
+│  │  • Add-in file changes (*.html, *.js)       │  │
+│  │                                              │  │
+│  │  Actions:                                    │  │
+│  │  1. Detect changes & increment version       │  │
+│  │  2. Update manifest.xml with new version     │  │
+│  │  3. Clear Redis cache via API                 │  │
+│  │  4. Build & push Docker image                 │  │
+│  │  5. Deploy to Azure Container Apps           │  │
+│  └──────────────────┬───────────────────────────┘  │
+└─────────────────────┼───────────────────────────────┘
+                      │
+                      ▼
 ┌──────────────────────────────────────────────┐
 │         Microsoft 365 Admin Center           │
-│            (Integrated Apps)                  │
+│         (Integrated Apps Portal)             │
+│                                               │
+│  • Manifest Version: auto-incremented        │
+│  • Cache-busted URLs with ?v=x.x.x.x        │
+│  • Automatic deployment on changes           │
 └────────────────┬─────────────────────────────┘
                  │
                  ▼
+┌──────────────────┐
+│  Outlook Email   │
+│   (Add-in UI)    │
+└────────┬─────────┘
+         │
+         ▼
 ┌──────────────────────────────────────────────┐
 │      OAuth Reverse Proxy Service             │
 │    (well-zoho-oauth.azurewebsites.net)       │
@@ -55,6 +85,7 @@ An intelligent email processing system that automatically converts recruitment e
 │  • Circuit breaker protection                │
 │  • Request forwarding with headers           │
 │  • CORS support                              │
+│  • Manifest serving & analytics              │
 └────────────────┬─────────────────────────────┘
                  │ Proxies all /api/* requests
                  │ Adds X-API-Key automatically
@@ -71,6 +102,15 @@ An intelligent email processing system that automatically converts recruitment e
 │  │  │ Node   │  │  Node  │  │  Node  │ │    │
 │  │  └────────┘  └────────┘  └────────┘ │    │
 │  └──────────────────────────────────────┘    │
+│                                               │
+│  ┌──────────────────────────────────────┐    │
+│  │     Redis Cache Layer                 │    │
+│  │                                       │    │
+│  │  • Manifest caching                   │    │
+│  │  • Add-in file caching               │    │
+│  │  • Email pattern caching             │    │
+│  │  • Auto-invalidation on deploy       │    │
+│  └──────────────────────────────────────┘    │
 └────────────────┬─────────────────────────────┘
                  │
     ┌────────────┼────────────┬───────────────┐
@@ -80,6 +120,15 @@ An intelligent email processing system that automatically converts recruitment e
 │GPT-5   │  │  API    │  │Blob    │    │API v8     │
 │mini    │  │         │  │Storage │    │           │
 └────────┘  └─────────┘  └────────┘    └───────────┘
+```
+
+### CI/CD Pipeline Flow
+
+```
+Developer Push → GitHub Actions → Version Increment → Cache Clear → Docker Build → Azure Deploy
+     │                │                  │                │              │              │
+     └─> Changes  ──> Detect ──────> Update ──────> Redis API ────> Registry ────> Container Apps
+         Detection     Type           Manifest        Invalidate       Push           Update
 ```
 
 ### Azure Resource Organization
@@ -180,6 +229,98 @@ POST https://well-zoho-oauth.azurewebsites.net/api/intake/email
     }
 }
 ```
+
+## 🚀 CI/CD with GitHub Actions
+
+### Manifest Cache Busting Workflow
+
+The system includes an automated CI/CD pipeline that handles manifest versioning and cache invalidation:
+
+#### Features
+- **Automatic Version Increment**: Detects changes and increments version based on change type
+  - Major: Breaking changes (ID, requirements, provider changes)
+  - Minor: New features (permissions, extension points)
+  - Patch: Bug fixes and minor updates
+  - Build: Auto-increment for all other changes
+
+- **Smart Change Detection**: Monitors specific files
+  - `addin/manifest.xml` - Outlook add-in manifest
+  - `addin/*.html` - Task pane and command UI files
+  - `addin/*.js` - JavaScript functionality
+  - `addin/*.css` - Styling changes
+
+- **Cache Invalidation**: Automatically clears Redis cache on deployment
+  - Manifest patterns: `manifest:*`
+  - Add-in patterns: `addin:*, taskpane:*`
+  - Triggers cache warmup for frequently accessed resources
+
+- **Zero-Downtime Deployment**: Blue-green deployment to Azure Container Apps
+  - Builds multi-platform Docker images
+  - Tags with version and commit SHA
+  - Automatic rollback on failure
+
+#### GitHub Secrets Required
+
+Configure these in your repository settings (Settings → Secrets → Actions):
+
+| Secret Name | Description | Example Value |
+|------------|-------------|---------------|
+| `AZURE_CLIENT_ID` | Service Principal Client ID | `fff7bffd-8f53-4a8c-a064-...` |
+| `AZURE_CLIENT_SECRET` | Service Principal Secret | `a~a8Q~jaSezoO3.USqu5...` |
+| `AZURE_TENANT_ID` | Azure AD Tenant ID | `29ee1479-b5f7-48c5-b665-...` |
+| `AZURE_SUBSCRIPTION_ID` | Azure Subscription ID | `3fee2ac0-3a70-4343-a8b2-...` |
+| `API_KEY` | API Key for cache endpoints | `e49d2dbcfa4547f5bdc371c5...` |
+
+#### Workflow Triggers
+
+The workflow automatically runs when:
+1. **Push to main branch** with changes to:
+   - Add-in manifest (`addin/manifest.xml`)
+   - Add-in HTML files (`addin/*.html`)
+   - Add-in JavaScript (`addin/*.js`)
+   - Add-in CSS (`addin/*.css`)
+
+2. **Manual dispatch** via GitHub Actions UI:
+   - Force version increment (major/minor/patch)
+   - Useful for testing or emergency deployments
+
+#### Example Workflow Execution
+
+```yaml
+name: Manifest Cache-Bust & Deploy
+on:
+  push:
+    paths:
+      - 'addin/manifest.xml'
+      - 'addin/*.html'
+      - 'addin/*.js'
+      
+jobs:
+  detect-changes:    # Analyzes what changed
+  increment-version: # Updates manifest version
+  clear-cache:       # Invalidates Redis cache
+  build-and-deploy:  # Deploys to Azure
+  verify-deployment: # Health check
+  rollback:          # Auto-rollback on failure
+```
+
+### Cache Strategy
+
+The system implements a multi-layer caching strategy:
+
+1. **Browser Cache Busting**: Version parameters (`?v=x.x.x.x`) on all resource URLs
+2. **Redis Cache**: Stores manifest and add-in files with TTL
+3. **CDN Cache**: Azure CDN with origin pull from Redis
+4. **Analytics Tracking**: Monitors cache hit rates and performance
+
+### Monitoring & Analytics
+
+Track deployment and cache performance through:
+
+- **GitHub Actions**: Workflow run history and logs
+- **Application Insights**: Cache metrics and performance
+- **Redis Monitor**: Hit/miss rates, memory usage
+- **Manifest Analytics**: Version adoption, error rates
 
 ## 🔧 Configuration
 
