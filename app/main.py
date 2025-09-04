@@ -348,6 +348,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "style-src 'self' 'unsafe-inline' https://*.office.com; "
                 "img-src 'self' data: https://*.office.com https://*.microsoft.com; "
                 "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com; "
+                "frame-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com https://telemetryservice.firstpartyapps.oaspapps.com; "
                 "frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com;"
             )
         else:
@@ -1598,69 +1599,23 @@ async def get_user_info(auth_info: dict = Depends(verify_user_auth)):
 # Static file serving for Outlook Add-in
 @app.get("/manifest.xml")
 async def get_manifest(request: Request):
-    """Serve Outlook Add-in manifest with Redis caching and analytics tracking"""
-    start_time = datetime.utcnow()
-    
-    try:
-        # Get manifest cache service
-        manifest_service = await get_manifest_cache_service()
-        
-        # Generate or retrieve cached manifest
-        manifest_xml, response_headers = await manifest_service.generate_manifest(request)
-        
-        # Track analytics with cache hit information
-        # Basic analytics data placeholder
-        analytics_data = {
-            "total_requests": 0,
-            "cache_hits": 0,
-            "cache_hit_rate": "0%",
-            "errors": 0,
-            "avg_response_time_ms": "0"
-        }
-        response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-        cache_hit = response_headers.get("X-Manifest-Source") == "cache"
-        
-        # Track manifest request (disabled)
-        # await analytics.track_manifest_request(
-        #     request=request,
-        #     response_time_ms=response_time_ms,
-        #     cache_hit=cache_hit
-        # )
-        
-        # Return manifest with custom headers
-        return Response(
-            content=manifest_xml,
+    """Serve Outlook Add-in manifest - direct file serving as primary method"""
+    # Direct file serving for reliability
+    manifest_path = os.path.join(os.path.dirname(__file__), "..", "addin", "manifest.xml")
+    if os.path.exists(manifest_path):
+        # Add cache busting headers
+        return FileResponse(
+            manifest_path, 
             media_type="application/xml; charset=utf-8",
-            headers=response_headers
-        )
-            
-    except HTTPException:
-        raise
-    except Exception as e:
-        # Track unexpected errors
-        try:
-            # Basic analytics data placeholder
-            analytics_data = {
-                "total_requests": 0,
-                "cache_hits": 0,
-                "cache_hit_rate": "0%",
-                "errors": 0,
-                "avg_response_time_ms": "0"
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Manifest-Version": "1.3.0.2"
             }
-            response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
-            
-            # Track manifest request (disabled)
-            # await analytics.track_manifest_request(
-            #         request=request,
-            #         response_time_ms=response_time_ms,
-            #         cache_hit=False,
-            #         error=f"internal_error: {str(e)}"
-            #     )
-        except:
-            pass  # Don't let analytics errors break the manifest serving
-            
-        logger.error(f"Manifest serving error: {e}")
-        raise HTTPException(status_code=500, detail="Internal server error")
+        )
+    
+    # Fallback error if file not found
+    logger.error(f"Manifest file not found at {manifest_path}")
+    raise HTTPException(status_code=404, detail="Manifest.xml not found")
 
 @app.get("/commands.js")
 async def get_commands():
@@ -2593,6 +2548,9 @@ async def get_icon(size: int):
     
     # Try multiple path resolutions for container compatibility
     possible_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "addin", f"icon-{size}.png"),
+        os.path.join("/app", "addin", f"icon-{size}.png"),
+        os.path.join(os.getcwd(), "addin", f"icon-{size}.png"),
         os.path.join(os.path.dirname(__file__), "..", "static", "icons", f"icon-{size}.png"),
         os.path.join("/app", "static", "icons", f"icon-{size}.png"),
         os.path.join(os.getcwd(), "static", "icons", f"icon-{size}.png"),
