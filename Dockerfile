@@ -43,8 +43,10 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 # Copy application code
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser addin/ ./addin/
-COPY --chown=appuser:appuser static/ ./static/
 COPY --chown=appuser:appuser scripts/ ./scripts/
+
+# Create static directory (may not exist in repo due to .gitignore)
+RUN mkdir -p ./static/icons && chown -R appuser:appuser ./static
 
 # Create logs directory
 RUN mkdir -p /app/logs && \
