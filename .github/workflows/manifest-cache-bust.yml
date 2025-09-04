@@ -21,6 +21,7 @@ on:
 
 env:
   AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   CONTAINER_REGISTRY: wellintakeregistry.azurecr.io
@@ -83,6 +84,8 @@ jobs:
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
       old_version: ${{ steps.version.outputs.old_version }}
+    permissions:
+      contents: write
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -191,12 +194,18 @@ jobs:
 
       - name: Log in to Azure
         uses: azure/login@v1
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
         with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          creds: |
+            {
+              "clientId": "${{ env.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ env.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ env.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ env.AZURE_TENANT_ID }}"
+            }
 
       - name: Log in to Azure Container Registry
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
         run: |
           az acr login --name wellintakeregistry
 
@@ -354,10 +363,15 @@ jobs:
 
       - name: Log in to Azure
         uses: azure/login@v1
+        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
         with:
-          client-id: ${{ env.AZURE_CLIENT_ID }}
-          tenant-id: ${{ env.AZURE_TENANT_ID }}
-          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+          creds: |
+            {
+              "clientId": "${{ env.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ env.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ env.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ env.AZURE_TENANT_ID }}"
+            }
 
       - name: Rollback to previous version
         run: |
