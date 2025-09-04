@@ -1,0 +1,393 @@
+name: Manifest Cache-Bust & Deploy
+
+on:
+  push:
+    paths:
+      - 'addin/manifest.xml'
+      - 'addin/*.html'
+      - 'addin/*.js'
+      - 'addin/*.css'
+  workflow_dispatch:
+    inputs:
+      force_version_increment:
+        description: 'Force version increment type'
+        required: false
+        default: 'patch'
+        type: choice
+        options:
+          - patch
+          - minor
+          - major
+
+env:
+  AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+  AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+  AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+  CONTAINER_REGISTRY: wellintakeregistry.azurecr.io
+  CONTAINER_APP_NAME: well-intake-api
+  RESOURCE_GROUP: TheWell-Infra-East
+  API_ENDPOINT: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
+  API_KEY: ${{ secrets.API_KEY }}
+
+jobs:
+  detect-changes:
+    runs-on: ubuntu-latest
+    outputs:
+      manifest_changed: ${{ steps.changes.outputs.manifest }}
+      addin_files_changed: ${{ steps.changes.outputs.addin_files }}
+      version_increment: ${{ steps.version.outputs.increment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect file changes
+        id: changes
+        run: |
+          if git diff --name-only HEAD^ HEAD | grep -E '^addin/manifest\.xml$'; then
+            echo "manifest=true" >> $GITHUB_OUTPUT
+          else
+            echo "manifest=false" >> $GITHUB_OUTPUT
+          fi
+          
+          if git diff --name-only HEAD^ HEAD | grep -E '^addin/.*\.(html|js|css)$'; then
+            echo "addin_files=true" >> $GITHUB_OUTPUT
+          else
+            echo "addin_files=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Determine version increment
+        id: version
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            echo "increment=${{ github.event.inputs.force_version_increment }}" >> $GITHUB_OUTPUT
+          elif [[ "${{ steps.changes.outputs.manifest }}" == "true" ]]; then
+            # Major manifest changes
+            if git diff HEAD^ HEAD addin/manifest.xml | grep -E '(\+.*<Id>|\+.*<ProviderName>|\+.*<Requirements>)'; then
+              echo "increment=major" >> $GITHUB_OUTPUT
+            # Minor manifest changes (new features, permissions)
+            elif git diff HEAD^ HEAD addin/manifest.xml | grep -E '(\+.*<Permissions>|\+.*<ExtensionPoint>)'; then
+              echo "increment=minor" >> $GITHUB_OUTPUT
+            else
+              echo "increment=patch" >> $GITHUB_OUTPUT
+            fi
+          else
+            echo "increment=patch" >> $GITHUB_OUTPUT
+          fi
+
+  increment-version:
+    needs: detect-changes
+    if: needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      new_version: ${{ steps.version.outputs.new_version }}
+      old_version: ${{ steps.version.outputs.old_version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract and increment version
+        id: version
+        run: |
+          # Extract current version from manifest.xml
+          CURRENT_VERSION=$(grep -o '<Version>[^<]*</Version>' addin/manifest.xml | sed 's/<Version>//;s/<\/Version>//')
+          echo "old_version=$CURRENT_VERSION" >> $GITHUB_OUTPUT
+          echo "Current version: $CURRENT_VERSION"
+          
+          # Parse semantic version
+          IFS='.' read -r major minor patch build <<< "$CURRENT_VERSION"
+          
+          # Increment based on change type
+          case "${{ needs.detect-changes.outputs.version_increment }}" in
+            "major")
+              major=$((major + 1))
+              minor=0
+              patch=0
+              build=0
+              ;;
+            "minor")
+              minor=$((minor + 1))
+              patch=0
+              build=0
+              ;;
+            *)
+              # Default to patch increment
+              if [[ -z "$build" ]]; then
+                build=1
+              else
+                build=$((build + 1))
+              fi
+              ;;
+          esac
+          
+          NEW_VERSION="${major}.${minor}.${patch}.${build}"
+          echo "new_version=$NEW_VERSION" >> $GITHUB_OUTPUT
+          echo "New version: $NEW_VERSION"
+          
+          # Update manifest.xml with new version
+          sed -i "s/<Version>$CURRENT_VERSION<\/Version>/<Version>$NEW_VERSION<\/Version>/g" addin/manifest.xml
+          
+          # Update cache-busting version parameters in URLs
+          sed -i "s/v=$CURRENT_VERSION/v=$NEW_VERSION/g" addin/manifest.xml
+          
+          # If no version parameter exists, add it
+          sed -i 's/\.html"/\.html?v='$NEW_VERSION'"/g' addin/manifest.xml
+          sed -i 's/\.html?v=[^"]*"/\.html?v='$NEW_VERSION'"/g' addin/manifest.xml
+
+      - name: Commit version changes
+        run: |
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add addin/manifest.xml
+          git commit -m "Auto-increment manifest version to ${{ steps.version.outputs.new_version }} [skip ci]" || exit 0
+          git push
+
+  clear-cache:
+    needs: [detect-changes, increment-version]
+    if: needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clear Redis cache
+        run: |
+          echo "Clearing Redis cache for manifest and add-in files..."
+          
+          # Clear cache via API endpoint
+          curl -X POST "${{ env.API_ENDPOINT }}/cache/invalidate" \
+            -H "X-API-Key: ${{ env.API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"pattern": "manifest:*,addin:*,taskpane:*"}' \
+            --max-time 30 \
+            --retry 3 \
+            --fail-with-body || echo "Cache clear failed, continuing..."
+          
+          # Additional cache warming patterns
+          curl -X POST "${{ env.API_ENDPOINT }}/cache/warmup" \
+            -H "X-API-Key: ${{ env.API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"patterns": ["manifest.xml", "taskpane.html", "commands.html"]}' \
+            --max-time 30 \
+            --retry 3 \
+            --fail-with-body || echo "Cache warmup failed, continuing..."
+
+  build-and-deploy:
+    needs: [detect-changes, increment-version, clear-cache]
+    if: needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Pull latest changes
+        run: |
+          git pull origin ${{ github.ref_name }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to Azure Container Registry
+        run: |
+          az acr login --name wellintakeregistry
+
+      - name: Build and push Docker image
+        env:
+          IMAGE_TAG: ${{ needs.increment-version.outputs.new_version }}-${{ github.sha }}
+        run: |
+          # Build multi-platform image
+          docker buildx build \
+            --platform linux/amd64 \
+            --tag ${{ env.CONTAINER_REGISTRY }}/well-intake-api:${{ env.IMAGE_TAG }} \
+            --tag ${{ env.CONTAINER_REGISTRY }}/well-intake-api:latest \
+            --push \
+            --cache-from type=registry,ref=${{ env.CONTAINER_REGISTRY }}/well-intake-api:cache \
+            --cache-to type=registry,ref=${{ env.CONTAINER_REGISTRY }}/well-intake-api:cache,mode=max \
+            .
+
+      - name: Deploy to Azure Container Apps
+        env:
+          IMAGE_TAG: ${{ needs.increment-version.outputs.new_version }}-${{ github.sha }}
+        run: |
+          echo "Deploying image with tag: ${{ env.IMAGE_TAG }}"
+          
+          # Update container app with new image
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.CONTAINER_REGISTRY }}/well-intake-api:${{ env.IMAGE_TAG }} \
+            --output table
+          
+          # Wait for deployment to complete
+          echo "Waiting for deployment to complete..."
+          for i in {1..30}; do
+            STATUS=$(az containerapp show \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --query "properties.provisioningState" \
+              --output tsv)
+            
+            if [[ "$STATUS" == "Succeeded" ]]; then
+              echo "Deployment completed successfully"
+              break
+            elif [[ "$STATUS" == "Failed" ]]; then
+              echo "Deployment failed"
+              exit 1
+            fi
+            
+            echo "Deployment status: $STATUS (attempt $i/30)"
+            sleep 10
+          done
+
+  post-deployment:
+    needs: [increment-version, build-and-deploy]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for service to be ready
+        run: |
+          echo "Waiting for service to be ready..."
+          for i in {1..20}; do
+            if curl -f "${{ env.API_ENDPOINT }}/health" --max-time 10; then
+              echo "Service is healthy"
+              break
+            fi
+            echo "Health check failed, retrying in 15 seconds... (attempt $i/20)"
+            sleep 15
+          done
+
+      - name: Verify manifest accessibility
+        run: |
+          echo "Verifying manifest accessibility..."
+          
+          # Test manifest.xml with new version
+          MANIFEST_URL="${{ env.API_ENDPOINT }}/manifest.xml?v=${{ needs.increment-version.outputs.new_version }}"
+          echo "Testing manifest URL: $MANIFEST_URL"
+          
+          if curl -f "$MANIFEST_URL" --max-time 30; then
+            echo "✅ Manifest is accessible with new version"
+          else
+            echo "❌ Manifest accessibility test failed"
+            exit 1
+          fi
+          
+          # Test taskpane.html with new version
+          TASKPANE_URL="${{ env.API_ENDPOINT }}/taskpane.html?v=${{ needs.increment-version.outputs.new_version }}"
+          echo "Testing taskpane URL: $TASKPANE_URL"
+          
+          if curl -f "$TASKPANE_URL" --max-time 30; then
+            echo "✅ Taskpane is accessible with new version"
+          else
+            echo "❌ Taskpane accessibility test failed"
+            exit 1
+          fi
+
+      - name: Warm cache with new manifest
+        run: |
+          echo "Warming cache with new manifest version..."
+          
+          curl -X POST "${{ env.API_ENDPOINT }}/cache/warmup" \
+            -H "X-API-Key: ${{ env.API_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{
+              "patterns": [
+                "manifest.xml?v=${{ needs.increment-version.outputs.new_version }}",
+                "taskpane.html?v=${{ needs.increment-version.outputs.new_version }}",
+                "commands.html?v=${{ needs.increment-version.outputs.new_version }}"
+              ]
+            }' \
+            --max-time 30 \
+            --retry 3 \
+            --fail-with-body || echo "Cache warming completed with warnings"
+
+      - name: Run smoke tests
+        run: |
+          echo "Running smoke tests..."
+          
+          # Test health endpoint
+          curl -f "${{ env.API_ENDPOINT }}/health" || exit 1
+          
+          # Test manifest endpoint
+          curl -f "${{ env.API_ENDPOINT }}/manifest.xml" || exit 1
+          
+          # Test static assets
+          curl -f "${{ env.API_ENDPOINT }}/icon-64.png" || exit 1
+          
+          echo "✅ All smoke tests passed"
+
+  notify:
+    needs: [increment-version, build-and-deploy, post-deployment]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Notify deployment result
+        run: |
+          if [[ "${{ needs.post-deployment.result }}" == "success" ]]; then
+            echo "🎉 Deployment successful!"
+            echo "📦 Version: ${{ needs.increment-version.outputs.old_version }} → ${{ needs.increment-version.outputs.new_version }}"
+            echo "🔗 Manifest URL: ${{ env.API_ENDPOINT }}/manifest.xml?v=${{ needs.increment-version.outputs.new_version }}"
+            echo "🌐 API Health: ${{ env.API_ENDPOINT }}/health"
+            echo "📋 Cache Status: ${{ env.API_ENDPOINT }}/cache/status"
+          else
+            echo "❌ Deployment failed or was cancelled"
+            echo "🔍 Check the workflow logs for details"
+            echo "🔄 Consider running the workflow manually with force_version_increment"
+          fi
+
+  rollback:
+    needs: [increment-version, build-and-deploy, post-deployment]
+    if: failure() && needs.increment-version.outputs.old_version != ''
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log in to Azure
+        uses: azure/login@v1
+        with:
+          client-id: ${{ env.AZURE_CLIENT_ID }}
+          tenant-id: ${{ env.AZURE_TENANT_ID }}
+          subscription-id: ${{ env.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Rollback to previous version
+        run: |
+          echo "Rolling back to version ${{ needs.increment-version.outputs.old_version }}"
+          
+          # Revert manifest version
+          sed -i "s/<Version>${{ needs.increment-version.outputs.new_version }}<\/Version>/<Version>${{ needs.increment-version.outputs.old_version }}<\/Version>/g" addin/manifest.xml
+          sed -i "s/v=${{ needs.increment-version.outputs.new_version }}/v=${{ needs.increment-version.outputs.old_version }}/g" addin/manifest.xml
+          
+          # Commit rollback
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git add addin/manifest.xml
+          git commit -m "Rollback manifest version to ${{ needs.increment-version.outputs.old_version }} [skip ci]"
+          git push
+          
+          # Try to rollback container deployment (best effort)
+          PREVIOUS_IMAGE=$(az containerapp revision list \
+            --name ${{ env.CONTAINER_APP_NAME }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "[1].properties.template.containers[0].image" \
+            --output tsv 2>/dev/null || echo "")
+          
+          if [[ -n "$PREVIOUS_IMAGE" ]]; then
+            echo "Attempting to rollback to previous image: $PREVIOUS_IMAGE"
+            az containerapp update \
+              --name ${{ env.CONTAINER_APP_NAME }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --image "$PREVIOUS_IMAGE" \
+              --output table || echo "Container rollback failed"
+          fi
+          
+          echo "🔄 Rollback completed. Manual intervention may be required."
