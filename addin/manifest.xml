@@ -11,8 +11,8 @@
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="The Well - Send to Zoho"/>
   <Description DefaultValue="Process recruitment emails and automatically create candidate records in Zoho CRM."/>
-  <IconUrl DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-64.png"/>
-  <HighResolutionIconUrl DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-128.png"/>
+  <IconUrl DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-32.png"/>
+  <HighResolutionIconUrl DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-80.png"/>
   <SupportUrl DefaultValue="https://thewell.solutions/"/>
   
   <AppDomains>
@@ -90,9 +90,7 @@
         <bt:Images>
           <bt:Image id="Icon.16x16" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-16.png"/>
           <bt:Image id="Icon.32x32" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-32.png"/>
-          <bt:Image id="Icon.64x64" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-64.png"/>
           <bt:Image id="Icon.80x80" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-80.png"/>
-          <bt:Image id="Icon.128x128" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/icon-128.png"/>
         </bt:Images>
         
         <bt:Urls>
