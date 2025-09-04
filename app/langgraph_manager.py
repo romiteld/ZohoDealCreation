@@ -215,7 +215,14 @@ class EmailProcessingWorkflow:
             system_prompt = enhanced_prompt
         else:
             system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis.
-            Extract key recruitment details from the email with extreme accuracy.
+            Extract key recruitment details from the email with ABSOLUTE ACCURACY.
+            
+            ⚠️ CRITICAL ANTI-FABRICATION RULES:
+            1. NEVER invent or fabricate ANY information
+            2. If data is not EXPLICITLY stated in the email, return null/None
+            3. DO NOT guess names, companies, locations, or contact details
+            4. DO NOT infer information that isn't directly stated
+            5. When uncertain, return null rather than a guess
             
             CRITICAL RULES FOR FORWARDED EMAILS:
             - Check if this is a forwarded email (look for "-----Original Message-----", "From:", "Date:", "Subject:", "Begin forwarded message:", etc.)
@@ -230,29 +237,30 @@ class EmailProcessingWorkflow:
             - CANDIDATE: The actual person being considered for a position (the subject of the discussion)
             - Do NOT confuse the person sending the referral with the candidate being referred
             
-            EXTRACTION RULES:
+            DATA EXTRACTION RULES:
             - ONLY extract information that is EXPLICITLY stated in the email
             - If information is not present, return null/None - NEVER make it up
             - candidate_name: The person being discussed as a potential hire (NOT the referrer)
             - referrer_name: The person who forwarded the email or made the introduction
-            - email: The CANDIDATE's email address (not the referrer's)
-            - company_name: The CANDIDATE's company (not the recruiting firm)
+            - email: The CANDIDATE's email address (not the referrer's) - MUST be an actual email in the message
+            - phone: Extract from email body or Calendly link parameters if present
+            - company_name: The CANDIDATE's current company (not the recruiting firm) - ONLY if explicitly mentioned
+            - location: ONLY if explicitly stated - DO NOT guess based on area codes or domains
+            
+            CALENDLY EXTRACTION:
+            - Look for Calendly URLs (calendly.com)
+            - Extract phone numbers from URL parameters (e.g., ?phone=123-456-7890)
+            - Extract email from URL parameters (e.g., ?email=john@example.com)
+            - Extract name from URL parameters (e.g., ?name=John+Doe)
             
             EXAMPLES OF CORRECT EXTRACTION:
             - If Kathy sends an email about Jerry Fetta: candidate=Jerry Fetta, referrer=Kathy
             - If Steve forwards an email about a consultant: referrer=Steve, candidate=[person discussed in email]
-            
-            Focus on identifying:
-            1. Candidate name - WHO is being referred for a position (look in forwarded content)
-            2. Job title - what position is being discussed
-            3. Location - where the opportunity is located
-            4. Company name - the CANDIDATE's current company (if mentioned)
-            5. Referrer name - who sent/forwarded this opportunity to you
-            6. Contact details - the CANDIDATE's phone, email, LinkedIn (not the referrer's)
+            - If phone/email not in email body but in Calendly link: extract from URL parameters
             
             {learning_hints}
             
-            Be precise and NEVER assume or invent information."""
+            Be precise and NEVER assume or invent information. Leave fields null if uncertain."""
         
         user_prompt = f"""Analyze this recruitment email and extract the key details:
         
@@ -477,16 +485,70 @@ class EmailProcessingWorkflow:
         extracted = state.get('extraction_result', {})
         research = state.get('company_research', {})
         
-        # Extract phone from Calendly URL if present
+        # Enhanced Calendly data extraction
         phone = extracted.get('phone')
+        email = extracted.get('email')
         calendly_url = extracted.get('calendly_url')
-        if not phone and calendly_url:
-            # Try to extract phone from Calendly URL parameters
+        
+        if calendly_url:
             import re
-            phone_match = re.search(r'phone=([0-9\-\+\(\)\s]+)', calendly_url)
-            if phone_match:
-                phone = phone_match.group(1)
-                logger.info(f"Extracted phone from Calendly: {phone}")
+            import urllib.parse
+            
+            # Try to extract ALL data from Calendly URL parameters
+            # Common patterns: ?phone=xxx&email=xxx&name=xxx
+            # or answer_1=phone&answer_2=email patterns
+            
+            # Extract phone if not already found
+            if not phone:
+                phone_patterns = [
+                    r'phone=([0-9\-\+\(\)\s]+)',
+                    r'answer_\d+=([0-9\-\+\(\)\s]+)',  # Sometimes phone in answer fields
+                    r'a\d+=([0-9\-\+\(\)\s]+)'  # Shortened form
+                ]
+                for pattern in phone_patterns:
+                    phone_match = re.search(pattern, calendly_url)
+                    if phone_match:
+                        phone = urllib.parse.unquote(phone_match.group(1))
+                        # Store in extracted data to preserve it
+                        if not extracted.get('phone'):
+                            extracted['phone'] = phone
+                        logger.info(f"Extracted phone from Calendly: {phone}")
+                        break
+            
+            # Extract email if not already found  
+            if not email:
+                email_patterns = [
+                    r'email=([^&]+)',
+                    r'invitee_email=([^&]+)',
+                    r'answer_\d+=([^&]*@[^&]+)'  # Email in answer fields
+                ]
+                for pattern in email_patterns:
+                    email_match = re.search(pattern, calendly_url)
+                    if email_match:
+                        email = urllib.parse.unquote(email_match.group(1))
+                        # Store in extracted data to preserve it
+                        if not extracted.get('email'):
+                            extracted['email'] = email
+                        logger.info(f"Extracted email from Calendly: {email}")
+                        break
+            
+            # Extract name if not already found
+            if not extracted.get('candidate_name'):
+                name_patterns = [
+                    r'name=([^&]+)',
+                    r'invitee_full_name=([^&]+)',
+                    r'first_name=([^&]+).*last_name=([^&]+)'
+                ]
+                for pattern in name_patterns:
+                    name_match = re.search(pattern, calendly_url)
+                    if name_match:
+                        if len(name_match.groups()) == 2:
+                            # First and last name
+                            extracted['candidate_name'] = f"{urllib.parse.unquote(name_match.group(1))} {urllib.parse.unquote(name_match.group(2))}"
+                        else:
+                            extracted['candidate_name'] = urllib.parse.unquote(name_match.group(1))
+                        logger.info(f"Extracted name from Calendly: {extracted['candidate_name']}")
+                        break
         
         # Determine source based on business rules
         source = "Email Inbound"  # Default
@@ -503,13 +565,17 @@ class EmailProcessingWorkflow:
             "candidate_name": extracted.get('candidate_name'),
             "job_title": extracted.get('job_title'),
             "location": extracted.get('location'),
-            "company_name": research.get('company_name') or extracted.get('company_guess'),
+            # Don't use research company if it's generic like "Example" or domain-based guesses
+            "company_name": (
+                extracted.get('company_guess') or 
+                (research.get('company_name') if research.get('confidence', 0) > 0.7 else None)
+            ),
             "referrer_name": extracted.get('referrer_name'),
             "referrer_email": extracted.get('referrer_email'),
-            # Prioritize extracted email, fallback to Firecrawl research
+            # Prioritize extracted email (including from Calendly), fallback to Firecrawl research
             "email": extracted.get('email') or research.get('email'),
-            # Prioritize extracted phone, fallback to Firecrawl research
-            "phone": phone or research.get('phone'),
+            # Prioritize extracted phone (including from Calendly), fallback to Firecrawl research
+            "phone": extracted.get('phone') or research.get('phone'),
             # Prioritize extracted LinkedIn, fallback to Firecrawl research
             "linkedin_url": extracted.get('linkedin_url') or research.get('linkedin_url'),
             "calendly_url": calendly_url,
@@ -570,7 +636,7 @@ class EmailProcessingWorkflow:
         # Compile the workflow
         return workflow.compile()
     
-    async def process_email(self, email_body: str, sender_domain: str, learning_hints: str = None) -> ExtractedData:
+    async def process_email(self, email_body: str, sender_domain: str, learning_hints: str = None, calendly_url: str = None) -> ExtractedData:
         """Main entry point to process an email with optional learning hints"""
         
         logger.info(f"Starting LangGraph email processing for domain: {sender_domain}")
@@ -590,16 +656,23 @@ class EmailProcessingWorkflow:
         try:
             # Run the workflow
             result = await self.graph.ainvoke(initial_state)
-            
+
             # Extract the final output
-            final_output = result.get("final_output")
-            
-            if final_output:
-                logger.info(f"LangGraph processing successful: {final_output}")
-                return final_output
-            else:
-                logger.error("No final output from LangGraph workflow")
-                return ExtractedData()
+            final_output = result.get("final_output") or ExtractedData()
+
+            # Calendly enrichment (best-effort)
+            try:
+                url = calendly_url or self._extract_calendly_url(email_body)
+                if url:
+                    extra = await self._enrich_from_calendly(url)
+                    for k, v in (extra or {}).items():
+                        if hasattr(final_output, k) and v:
+                            setattr(final_output, k, v)
+            except Exception:
+                pass
+
+            logger.info(f"LangGraph processing successful: {final_output}")
+            return final_output
                 
         except Exception as e:
             logger.error(f"LangGraph processing failed: {e}")
@@ -630,6 +703,28 @@ class EmailProcessingCrew:
     async def run_async(self, email_body: str, sender_domain: str) -> ExtractedData:
         """Async method matching CrewAI interface"""
         return await self.workflow.process_email(email_body, sender_domain)
+
+    def _extract_calendly_url(self, text: str) -> str:
+        import re
+        m = re.search(r"https?://(?:www\.)?calendly\.com/[\w\-/.?=&]+", text, re.IGNORECASE)
+        return m.group(0) if m else None
+
+    async def _enrich_from_calendly(self, url: str) -> dict:
+        try:
+            import aiohttp, re
+            async with aiohttp.ClientSession() as session:
+                async with session.get(url, timeout=5) as resp:
+                    if resp.status != 200:
+                        return {}
+                    html = await resp.text()
+            phone = re.search(r"(\+?\d[\d\s().-]{7,}\d)", html)
+            email = re.search(r"[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}", html)
+            return {
+                "phone": phone.group(0) if phone else None,
+                "candidate_email": email.group(0) if email else None
+            }
+        except Exception:
+            return {}
 
 
 # Simple fallback extractor (unchanged)

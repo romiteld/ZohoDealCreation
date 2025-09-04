@@ -18,8 +18,10 @@ class EmailPayload(BaseModel):
     attachments: List[AttachmentPayload] = []
     raw_email: Optional[str] = Field(None, description="Raw email content for metadata extraction")
     reply_to: Optional[str] = Field(None, description="Reply-To header if different from sender")
+    internet_message_id: Optional[str] = Field(None, description="Unique message ID from the email provider (e.g., Graph 'id')")
     user_corrections: Optional[Dict[str, Any]] = Field(None, description="User corrections to AI extraction")
     ai_extraction: Optional[Dict[str, Any]] = Field(None, description="Original AI extraction for learning")
+    dry_run: Optional[bool] = Field(False, description="If true, run extraction only and return preview without creating Zoho records")
 
 class ExtractedData(BaseModel):
     candidate_name: Optional[str] = Field(None, description="The full name of the candidate.")
@@ -46,6 +48,7 @@ class ProcessingResult(BaseModel):
     contact_id: Optional[str] = None
     deal_name: Optional[str] = Field(None, description="The formatted deal name that was created")
     primary_email: Optional[str] = Field(None, description="The email address used (Reply-To or From)")
+    extracted: Optional[ExtractedData] = Field(None, description="Extracted data preview for dry_run flows")
 
 class HealthStatus(BaseModel):
     status: str

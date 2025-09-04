@@ -4,16 +4,35 @@ import re
 def format_deal_name(job_title: Optional[str], location: Optional[str], company_name: Optional[str]) -> str:
     """
     Formats the deal name according to the strict business rule.
-    Rule: [Job Title] ([Location]) - [Firm Name]
-    """
-    jt = (job_title or "Unknown Role").strip()
-    loc = (location or "Unknown Location").strip()
-    comp = (company_name or "Unknown Company").strip()
+    Rule: [Position] [Location] - [Company Name]
     
-    if loc != "Unknown Location" and "," in loc:
+    CRITICAL: Boss requires this exact format - no parentheses around location
+    """
+    # Use None for missing values - DO NOT use placeholder text
+    jt = job_title.strip() if job_title else None
+    loc = location.strip() if location else None
+    comp = company_name.strip() if company_name else None
+    
+    # If location has comma, take only city (first part)
+    if loc and "," in loc:
         loc = loc.split(',')[0].strip()
-        
-    return f"{jt} ({loc}) - {comp}"
+    
+    # Build deal name only with available data
+    if jt and loc and comp:
+        # All three components available - use standard format
+        return f"{jt} {loc} - {comp}"
+    elif jt and comp:
+        # Missing location
+        return f"{jt} - {comp}"
+    elif jt and loc:
+        # Missing company
+        return f"{jt} {loc}"
+    elif comp:
+        # Only company available
+        return comp
+    else:
+        # Nothing available - this should trigger user prompt
+        return None
 
 def clean_contact_name(name: Optional[str]) -> Tuple[Optional[str], Dict[str, str]]:
     """
@@ -86,19 +105,37 @@ class BusinessRulesEngine:
         """
         result = ai_data.copy() if ai_data else {}
         
-        # Format deal name
+        # Format deal name - CRITICAL: Use exact format required by boss
         job_title = result.get('job_title')
         location = result.get('location')
         company_name = result.get('company_name')
-        result['deal_name'] = format_deal_name(job_title, location, company_name)
         
-        # Clean contact name
+        # Don't use placeholder values - keep as None if missing
+        deal_name = format_deal_name(job_title, location, company_name)
+        if deal_name:
+            result['deal_name'] = deal_name
+        else:
+            # Mark that deal name needs user input
+            result['deal_name'] = None
+            result['requires_user_input'] = True
+            result['missing_fields'] = []
+            if not job_title:
+                result['missing_fields'].append('job_title')
+            if not location:
+                result['missing_fields'].append('location')
+            if not company_name:
+                result['missing_fields'].append('company_name')
+        
+        # Clean contact name - don't use "Unknown" placeholders
         contact_name = result.get('candidate_name')
         if contact_name:
             full_name, name_parts = clean_contact_name(contact_name)
             result['contact_full_name'] = full_name
-            result['contact_first_name'] = name_parts.get('first_name')
-            result['contact_last_name'] = name_parts.get('last_name')
+            # Only set first/last name if we have real values
+            if name_parts.get('first_name') != 'Unknown':
+                result['contact_first_name'] = name_parts.get('first_name')
+            if name_parts.get('last_name') != 'Contact':
+                result['contact_last_name'] = name_parts.get('last_name')
         
         # Determine source
         referrer = result.get('referrer')

@@ -152,6 +152,22 @@ async def verify_user_auth(authorization: str = Header(None)):
             detail="Invalid authorization format"
         )
 
+# Combined dependency: allow either Azure AD Bearer token OR API key
+async def verify_auth_or_api_key(request: Request, authorization: str = Header(None), x_api_key: str = Header(None)):
+    """Validate Authorization: Bearer <token> (Azure AD) or X-API-Key."""
+    # Try Microsoft Bearer first if provided
+    if authorization and authorization.startswith('Bearer '):
+        return await verify_user_auth(authorization)
+    # Fallback to API key if provided
+    if x_api_key:
+        # Reuse existing API key logic
+        api_env = os.getenv("API_KEY", "")
+        if hmac.compare_digest(x_api_key, api_env):
+            return {"type": "api_key", "user_id": "api_client"}
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API Key")
+    # If neither header present, unauthorized
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization or API key required")
+
 # Lifespan context manager for startup/shutdown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -291,7 +307,7 @@ app = FastAPI(
 ALLOWED_ORIGINS = [
     # Azure Container Apps domains
     "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
-    "https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io",
+    "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io",
     
     # Microsoft Office domains
     "https://outlook.office.com",
@@ -323,6 +339,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         add_in_paths = ["/manifest.xml", "/commands.html", "/commands.js", "/taskpane.html", 
                        "/taskpane.js", "/placeholder.html", "/loader.html", "/config.js",
                        "/icon-16.png", "/icon-32.png", "/icon-64.png", "/icon-80.png", "/icon-128.png",
+                       "/icons/",  # versioned icon path prefix
                        "/addin/manifest.xml", "/addin/commands.html", "/addin/commands.js", 
                        "/addin/taskpane.html", "/addin/taskpane.js", "/addin/config.js",
                        "/addin/icon-16.png", "/addin/icon-32.png", "/addin/icon-64.png", "/addin/icon-80.png", "/addin/icon-128.png"]
@@ -346,10 +363,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "default-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com; "
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com https://ajax.aspnetcdn.com; "
                 "style-src 'self' 'unsafe-inline' https://*.office.com; "
-                "img-src 'self' data: https://*.office.com https://*.microsoft.com; "
+                "img-src 'self' data: https://*.office.com https://*.microsoft.com https://*.azurecontainerapps.io; "
                 "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com; "
                 "frame-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com https://telemetryservice.firstpartyapps.oaspapps.com; "
-                "frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com;"
+                "frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com https://outlook.officeppe.com https://*.microsoft.com https://*.office.com;"
             )
         else:
             # Standard CSP for API endpoints
@@ -651,8 +668,8 @@ async def health_check():
     
     return health_status
 
-@app.post("/intake/email", response_model=ZohoResponse, dependencies=[Depends(verify_api_key)])
-async def process_email(request: EmailRequest, req: Request):
+@app.post("/intake/email", response_model=ZohoResponse)
+async def process_email(request: EmailRequest, req: Request, _auth=Depends(verify_auth_or_api_key)):
     """Process email and create Zoho CRM records with learning from user corrections"""
     try:
         # Input validation
@@ -794,6 +811,20 @@ async def process_email(request: EmailRequest, req: Request):
             request.body,
             request.sender_email
         )
+        
+        # Check if user input is required for missing fields
+        if processed_data.get('requires_user_input'):
+            missing_fields = processed_data.get('missing_fields', [])
+            logger.info(f"Missing critical fields requiring user input: {missing_fields}")
+            
+            # Return response indicating user input is needed
+            return ZohoResponse(
+                status="requires_input",
+                message=f"Missing information required: {', '.join(missing_fields)}",
+                extracted=extracted_data,
+                missing_fields=missing_fields
+            )
+        
         # Convert back to ExtractedData model
         from app.models import ExtractedData
         enhanced_data = ExtractedData(**processed_data)
@@ -809,6 +840,14 @@ async def process_email(request: EmailRequest, req: Request):
         if is_duplicate:
             logger.info(f"Duplicate detected for {request.sender_email}")
         
+        # If dry_run, return preview without creating Zoho records
+        if getattr(request, 'dry_run', False):
+            return ZohoResponse(
+                status="preview",
+                message="Preview only - no Zoho records created",
+                extracted=enhanced_data
+            )
+
         # Create or update Zoho records
         zoho_result = await req.app.state.zoho_integration.create_or_update_records(
             enhanced_data,
@@ -2565,6 +2604,15 @@ async def get_icon(size: int):
     # Log which paths were tried for debugging
     logger.error(f"Icon {size} not found. Tried paths: {possible_paths}")
     raise HTTPException(status_code=404, detail=f"Icon {size} not found. Tried: {possible_paths}")
+
+# Versioned icon serving to hard-bust caches
+@app.get("/icons/{version}/icon-{size}.png")
+async def get_versioned_icon(version: str, size: int):
+    """Serve versioned icon paths for Outlook Add-in cache busting"""
+    if size not in [16, 32, 64, 80, 128]:
+        raise HTTPException(status_code=404, detail="Invalid icon size")
+    # Reuse existing resolver; ignore version in path and map to standard icon files
+    return await get_icon(size)
 
 if __name__ == "__main__":
     import uvicorn

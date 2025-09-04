@@ -1,10 +1,11 @@
 /**
  * Taskpane JavaScript for Human-in-the-Loop Email Processing
  * Allows users to preview and edit extracted data before sending to Zoho
+ * Version 1.4.0.0 - Fresh deployment with cache refresh
  */
 
 // Configuration
-const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io';
+const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
 const API_KEY = window.API_KEY || ''; // API key should be injected from config.js
 
 // Global variables

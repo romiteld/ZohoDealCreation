@@ -6,7 +6,7 @@
 /* global Office */
 
 // Configuration for API connection - Now using Container Apps deployment
-const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io';
+const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
 const API_KEY = window.API_KEY || ''; // API key should be injected from config.js
 
 Office.onReady(() => {

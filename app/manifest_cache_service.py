@@ -134,7 +134,7 @@ class ManifestCacheService:
             Environment.DEVELOPMENT: "http://localhost:8000",
             Environment.TESTING: "https://well-intake-api-test.azurecontainerapps.io",
             Environment.STAGING: "https://well-intake-api-staging.azurecontainerapps.io",
-            Environment.PRODUCTION: "https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io"
+            Environment.PRODUCTION: "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io"
         }
         
         # Get current production URL from environment variable or use default

@@ -202,16 +202,39 @@ class PostgreSQLClient:
         """Check if similar record already exists for this sender/candidate combo."""
         await self.init_pool()
         
+        # More comprehensive duplicate check - tighten to 30 days and include sender email
         query = """
         SELECT COUNT(*) as count 
         FROM email_processing_history 
-        WHERE sender_email = $1 AND contact_name = $2
-        AND processed_at > NOW() - INTERVAL '30 days'
+        WHERE contact_name = $1
+          AND sender_email = $2
+          AND processed_at > NOW() - INTERVAL '30 days'
         """
         
         async with self.pool.acquire() as conn:
-            row = await conn.fetchrow(query, sender_email, candidate_name)
-            return row['count'] > 0 if row else False
+            row = await conn.fetchrow(query, candidate_name, sender_email)
+            recent_count = row['count'] if row else 0
+            
+            if recent_count > 0:
+                logger.warning(f"Found {recent_count} recent entries for candidate {candidate_name} from {sender_email} in last 30 days")
+                return True
+            
+            # Also check if exact same email was processed recently (within 24 hours) by email hash
+            email_query = """
+            SELECT COUNT(*) as count
+            FROM email_processing_history
+            WHERE sender_email = $1
+              AND processed_at > NOW() - INTERVAL '24 hours'
+            """
+            
+            email_row = await conn.fetchrow(email_query, sender_email)
+            email_count = email_row['count'] if email_row else 0
+            
+            if email_count > 0:
+                logger.warning(f"Same email from {sender_email} processed within last hour")
+                return True
+                
+            return False
     
     async def store_processed_email(self, sender_email: str, candidate_name: str, deal_id: str):
         """Store processed email record for deduplication."""
@@ -782,7 +805,26 @@ class ZohoApiClient(ZohoClient):
             )
             logger.info(f"Contact ID: {contact_id}")
             
-            # 3. Create Deal (always create new deal per business requirements)
+            # 3. Create Deal (avoid duplicates if an identical deal already exists)
+            # Check for an existing deal with the same name first
+            try:
+                existing_deal = await self.check_zoho_deal_duplicate(deal_name)
+            except Exception:
+                existing_deal = None
+            if existing_deal and existing_deal.get("id"):
+                logger.info(f"Found existing deal in Zoho with same name: {existing_deal['id']} - skipping create")
+                deal_id = existing_deal["id"]
+                # Return comprehensive result without re-creating
+                return {
+                    "deal_id": deal_id,
+                    "account_id": account_id,
+                    "contact_id": contact_id,
+                    "deal_name": deal_name,
+                    "primary_email": primary_email,
+                    "was_duplicate": True,
+                    "existing_contact_id": existing_contact.get('id') if existing_contact else None,
+                    "existing_account_id": existing_account.get('id') if existing_account else None
+                }
             logger.info(f"Creating deal: {deal_name}")
             deal_data = {
                 "deal_name": deal_name,
@@ -821,6 +863,29 @@ class ZohoApiClient(ZohoClient):
             logger.error(f"Error in create_or_update_records: {str(e)}")
             raise
     
+    async def check_zoho_deal_duplicate(self, deal_name: str) -> dict:
+        """Check if a deal with this exact name already exists in Zoho CRM.
+        Uses Zoho search API on Deal_Name for exact match.
+        """
+        try:
+            if not deal_name:
+                return None
+            # Exact match on Deal_Name
+            search_query = f"(Deal_Name:equals:{deal_name})"
+            response = self._make_request("GET", f"Deals/search?criteria={search_query}")
+            if response.get("data") and len(response["data"]) > 0:
+                deal = response["data"][0]
+                logger.info(f"Found existing deal in Zoho: {deal.get('Deal_Name')} ({deal.get('id')})")
+                return {
+                    "id": deal.get("id"),
+                    "name": deal.get("Deal_Name"),
+                    "stage": deal.get("Stage")
+                }
+            return None
+        except Exception as e:
+            logger.warning(f"Error checking Zoho deal duplicate: {e}")
+            return None
+
     async def check_zoho_contact_duplicate(self, email: str) -> dict:
         """Check if a contact with this email already exists in Zoho CRM"""
         try:

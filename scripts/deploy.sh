@@ -241,7 +241,7 @@ echo "Waiting for deployment to stabilize (30 seconds)..."
 sleep 30
 
 # Check health endpoint
-HEALTH_URL="https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/health"
+HEALTH_URL="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health"
 echo "Checking health endpoint..."
 HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" $HEALTH_URL)
 
@@ -270,8 +270,8 @@ echo ""
 echo -e "${GREEN}Deployment Summary:${NC}"
 echo "• Image Tag: $IMAGE_TAG"
 echo "• Container App: $CONTAINER_APP_NAME"
-echo "• URL: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io"
-echo "• Manifest: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml"
+echo "• URL: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io"
+echo "• Manifest: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml"
 echo ""
 echo -e "${YELLOW}Next Steps:${NC}"
 echo "1. Clear browser cache in Outlook Web"

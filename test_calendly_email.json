@@ -1,0 +1,5 @@
+{
+  "email_body": "Hi Daniel,\n\nYour interview has been scheduled for the Senior Developer position at Tech Corp in Boston.\n\nPlease join using this link:\nhttps://calendly.com/techcorp/interview?email=candidate@example.com&phone=555-1234&name=Sarah%20Johnson\n\nBest regards,\nHR Team",
+  "sender_email": "hr@techcorp.com",
+  "dry_run": true
+}
