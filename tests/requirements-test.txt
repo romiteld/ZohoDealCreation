@@ -1,0 +1,47 @@
+# Testing Requirements for Azure Infrastructure Migration Tests
+# Install with: pip install -r tests/requirements-test.txt
+
+# Core testing framework
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+pytest-timeout>=2.1.0
+pytest-xdist>=3.3.0  # For parallel test execution
+pytest-cov>=4.1.0  # For coverage reporting
+
+# Azure SDK libraries
+azure-storage-blob>=12.19.0
+azure-servicebus>=7.11.0
+azure-search-documents>=11.4.0
+azure-messaging-webpubsubservice>=1.0.0
+azure-monitor-query>=1.2.0
+azure-identity>=1.15.0
+azure-keyvault-secrets>=4.7.0
+applicationinsights>=0.11.10
+
+# Database libraries  
+psycopg2-binary>=2.9.9  # PostgreSQL client
+redis>=5.0.0  # Redis client
+
+# HTTP and API testing
+requests>=2.31.0
+aiohttp>=3.9.0
+websocket-client>=1.6.0  # For WebSocket testing
+
+# Utilities
+python-dotenv>=1.0.0
+colorama>=0.4.6  # Colored terminal output
+tabulate>=0.9.0  # Table formatting for reports
+faker>=20.0.0  # Generate test data
+
+# JSON and data handling
+jsonschema>=4.19.0
+pydantic>=2.5.0
+
+# Performance testing
+locust>=2.17.0  # Load testing
+memory-profiler>=0.61.0
+
+# Mocking and test utilities
+responses>=0.23.0  # Mock requests
+freezegun>=1.2.0  # Mock datetime
+factory-boy>=3.3.0  # Test fixtures

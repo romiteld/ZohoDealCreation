@@ -1,0 +1,181 @@
+{
+  "deployment_pipeline": {
+    "name": "Well Intake API - Enhanced Deployment with Cache Busting",
+    "version": "1.0.0",
+    "description": "Automated deployment pipeline with Redis cache invalidation, manifest versioning, and Azure Container Apps integration",
+    "created": "2024-09-04",
+    "last_updated": "2024-09-04"
+  },
+  "environments": {
+    "dev": {
+      "resource_group": "TheWell-Dev-East",
+      "container_app_name": "well-intake-api-dev", 
+      "registry_name": "wellintakeregistrydev",
+      "key_vault_name": "well-intake-kv-dev",
+      "redis_name": "well-intake-redis-dev",
+      "app_insights_name": "well-intake-insights-dev",
+      "location": "eastus",
+      "description": "Development environment for testing and validation"
+    },
+    "prod": {
+      "resource_group": "TheWell-Infra-East",
+      "container_app_name": "well-intake-api",
+      "registry_name": "wellintakeregistry", 
+      "key_vault_name": "well-intake-kv",
+      "redis_name": "well-intake-redis",
+      "app_insights_name": "well-intake-insights",
+      "location": "eastus",
+      "description": "Production environment for live operations"
+    }
+  },
+  "deployment_features": {
+    "cache_busting": {
+      "enabled": true,
+      "description": "Automatic Redis cache invalidation during deployment",
+      "patterns": [
+        "manifest:*",
+        "config:*", 
+        "email:pattern:*"
+      ],
+      "warm_cache": true
+    },
+    "manifest_versioning": {
+      "enabled": true,
+      "description": "Automatic Outlook add-in manifest version bumping",
+      "file_path": "addin/manifest.xml",
+      "version_format": "major.minor.patch.build",
+      "auto_increment": "build",
+      "cache_busting_urls": true
+    },
+    "zero_downtime_deployment": {
+      "enabled": true,
+      "description": "Blue-green deployment with traffic shifting",
+      "min_replicas": 2,
+      "max_replicas": 10,
+      "health_check_timeout": 30,
+      "traffic_shift_delay": 60
+    },
+    "rollback_capability": {
+      "enabled": true,
+      "description": "Automatic rollback on deployment failure",
+      "keep_revisions": 3,
+      "auto_rollback": true,
+      "rollback_triggers": [
+        "health_check_failure",
+        "deployment_timeout", 
+        "startup_failure"
+      ]
+    }
+  },
+  "monitoring": {
+    "health_endpoints": [
+      "/health",
+      "/health/ready",
+      "/health/live"
+    ],
+    "metrics": {
+      "deployment_duration": true,
+      "cache_hit_rate": true,
+      "rollback_events": true,
+      "version_bumps": true
+    },
+    "alerts": [
+      "deployment_failure",
+      "rollback_triggered",
+      "health_check_failure",
+      "cache_clear_failure"
+    ]
+  },
+  "cache_strategies": {
+    "email_patterns": {
+      "ttl_hours": 24,
+      "description": "Standard email processing patterns"
+    },
+    "batch_processing": {
+      "ttl_hours": 48,
+      "description": "Batch email processing results"
+    },
+    "common_patterns": {
+      "ttl_days": 90,
+      "description": "Frequently used email templates and patterns"
+    },
+    "deployment_metadata": {
+      "ttl_hours": 168,
+      "description": "Deployment version and status information"
+    }
+  },
+  "security": {
+    "key_vault_integration": true,
+    "managed_identity": true,
+    "rbac_authorization": true,
+    "environment_variables": [
+      "USE_MANAGED_IDENTITY=true",
+      "USE_LANGGRAPH=true",
+      "OPENAI_MODEL=gpt-4o-mini"
+    ]
+  },
+  "prerequisites": {
+    "azure_cli": ">=2.50.0",
+    "docker": ">=20.10.0",
+    "python": ">=3.8.0",
+    "azure_login": "required",
+    "virtual_environment": "recommended"
+  },
+  "usage_examples": {
+    "simple_deployment": {
+      "command": "./deploy.sh",
+      "description": "Deploy to production with automatic cache busting"
+    },
+    "environment_specific": {
+      "command": "./deploy.sh dev deploy",
+      "description": "Deploy to development environment"
+    },
+    "force_version_bump": {
+      "command": "python scripts/deploy_with_cache_bust.py --environment=prod --force-version-bump",
+      "description": "Force manifest version bump even without changes"
+    },
+    "rollback": {
+      "command": "./deploy.sh prod rollback",
+      "description": "Rollback to previous version"
+    },
+    "specific_rollback": {
+      "command": "python scripts/deploy_with_cache_bust.py --rollback=well-intake-api--v1300120241201",
+      "description": "Rollback to specific revision"
+    },
+    "deployment_status": {
+      "command": "./deploy.sh prod status",
+      "description": "Check current deployment status and health"
+    }
+  },
+  "troubleshooting": {
+    "common_issues": {
+      "cache_connection_failed": {
+        "description": "Redis connection failure during cache operations",
+        "solution": "Check AZURE_REDIS_CONNECTION_STRING in .env.local",
+        "impact": "Cache operations skipped, deployment continues"
+      },
+      "manifest_backup_failed": {
+        "description": "Cannot create manifest backup before version bump",
+        "solution": "Check file permissions and disk space",
+        "impact": "Version bump aborted, deployment stopped"
+      },
+      "health_check_timeout": {
+        "description": "Deployment health check fails after 30 seconds",
+        "solution": "Check application logs and resource allocation",
+        "impact": "Automatic rollback triggered"
+      },
+      "azure_login_required": {
+        "description": "Not authenticated with Azure CLI",
+        "solution": "Run 'az login' and retry deployment",
+        "impact": "Deployment cannot proceed"
+      }
+    }
+  },
+  "logging": {
+    "file_path": "deployment.log",
+    "level": "INFO",
+    "format": "%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    "rotation": false,
+    "retention_days": 30
+  }
+}

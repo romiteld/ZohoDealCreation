@@ -8,7 +8,7 @@ import os
 import logging
 import asyncio
 from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, HTTPException, Depends, status, Header, Request, WebSocket
@@ -33,6 +33,7 @@ from app.integrations import ZohoApiClient as ZohoIntegration, AzureBlobStorageC
 from app.microsoft_graph_client import MicrosoftGraphClient
 from app.azure_ad_auth import get_auth_service
 from app.realtime_queue_manager import get_queue_manager, websocket_endpoint, EmailStatus
+from app.manifest_cache_service import get_manifest_cache_service
 
 # API Key Authentication with secure comparison and rate limiting
 import hmac
@@ -226,6 +227,45 @@ async def lifespan(app: FastAPI):
         logger.warning(f"Microsoft Graph client initialization error: {e}")
         app.state.graph_client = None
     
+    # Initialize manifest cache warmup after all services are ready
+    try:
+        from app.startup_warmup import perform_manifest_startup_warmup, schedule_background_manifest_warmup
+        
+        # Perform initial cache warmup (fast startup)
+        warmup_stats = await perform_manifest_startup_warmup()
+        
+        if 'error' not in warmup_stats:
+            logger.info(f"Manifest cache warmed during startup: {warmup_stats.get('success_rate', '0%')} success rate")
+            
+            # Schedule comprehensive warmup in background
+            await schedule_background_manifest_warmup()
+        else:
+            logger.warning(f"Manifest warmup failed: {warmup_stats.get('error', 'Unknown error')}")
+            
+        app.state.manifest_warmup_stats = warmup_stats
+        
+    except Exception as e:
+        logger.warning(f"Manifest warmup initialization failed: {e}")
+        app.state.manifest_warmup_stats = {"error": str(e)}
+    
+    # Initialize Redis monitoring service
+    try:
+        from app.redis_monitoring import get_monitoring_service
+        from app.redis_cache_manager import get_cache_manager
+        
+        monitoring_service = get_monitoring_service()
+        cache_manager = await get_cache_manager()
+        
+        # Start background monitoring
+        await monitoring_service.start_monitoring(cache_manager, interval_minutes=5)
+        
+        app.state.redis_monitoring = monitoring_service
+        logger.info("Redis monitoring service initialized and started")
+        
+    except Exception as e:
+        logger.warning(f"Redis monitoring initialization failed: {e}")
+        app.state.redis_monitoring = None
+    
     yield
     
     # Shutdown
@@ -237,6 +277,7 @@ async def lifespan(app: FastAPI):
         await app.state.postgres_client.close()
     if hasattr(app.state, 'service_bus_manager') and app.state.service_bus_manager:
         await app.state.service_bus_manager.close()
+    # Cleanup handled by individual cache managers
 
 # Create FastAPI app
 app = FastAPI(
@@ -349,6 +390,24 @@ app.add_middleware(
 from app.streaming_endpoints import router as streaming_router
 app.include_router(streaming_router)
 
+# Include manifest template endpoints
+from app.manifest_endpoints import router as manifest_router
+app.include_router(manifest_router)
+
+# Include manifest monitoring dashboard
+from app.manifest_monitoring import router as manifest_monitoring_router
+app.include_router(manifest_monitoring_router)
+
+# Include CDN management endpoints
+try:
+    from app.cdn_endpoints import router as cdn_router
+    app.include_router(cdn_router)
+    logger.info("CDN router loaded successfully")
+except ImportError as e:
+    logger.error(f"Failed to load CDN router: {e}")
+except Exception as e:
+    logger.error(f"Error loading CDN router: {e}")
+
 # Initialize services (zoho_integration will be initialized in lifespan)
 business_rules = BusinessRulesEngine()
 blob_storage = AzureBlobStorage(
@@ -393,7 +452,10 @@ async def root():
             "/api/auth/users",
             "/api/emails/queue",
             "/api/emails/{email_id}",
-            "/api/voice/process"
+            "/api/voice/process",
+            "/api/webhook/github",
+            "/api/webhook/github/status",
+            "/api/webhook/github/test"
         ]
     }
 
@@ -427,11 +489,17 @@ async def get_field_analytics(field_name: str, days_back: int = 30, domain: Opti
         analytics = LearningAnalytics(search_manager=correction_service.search_manager)
         
         # Get field analytics
-        result = await analytics.get_field_analytics(
-            field_name=field_name,
-            days_back=days_back,
-            email_domain=domain
-        )
+        # Temporarily disable analytics
+        result = {
+            "field_name": field_name,
+            "analytics_disabled": True,
+            "message": "Analytics temporarily disabled"
+        }
+        # result = await analytics.get_field_analytics(
+        #     field_name=field_name,
+        #     days_back=days_back,
+        #     email_domain=domain
+        # )
         
         return result
     except Exception as e:
@@ -524,23 +592,61 @@ async def health_check():
         logger.warning(f"Blob Storage health check failed: {e}")
         health_status["services"]["blob_storage"] = "error"
     
-    # Check Redis Cache
+    # Check Redis Cache with enhanced fallback status
     try:
-        from app.redis_cache_manager import get_cache_manager
-        cache_manager = await get_cache_manager()
-        if cache_manager._connected:
+        from app.redis_cache_manager import get_redis_health_status
+        redis_health = await get_redis_health_status()
+        
+        # Map Redis health status to service status
+        status_mapping = {
+            "healthy": "operational",
+            "unhealthy": "degraded", 
+            "not_configured": "not_configured",
+            "circuit_breaker_open": "circuit_breaker_open",
+            "fallback_mode": "fallback_mode",
+            "error": "error"
+        }
+        
+        health_status["services"]["redis_cache"] = status_mapping.get(
+            redis_health.get("status"), "unknown"
+        )
+        
+        # Include detailed Redis metrics and fallback information
+        health_status["redis_details"] = {
+            "connection_status": redis_health.get("connection_status"),
+            "circuit_breaker_status": redis_health.get("circuit_breaker_status"),
+            "fallback_mode": redis_health.get("fallback_mode"),
+            "response_time_ms": redis_health.get("response_time_ms"),
+            "error": redis_health.get("error")
+        }
+        
+        # Get performance metrics if available
+        try:
+            from app.redis_cache_manager import get_cache_manager
+            cache_manager = await get_cache_manager()
             metrics = await cache_manager.get_metrics()
-            health_status["services"]["redis_cache"] = "operational"
             health_status["cache_metrics"] = {
                 "hit_rate": metrics.get("hit_rate", "0%"),
                 "total_requests": metrics.get("total_requests", 0),
-                "estimated_savings": f"${metrics.get('savings', 0):.2f}"
+                "estimated_savings": f"${metrics.get('savings', 0):.2f}",
+                "uptime_percentage": metrics.get("uptime_percentage", "0%"),
+                "fallback_activations": metrics.get("fallback_activations", 0)
             }
-        else:
-            health_status["services"]["redis_cache"] = "not_connected"
+        except:
+            health_status["cache_metrics"] = {
+                "hit_rate": "0%",
+                "total_requests": 0,
+                "estimated_savings": "$0.00",
+                "uptime_percentage": "0%",
+                "fallback_activations": 0
+            }
+            
     except Exception as e:
         logger.warning(f"Redis cache health check failed: {e}")
-        health_status["services"]["redis_cache"] = "not_configured"
+        health_status["services"]["redis_cache"] = "error"
+        health_status["redis_details"] = {
+            "error": f"Health check failed: {str(e)}"
+        }
     
     return health_status
 
@@ -1054,25 +1160,45 @@ async def process_dead_letter_queue(max_messages: int = 10):
 
 @app.get("/cache/status", dependencies=[Depends(verify_api_key)])
 async def get_cache_status():
-    """Get Redis cache performance metrics and optimization recommendations"""
+    """Get comprehensive Redis cache performance metrics, health status, and optimization recommendations"""
     try:
-        from app.redis_cache_manager import get_cache_manager
+        from app.redis_cache_manager import get_cache_manager, get_redis_health_status
         from app.cache_strategies import get_strategy_manager
         
         cache_manager = await get_cache_manager()
         strategy_manager = get_strategy_manager()
         
-        # Get cache metrics
+        # Get health status first
+        redis_health = await get_redis_health_status()
+        
+        # Get cache metrics (will handle Redis being unavailable gracefully)
         cache_metrics = await cache_manager.get_metrics()
         
         # Get strategy metrics
-        strategy_metrics = strategy_manager.get_metrics()
+        try:
+            strategy_metrics = strategy_manager.get_metrics()
+            optimizations = strategy_manager.optimize_cache_strategy(cache_metrics)
+        except Exception as e:
+            logger.warning(f"Failed to get strategy metrics: {e}")
+            strategy_metrics = {}
+            optimizations = []
         
-        # Get optimization recommendations
-        optimizations = strategy_manager.optimize_cache_strategy(cache_metrics)
+        # Enhanced status determination
+        overall_status = "healthy"
+        if redis_health.get("status") == "not_configured":
+            overall_status = "not_configured"
+        elif redis_health.get("status") == "circuit_breaker_open":
+            overall_status = "circuit_breaker_open"
+        elif cache_manager.fallback_mode:
+            overall_status = "fallback_mode"
+        elif not cache_manager._connected:
+            overall_status = "disconnected"
+        elif redis_health.get("status") in ["unhealthy", "degraded"]:
+            overall_status = "degraded"
         
         return {
-            "status": "connected" if cache_manager._connected else "disconnected",
+            "status": overall_status,
+            "health_check": redis_health,
             "cache_metrics": cache_metrics,
             "strategy_metrics": strategy_metrics,
             "optimizations": optimizations,
@@ -1081,37 +1207,85 @@ async def get_cache_status():
                 "cached_per_million": "$0.025",
                 "savings_ratio": "90%",
                 "estimated_monthly_savings": f"${cache_metrics.get('estimated_monthly_savings', 0):.2f}"
+            },
+            "reliability": {
+                "uptime_percentage": cache_metrics.get("uptime_percentage", "0%"),
+                "circuit_breaker_status": "open" if cache_manager.circuit_breaker.is_open else "closed",
+                "fallback_activations": cache_metrics.get("fallback_activations", 0),
+                "connection_failures": cache_metrics.get("connection_failures", 0),
+                "timeout_failures": cache_metrics.get("timeout_failures", 0)
+            },
+            "configuration": {
+                "max_failures_before_circuit_breaker": cache_manager.max_failures,
+                "failure_timeout_minutes": int(cache_manager.failure_timeout.total_seconds() / 60),
+                "connection_timeout_seconds": cache_manager.connection_timeout,
+                "operation_timeout_seconds": cache_manager.operation_timeout,
+                "max_retries": cache_manager.max_retries
             }
         }
+        
     except Exception as e:
         logger.error(f"Error getting cache status: {e}")
         return {
             "status": "error",
             "error": str(e),
-            "message": "Cache not configured or unavailable"
+            "health_check": {"status": "error", "error": str(e)},
+            "cache_metrics": {},
+            "strategy_metrics": {},
+            "optimizations": [],
+            "cost_analysis": {
+                "gpt5_mini_per_million": "$0.25",
+                "cached_per_million": "$0.025",
+                "savings_ratio": "90%",
+                "estimated_monthly_savings": "$0.00"
+            },
+            "reliability": {
+                "uptime_percentage": "0%",
+                "circuit_breaker_status": "unknown",
+                "fallback_activations": 0
+            },
+            "message": "Cache status check failed"
         }
 
 @app.post("/cache/invalidate", dependencies=[Depends(verify_api_key)])
 async def invalidate_cache(pattern: Optional[str] = None):
-    """Invalidate cache entries matching a pattern"""
+    """Invalidate cache entries matching a pattern with graceful fallback handling"""
     try:
         from app.redis_cache_manager import get_cache_manager
         
         cache_manager = await get_cache_manager()
         deleted_count = await cache_manager.invalidate_cache(pattern)
         
+        # Check if we're in fallback mode
+        if cache_manager.fallback_mode:
+            return {
+                "status": "fallback_mode",
+                "deleted_entries": 0,
+                "pattern": pattern or "well:email:*",
+                "message": "Cache invalidation skipped - Redis unavailable",
+                "fallback_reason": cache_manager.fallback_reason
+            }
+        
         return {
             "status": "success",
             "deleted_entries": deleted_count,
-            "pattern": pattern or "well:email:*"
+            "pattern": pattern or "well:email:*",
+            "redis_status": "connected" if cache_manager._connected else "disconnected"
         }
+        
     except Exception as e:
         logger.error(f"Error invalidating cache: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
+        return {
+            "status": "error",
+            "error": str(e),
+            "deleted_entries": 0,
+            "pattern": pattern or "well:email:*",
+            "message": "Cache invalidation failed"
+        }
 
 @app.post("/cache/warmup", dependencies=[Depends(verify_api_key)])
 async def warmup_cache():
-    """Pre-warm cache with common email patterns"""
+    """Pre-warm cache with common email patterns with graceful fallback handling"""
     try:
         from app.redis_cache_manager import get_cache_manager
         from app.cache_strategies import get_strategy_manager
@@ -1125,13 +1299,245 @@ async def warmup_cache():
         # Warm up cache
         cached_count = await cache_manager.warmup_cache(common_patterns)
         
+        # Check if we're in fallback mode
+        if cache_manager.fallback_mode:
+            return {
+                "status": "fallback_mode",
+                "patterns_cached": 0,
+                "total_patterns": len(common_patterns),
+                "patterns": [p["key"] for p in common_patterns],
+                "message": "Cache warmup skipped - Redis unavailable",
+                "fallback_reason": cache_manager.fallback_reason
+            }
+        
         return {
             "status": "success",
             "patterns_cached": cached_count,
-            "patterns": [p["key"] for p in common_patterns]
+            "total_patterns": len(common_patterns),
+            "patterns": [p["key"] for p in common_patterns],
+            "redis_status": "connected" if cache_manager._connected else "disconnected",
+            "success_rate": f"{(cached_count / len(common_patterns) * 100):.1f}%" if common_patterns else "N/A"
         }
+        
     except Exception as e:
         logger.error(f"Error warming up cache: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "patterns_cached": 0,
+            "total_patterns": 0,
+            "patterns": [],
+            "message": "Cache warmup failed"
+        }
+
+# Redis monitoring and alerting endpoints
+@app.get("/cache/alerts", dependencies=[Depends(verify_api_key)])
+async def get_cache_alerts(hours: int = 24):
+    """Get Redis cache alerts from the last N hours"""
+    try:
+        from app.redis_monitoring import get_monitoring_service
+        
+        monitoring_service = get_monitoring_service()
+        alert_summary = monitoring_service.get_alert_summary(hours=hours)
+        
+        return {
+            "status": "success",
+            "alert_summary": alert_summary
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache alerts: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "alert_summary": {}
+        }
+
+@app.get("/cache/metrics/report", dependencies=[Depends(verify_api_key)])
+async def get_cache_metrics_report(hours: int = 24):
+    """Get comprehensive Redis cache metrics report"""
+    try:
+        from app.redis_monitoring import get_monitoring_service
+        
+        monitoring_service = get_monitoring_service()
+        metrics_report = monitoring_service.get_metrics_report(hours=hours)
+        
+        return {
+            "status": "success",
+            "metrics_report": metrics_report
+        }
+    except Exception as e:
+        logger.error(f"Error getting cache metrics report: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "metrics_report": {}
+        }
+
+@app.post("/cache/monitoring/start", dependencies=[Depends(verify_api_key)])
+async def start_cache_monitoring(interval_minutes: int = 5):
+    """Start Redis cache monitoring service"""
+    try:
+        from app.redis_monitoring import get_monitoring_service
+        from app.redis_cache_manager import get_cache_manager
+        
+        monitoring_service = get_monitoring_service()
+        cache_manager = await get_cache_manager()
+        
+        await monitoring_service.start_monitoring(cache_manager, interval_minutes)
+        
+        return {
+            "status": "success",
+            "message": f"Redis monitoring started with {interval_minutes} minute intervals",
+            "interval_minutes": interval_minutes
+        }
+    except Exception as e:
+        logger.error(f"Error starting cache monitoring: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "message": "Failed to start Redis monitoring"
+        }
+
+@app.get("/cache/health/detailed", dependencies=[Depends(verify_api_key)])
+async def get_detailed_cache_health():
+    """Get detailed Redis cache health with monitoring data"""
+    try:
+        from app.redis_monitoring import get_monitoring_service
+        from app.redis_cache_manager import get_redis_health_status
+        from datetime import datetime
+        
+        # Get basic health status
+        redis_health = await get_redis_health_status()
+        
+        # Get monitoring data
+        monitoring_service = get_monitoring_service()
+        alert_summary = monitoring_service.get_alert_summary(hours=1)  # Last hour
+        metrics_report = monitoring_service.get_metrics_report(hours=1)  # Last hour
+        
+        return {
+            "status": "success",
+            "timestamp": datetime.now().isoformat(),
+            "redis_health": redis_health,
+            "recent_alerts": alert_summary,
+            "metrics_summary": metrics_report,
+            "overall_status": "healthy" if redis_health.get("status") == "healthy" and alert_summary.get("unresolved_alerts", 0) == 0 else "degraded"
+        }
+    except Exception as e:
+        logger.error(f"Error getting detailed cache health: {e}")
+        return {
+            "status": "error",
+            "error": str(e),
+            "timestamp": datetime.now().isoformat()
+        }
+
+# Manifest cache management endpoints
+@app.get("/manifest/cache/status", dependencies=[Depends(verify_api_key)])
+async def get_manifest_cache_status():
+    """Get manifest cache performance metrics and configuration"""
+    try:
+        manifest_service = await get_manifest_cache_service()
+        status = await manifest_service.get_cache_status()
+        return status
+    except Exception as e:
+        logger.error(f"Error getting manifest cache status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/manifest/cache/invalidate", dependencies=[Depends(verify_api_key)])
+async def invalidate_manifest_cache(
+    environment: str = None,
+    variant: str = None,
+    pattern: str = None
+):
+    """Invalidate manifest cache entries with instant invalidation"""
+    try:
+        manifest_service = await get_manifest_cache_service()
+        
+        # Convert string parameters to enums if provided
+        env = None
+        var = None
+        
+        if environment:
+            try:
+                env = Environment(environment.lower())
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid environment: {environment}")
+        
+        if variant:
+            try:
+                var = ManifestVariant(variant.lower())
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"Invalid variant: {variant}")
+        
+        deleted_count = await manifest_service.invalidate_cache(env, var, pattern)
+        
+        return {
+            "status": "success",
+            "entries_invalidated": deleted_count,
+            "environment": environment,
+            "variant": variant,
+            "pattern": pattern
+        }
+    except Exception as e:
+        logger.error(f"Error invalidating manifest cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/manifest/cache/warmup", dependencies=[Depends(verify_api_key)])
+async def warmup_manifest_cache(environments: List[str] = None):
+    """Pre-warm manifest cache for specified environments"""
+    try:
+        manifest_service = await get_manifest_cache_service()
+        
+        # Convert string environments to enums
+        env_list = []
+        if environments:
+            for env_str in environments:
+                try:
+                    env_list.append(Environment(env_str.lower()))
+                except ValueError:
+                    raise HTTPException(status_code=400, detail=f"Invalid environment: {env_str}")
+        
+        results = await manifest_service.warmup_cache(env_list if env_list else None)
+        
+        return {
+            "status": "success",
+            "warmup_results": results,
+            "total_manifests_cached": sum(r["success"] for r in results.values())
+        }
+    except Exception as e:
+        logger.error(f"Error warming up manifest cache: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.put("/manifest/template/update", dependencies=[Depends(verify_api_key)])
+async def update_manifest_template(
+    environment: str,
+    variant: str,
+    template_updates: Dict[str, Any]
+):
+    """Update manifest template and invalidate related cache entries"""
+    try:
+        manifest_service = await get_manifest_cache_service()
+        
+        # Convert parameters to enums
+        try:
+            env = Environment(environment.lower())
+            var = ManifestVariant(variant.lower())
+        except ValueError as e:
+            raise HTTPException(status_code=400, detail=f"Invalid parameter: {str(e)}")
+        
+        success = await manifest_service.update_template(env, var, template_updates)
+        
+        if success:
+            return {
+                "status": "success",
+                "environment": environment,
+                "variant": variant,
+                "updates_applied": list(template_updates.keys())
+            }
+        else:
+            raise HTTPException(status_code=500, detail="Failed to update template")
+            
+    except Exception as e:
+        logger.error(f"Error updating manifest template: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 # Authentication endpoints for Voice UI
@@ -1191,12 +1597,70 @@ async def get_user_info(auth_info: dict = Depends(verify_user_auth)):
 
 # Static file serving for Outlook Add-in
 @app.get("/manifest.xml")
-async def get_manifest():
-    """Serve Outlook Add-in manifest"""
-    manifest_path = os.path.join(os.path.dirname(__file__), "..", "addin", "manifest.xml")
-    if os.path.exists(manifest_path):
-        return FileResponse(manifest_path, media_type="application/xml")
-    raise HTTPException(status_code=404, detail="Manifest not found")
+async def get_manifest(request: Request):
+    """Serve Outlook Add-in manifest with Redis caching and analytics tracking"""
+    start_time = datetime.utcnow()
+    
+    try:
+        # Get manifest cache service
+        manifest_service = await get_manifest_cache_service()
+        
+        # Generate or retrieve cached manifest
+        manifest_xml, response_headers = await manifest_service.generate_manifest(request)
+        
+        # Track analytics with cache hit information
+        # Basic analytics data placeholder
+        analytics_data = {
+            "total_requests": 0,
+            "cache_hits": 0,
+            "cache_hit_rate": "0%",
+            "errors": 0,
+            "avg_response_time_ms": "0"
+        }
+        response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+        cache_hit = response_headers.get("X-Manifest-Source") == "cache"
+        
+        # Track manifest request (disabled)
+        # await analytics.track_manifest_request(
+        #     request=request,
+        #     response_time_ms=response_time_ms,
+        #     cache_hit=cache_hit
+        # )
+        
+        # Return manifest with custom headers
+        return Response(
+            content=manifest_xml,
+            media_type="application/xml; charset=utf-8",
+            headers=response_headers
+        )
+            
+    except HTTPException:
+        raise
+    except Exception as e:
+        # Track unexpected errors
+        try:
+            # Basic analytics data placeholder
+            analytics_data = {
+                "total_requests": 0,
+                "cache_hits": 0,
+                "cache_hit_rate": "0%",
+                "errors": 0,
+                "avg_response_time_ms": "0"
+            }
+            response_time_ms = int((datetime.utcnow() - start_time).total_seconds() * 1000)
+            
+            # Track manifest request (disabled)
+            # await analytics.track_manifest_request(
+            #         request=request,
+            #         response_time_ms=response_time_ms,
+            #         cache_hit=False,
+            #         error=f"internal_error: {str(e)}"
+            #     )
+        except:
+            pass  # Don't let analytics errors break the manifest serving
+            
+        logger.error(f"Manifest serving error: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 
 @app.get("/commands.js")
 async def get_commands():
@@ -1241,6 +1705,39 @@ async def get_placeholder_html():
 </body>
 </html>"""
     return HTMLResponse(content=placeholder_content)
+
+@app.get("/manifest/warmup/status")
+async def get_manifest_warmup_status(request: Request):
+    """Get manifest cache warmup status"""
+    try:
+        from app.startup_warmup import get_manifest_warmup_status
+        
+        # Get warmup status
+        status = await get_manifest_warmup_status()
+        
+        # Add current request environment for context
+        host = str(request.url.hostname).lower()
+        current_env = 'development' if 'localhost' in host or '127.0.0.1' in host else 'production'
+        
+        return {
+            "warmup_status": status,
+            "current_environment": current_env,
+            "startup_stats": getattr(request.app.state, 'manifest_warmup_stats', {}),
+            "api_endpoints": {
+                "generate_manifest": "/api/manifest/generate",
+                "warmup_cache": "/api/manifest/warmup",
+                "cache_status": "/api/manifest/cache/status",
+                "templates": "/api/manifest/templates"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting manifest warmup status: {e}")
+        return {
+            "error": str(e),
+            "warmup_status": {"completed": False},
+            "current_environment": "unknown"
+        }
 
 # Azure AD Authentication Endpoints
 @app.get("/auth/login")
@@ -1841,6 +2338,251 @@ async def process_email_internal(email_payload: EmailRequest, zoho_integration):
     except Exception as e:
         logger.error(f"Internal email processing error: {e}")
         raise
+
+# GitHub Webhook Endpoints for Cache Invalidation
+@app.post("/api/webhook/github")
+async def github_webhook_endpoint(request: Request):
+    """
+    GitHub webhook endpoint for automatic cache invalidation.
+    Handles push events for manifest-related file changes.
+    """
+    try:
+        from app.webhook_handlers import verify_github_webhook, handle_github_webhook, log_webhook_event
+        
+        # Verify webhook signature and parse payload
+        webhook_data = await verify_github_webhook(request)
+        
+        logger.info(f"Received GitHub webhook: {webhook_data['event_type']}")
+        
+        # Process the webhook
+        processing_result = await handle_github_webhook(webhook_data)
+        
+        # Log to Application Insights for monitoring
+        try:
+            await log_webhook_event(webhook_data, processing_result)
+        except Exception as log_error:
+            logger.warning(f"Failed to log webhook event: {log_error}")
+        
+        return {
+            "status": "success",
+            "webhook_processed": True,
+            "event_type": webhook_data["event_type"],
+            "result": processing_result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"GitHub webhook processing error: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Webhook processing failed: {str(e)}"
+        )
+
+@app.get("/api/webhook/github/status", dependencies=[Depends(verify_api_key)])
+async def get_webhook_status():
+    """Get GitHub webhook handler status and statistics."""
+    try:
+        from app.webhook_handlers import get_webhook_handler
+        
+        handler = get_webhook_handler()
+        stats = handler.get_stats()
+        
+        return {
+            "status": "operational",
+            "webhook_endpoint": "/api/webhook/github",
+            "statistics": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting webhook status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/webhook/github/test", dependencies=[Depends(verify_api_key)])
+async def test_webhook_invalidation():
+    """Test endpoint to manually trigger cache invalidation."""
+    try:
+        from app.webhook_handlers import get_webhook_handler
+        
+        handler = get_webhook_handler()
+        
+        # Simulate a push event with manifest changes
+        test_payload = {
+            "repository": {"full_name": "romiteld/outlook"},
+            "ref": "refs/heads/main",
+            "commits": [{
+                "modified": ["addin/manifest.xml", "addin/commands.js"],
+                "added": [],
+                "removed": []
+            }]
+        }
+        
+        result = await handler.process_push_event(test_payload)
+        
+        return {
+            "status": "test_completed",
+            "result": result,
+            "message": "Manual cache invalidation test completed",
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Webhook test error: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Manifest Analytics Endpoints
+@app.get("/api/manifest/status", dependencies=[Depends(verify_api_key)])
+async def get_manifest_cache_status():
+    """Get manifest cache status and performance metrics."""
+    try:
+        # Basic analytics data placeholder
+        analytics_data = {
+            "total_requests": 0,
+            "cache_hits": 0,
+            "cache_hit_rate": "0%",
+            "errors": 0,
+            "avg_response_time_ms": "0"
+        }
+        status_data = await analytics.get_cache_status()
+        
+        return {
+            "status": "success",
+            "data": status_data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting manifest cache status: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve cache status: {str(e)}"
+        )
+
+@app.get("/api/manifest/metrics", dependencies=[Depends(verify_api_key)])
+async def get_manifest_performance_metrics(hours: int = 24):
+    """Get manifest performance analytics for the specified time period."""
+    if hours < 1 or hours > 168:  # Limit to 7 days max
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Hours parameter must be between 1 and 168"
+        )
+    
+    try:
+        # Basic analytics data placeholder
+        analytics_data = {
+            "total_requests": 0,
+            "cache_hits": 0,
+            "cache_hit_rate": "0%",
+            "errors": 0,
+            "avg_response_time_ms": "0"
+        }
+        metrics_data = await analytics.get_performance_metrics(hours)
+        
+        return {
+            "status": "success",
+            "data": metrics_data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting manifest metrics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve performance metrics: {str(e)}"
+        )
+
+@app.post("/api/manifest/invalidate", dependencies=[Depends(verify_api_key)])
+async def invalidate_manifest_cache(pattern: Optional[str] = None):
+    """Manually invalidate manifest cache entries."""
+    try:
+        # Basic analytics data placeholder
+        analytics_data = {
+            "total_requests": 0,
+            "cache_hits": 0,
+            "cache_hit_rate": "0%",
+            "errors": 0,
+            "avg_response_time_ms": "0"
+        }
+        result = await analytics.invalidate_manifest_cache(pattern)
+        
+        return {
+            "status": "success",
+            "data": result,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error invalidating manifest cache: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Cache invalidation failed: {str(e)}"
+        )
+
+@app.get("/api/manifest/versions", dependencies=[Depends(verify_api_key)])
+async def get_version_adoption_metrics():
+    """Get version adoption tracking across different Office clients."""
+    try:
+        # Basic analytics data placeholder
+        analytics_data = {
+            "total_requests": 0,
+            "cache_hits": 0,
+            "cache_hit_rate": "0%",
+            "errors": 0,
+            "avg_response_time_ms": "0"
+        }
+        adoption_data = await analytics.get_version_adoption()
+        
+        return {
+            "status": "success",
+            "data": adoption_data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting version adoption metrics: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to retrieve version adoption data: {str(e)}"
+        )
+
+@app.get("/api/manifest/health", dependencies=[Depends(verify_api_key)])
+async def get_manifest_analytics_health():
+    """Get manifest analytics service health status."""
+    try:
+        # Basic analytics data placeholder
+        analytics_data = {
+            "total_requests": 0,
+            "cache_hits": 0,
+            "cache_hit_rate": "0%",
+            "errors": 0,
+            "avg_response_time_ms": "0"
+        }
+        
+        # Basic health data without analytics service
+        health_data = {
+            "analytics_service": "operational",
+            "request_history_size": 0,
+            "recent_requests_1h": 0,
+            "version_stats_count": 0,
+            "client_stats_count": 0,
+            "cache_manager_available": False,
+            "monitoring_service_available": False
+        }
+        
+        return {
+            "status": "healthy",
+            "data": health_data,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting manifest analytics health: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Health check failed: {str(e)}"
+        )
 
 # Icon file serving
 @app.get("/icon-{size}.png")

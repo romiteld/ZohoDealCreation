@@ -74,3 +74,13 @@ tiktoken>=0.7,<1
 
 # System monitoring
 psutil==5.9.6
+
+# User agent parsing for analytics
+user-agents==2.2.0
+
+# Template engine for manifest generation
+jinja2>=3.1.2
+
+# Azure Front Door SDK for CDN management
+azure-mgmt-frontdoor==1.1.0
+azure-mgmt-cdn==13.1.1

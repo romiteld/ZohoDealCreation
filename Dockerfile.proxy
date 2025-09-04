@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+# Install nginx
+RUN apt-get update && apt-get install -y nginx && rm -rf /var/lib/apt/lists/*
+
+# Copy application code
+WORKDIR /app
+COPY requirements.txt .
+RUN pip install --no-cache-dir -r requirements.txt
+
+COPY app/ app/
+COPY static/ static/
+COPY nginx-proxy.conf /etc/nginx/sites-available/default
+COPY start-with-proxy.sh /start-with-proxy.sh
+RUN chmod +x /start-with-proxy.sh
+
+# Expose port 8000 (nginx will listen here)
+EXPOSE 8000
+
+# Start both nginx and the app
+CMD ["/start-with-proxy.sh"]
