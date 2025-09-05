@@ -90,22 +90,29 @@ async function handleFile(file) {
     showStatus('Processing email file...', 'loading');
 
     try {
-        // Read file content - for now we'll try to extract text from both .msg and .eml
-        const emailContent = await readFileAsText(file);
+        let senderEmail, subject, bodyContent;
         
-        // Extract basic info from the file content
-        const senderEmail = extractEmailFromFile(emailContent) || 'unknown@example.com';
-        const subject = extractSubjectFromFile(emailContent) || file.name.replace(/\.(msg|eml)$/i, '');
-        
-        // For .msg files, try to extract the actual email body
-        let bodyContent = emailContent;
         if (file.name.endsWith('.msg')) {
-            // Try to extract readable text from .msg file
-            // MSG files contain readable text mixed with binary, we can extract it
-            const textMatch = emailContent.match(/[\x20-\x7E\s]{20,}/g);
-            if (textMatch) {
-                bodyContent = textMatch.join(' ');
+            // Use msg.reader library to properly parse .msg files
+            const arrayBuffer = await file.arrayBuffer();
+            const msgReader = new MSGReader(arrayBuffer);
+            const fileData = msgReader.getFileData();
+            
+            senderEmail = fileData.senderEmail || 'unknown@example.com';
+            subject = fileData.subject || file.name.replace(/\.msg$/i, '');
+            bodyContent = fileData.body || fileData.bodyHTML || `Email from file: ${file.name}`;
+            
+            // Extract URLs from parsed content
+            if (bodyContent) {
+                extractUrlsFromEmail(bodyContent);
             }
+        } else {
+            // .eml files can be read as text
+            const emailContent = await readFileAsText(file);
+            senderEmail = extractEmailFromFile(emailContent) || 'unknown@example.com';
+            subject = extractSubjectFromFile(emailContent) || file.name.replace(/\.eml$/i, '');
+            bodyContent = emailContent;
+            extractUrlsFromEmail(emailContent);
         }
         
         const response = await fetch(`${API_BASE_URL}/intake/email`, {
@@ -132,17 +139,12 @@ async function handleFile(file) {
         // Populate form
         populateForm(extractedData);
         
-        // Try to extract URLs from the original content
-        extractUrlsFromEmail(bodyContent);
-        
         // Override with extracted data URLs if available
-        if (extractedData) {
-            if (extractedData.linkedin_url) {
-                document.getElementById('linkedin_url').value = extractedData.linkedin_url;
-            }
-            if (extractedData.calendly_url) {
-                document.getElementById('calendly_url').value = extractedData.calendly_url;
-            }
+        if (extractedData && extractedData.linkedin_url) {
+            document.getElementById('linkedin_url').value = extractedData.linkedin_url;
+        }
+        if (extractedData && extractedData.calendly_url) {
+            document.getElementById('calendly_url').value = extractedData.calendly_url;
         }
         
         showStatus('Data extracted successfully! Please review and edit as needed.', 'success');
