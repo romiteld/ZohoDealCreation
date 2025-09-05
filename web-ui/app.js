@@ -222,7 +222,11 @@ async function handleFile(file) {
         }
 
         const data = await response.json();
+        console.log('API Response:', data);
+        
+        // The response has the extracted data in the 'extracted' field
         extractedData = data.extracted || data;
+        console.log('Extracted data to populate:', extractedData);
         
         // Populate form with AI-extracted data
         populateForm(extractedData);
@@ -370,22 +374,41 @@ function updateFormWithEnrichedData(enrichedData) {
 
 // Populate form with extracted data
 function populateForm(data) {
+    console.log('Populating form with data:', data);
+    
+    // Handle multiple candidates - take the first one if semicolon-separated
+    let candidateName = data.candidate_name || '';
+    if (candidateName.includes(';')) {
+        candidateName = candidateName.split(';')[0].trim();
+    }
+    
     // Split candidate_name into first and last
-    if (data.candidate_name) {
-        const nameParts = data.candidate_name.split(' ');
+    if (candidateName) {
+        const nameParts = candidateName.split(' ');
         document.getElementById('contact_first').value = nameParts[0] || '';
         document.getElementById('contact_last').value = nameParts.slice(1).join(' ') || '';
     }
 
     // Filter out "The Well" from company name since that's the recipient
     let companyName = data.company_name || '';
+    // Handle multiple companies - take first non-"The Well" company
+    if (companyName.includes(';')) {
+        const companies = companyName.split(';').map(c => c.trim());
+        companyName = companies.find(c => 
+            !c.toLowerCase().includes('the well') && 
+            !c.toLowerCase().includes('well recruiting')
+        ) || companies[0] || '';
+    }
     if (companyName.toLowerCase().includes('the well') || 
         companyName.toLowerCase().includes('well recruiting')) {
         companyName = ''; // Clear it, this is the recipient not the candidate's company
     }
 
-    // Clean up location - if it's a full address, try to extract just city/state
+    // Clean up location - handle multiple locations
     let location = data.location || '';
+    if (location.includes(';')) {
+        location = location.split(';')[0].trim();
+    }
     if (location.includes(',')) {
         // Try to extract city, state from address like "21501 N. 78th Ave #100 Peoria, AZ 85382"
         const parts = location.split(',');
@@ -400,14 +423,26 @@ function populateForm(data) {
         }
     }
 
+    // Handle multiple emails - take the first one
+    let email = data.email || data.candidate_email || '';
+    if (email.includes(';')) {
+        email = email.split(';')[0].trim();
+    }
+    
+    // Handle multiple job titles - take the first one
+    let jobTitle = data.job_title || 'Advisor';
+    if (jobTitle.includes(';')) {
+        jobTitle = jobTitle.split(';')[0].trim();
+    }
+    
     // Map other fields
     const fieldMappings = {
-        'email': data.email || data.candidate_email || '',
+        'email': email,
         'phone': data.phone || '',
         'company': companyName,
         'website': data.website || '',
         'industry': data.industry || '',
-        'job_title': data.job_title || 'Advisor',
+        'job_title': jobTitle,
         'location': location,
         'linkedin_url': data.linkedin_url || '',
         'calendly_url': data.calendly_url || '',
