@@ -10,12 +10,12 @@
  * 3. Or use Azure AD authentication for more secure access
  */
 
-// Production configuration - Using Container Apps deployment
-window.API_BASE_URL = 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
+// Production configuration - Using Azure Front Door
+window.API_BASE_URL = 'https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net';
 
-// API Key - Retrieved from .env.local during build/deployment
-// WARNING: In production, this should be handled server-side
-// The value below is from .env.local for development
+// API Key - Should be injected during deployment or handled server-side
+// WARNING: Never hardcode API keys in client-side code
+// For now, using a placeholder that will be replaced during deployment
 window.API_KEY = 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
 
 // Note: Since browser JavaScript cannot directly access .env.local,

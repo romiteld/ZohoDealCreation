@@ -1,0 +1,192 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.23/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.23",
+  "id": "d2422753-f7f6-4a4a-9e1e-7512f37a50e5",
+  "version": "1.5.0",
+  "name": {
+    "short": "The Well - Send to Zoho",
+    "full": "The Well Recruiting Solutions - Zoho Integration"
+  },
+  "description": {
+    "short": "Process recruitment emails to Zoho",
+    "full": "Process recruitment emails and automatically create candidate records in Zoho CRM."
+  },
+  "developer": {
+    "name": "The Well Recruiting Solutions",
+    "websiteUrl": "https://thewell.solutions/",
+    "privacyUrl": "https://thewell.solutions/privacy",
+    "termsOfUseUrl": "https://thewell.solutions/terms"
+  },
+  "icons": {
+    "color": "icon-64.png",
+    "outline": "icon-128.png"
+  },
+  "accentColor": "#3498DB",
+  "localizationInfo": {
+    "defaultLanguageTag": "en-US",
+    "additionalLanguages": []
+  },
+  "authorization": {
+    "permissions": {
+      "resourceSpecific": [
+        {
+          "name": "MailboxItem.ReadWrite.User",
+          "type": "Delegated"
+        }
+      ]
+    }
+  },
+  "validDomains": [
+    "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net",
+    "https://addin.emailthewell.com",
+    "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io",
+    "https://thewell.solutions"
+  ],
+  "webApplicationInfo": {
+    "id": "d2422753-f7f6-4a4a-9e1e-7512f37a50e5",
+    "resource": "api://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/d2422753-f7f6-4a4a-9e1e-7512f37a50e5"
+  },
+  "extensions": [
+    {
+      "requirements": {
+        "scopes": ["mail"],
+        "capabilities": [
+          {
+            "name": "Mailbox",
+            "minVersion": "1.14"
+          }
+        ]
+      },
+      "ribbons": [
+        {
+          "contexts": ["mailRead"],
+          "tabs": [
+            {
+              "builtInTabId": "TabDefault",
+              "groups": [
+                {
+                  "id": "msgReadGroup",
+                  "label": "The Well",
+                  "icons": [
+                    {
+                      "size": 16,
+                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png"
+                    },
+                    {
+                      "size": 32,
+                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png"
+                    },
+                    {
+                      "size": 80,
+                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png"
+                    }
+                  ],
+                  "controls": [
+                    {
+                      "id": "msgReadOpenButton",
+                      "type": "button",
+                      "label": "Send to Zoho",
+                      "tooltip": {
+                        "title": "Send to Zoho",
+                        "description": "Process this email and create candidate records in Zoho CRM"
+                      },
+                      "icons": [
+                        {
+                          "size": 16,
+                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png"
+                        },
+                        {
+                          "size": 32,
+                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png"
+                        },
+                        {
+                          "size": 80,
+                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png"
+                        }
+                      ],
+                      "supertip": {
+                        "title": "Send to Zoho",
+                        "description": "Process this recruitment email and automatically create or update candidate records in Zoho CRM with AI-powered data extraction."
+                      },
+                      "actionId": "ShowTaskpane"
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "runtimes": [
+        {
+          "requirements": {
+            "capabilities": [
+              {
+                "name": "Mailbox",
+                "minVersion": "1.14"
+              }
+            ]
+          },
+          "id": "TaskpaneRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.html?v=1.5.0",
+            "script": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.js"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "ShowTaskpane",
+              "type": "openPage",
+              "view": "dashboard",
+              "pinnable": true
+            }
+          ]
+        },
+        {
+          "requirements": {
+            "capabilities": [
+              {
+                "name": "Mailbox",
+                "minVersion": "1.14"
+              }
+            ]
+          },
+          "id": "CommandsRuntime",
+          "type": "general",
+          "code": {
+            "page": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.html?v=1.5.0",
+            "script": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.js"
+          },
+          "lifetime": "short",
+          "actions": [
+            {
+              "id": "action_id",
+              "type": "executeFunction",
+              "displayName": "Process Email"
+            }
+          ]
+        }
+      ],
+      "alternates": [
+        {
+          "requirements": {
+            "scopes": ["mail"]
+          },
+          "prefer": {
+            "mailbox": "1.14"
+          },
+          "hide": {
+            "storeApp": false,
+            "tab": false,
+            "bot": false,
+            "staticTab": false,
+            "messageExtension": false,
+            "connector": false
+          }
+        }
+      ],
+      "audienceClaimUrl": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/api/audience"
+    }
+  ]
+}
