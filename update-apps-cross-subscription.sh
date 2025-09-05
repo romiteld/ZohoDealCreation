@@ -311,7 +311,7 @@ echo "Step 9: Testing application connectivity..."
 echo "-------------------------------------------"
 
 echo "Testing Container App health..."
-curl -s -f -m 10 https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/health > /dev/null && echo "✅ well-intake-api health check passed" || echo "⚠️ well-intake-api health check failed"
+curl -s -f -m 10 https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health > /dev/null && echo "✅ well-intake-api health check passed" || echo "⚠️ well-intake-api health check failed"
 
 echo "Testing Web Apps..."
 curl -s -f -m 10 https://well-zoho-oauth.azurewebsites.net > /dev/null && echo "✅ well-zoho-oauth responding" || echo "⚠️ well-zoho-oauth not responding"

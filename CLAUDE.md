@@ -220,9 +220,9 @@ Check LangGraph is enabled: `USE_LANGGRAPH=true`
 
 ## Production URLs
 
-- **API**: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io
-- **Health**: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/health
-- **Manifest**: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml
+- **API**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
+- **Health**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
+- **Manifest**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
 
 ## Recent Updates
 

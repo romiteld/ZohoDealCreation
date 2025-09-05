@@ -1,0 +1,10 @@
+{
+  "spa": {
+    "redirectUris": [
+      "https://jlbmnhdaddmiipeaocdmipikkloimcei.chromiumapp.org/"
+    ]
+  },
+  "publicClient": {
+    "redirectUris": []
+  }
+}

@@ -349,11 +349,11 @@ metadata:
 spec:
   tls:
   - hosts:
-    - well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io
+    - well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
     secretName: well-intake-tls
   
   rules:
-  - host: well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io
+  - host: well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
     http:
       paths:
       - path: /

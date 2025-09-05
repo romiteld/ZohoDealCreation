@@ -77,7 +77,7 @@ def main():
         print("   - Get Add-ins → My Add-ins → Custom Add-ins")
         print("   - Remove 'The Well - Send to Zoho'")
         print("   - Clear browser cache (Ctrl+Shift+Delete)")
-        print("   - Add from URL: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml")
+        print("   - Add from URL: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml")
         print(f"\n3. Verify new version ({new_version}) is loaded in Outlook")
         print("\n4. Run test script to validate:")
         print("   python test_container_deployment.py")

@@ -22,6 +22,10 @@ class EmailPayload(BaseModel):
     user_corrections: Optional[Dict[str, Any]] = Field(None, description="User corrections to AI extraction")
     ai_extraction: Optional[Dict[str, Any]] = Field(None, description="Original AI extraction for learning")
     dry_run: Optional[bool] = Field(False, description="If true, run extraction only and return preview without creating Zoho records")
+    # Optional Graph enrichment fields (Chrome extension thin client)
+    graph_access_token: Optional[str] = Field(None, description="Bearer token for Microsoft Graph to fetch the message")
+    graph_message_id: Optional[str] = Field(None, description="Microsoft Graph message id (me/messages/{id})")
+    graph_conversation_id: Optional[str] = Field(None, description="Graph conversationId for context")
 
 class ExtractedData(BaseModel):
     candidate_name: Optional[str] = Field(None, description="The full name of the candidate.")

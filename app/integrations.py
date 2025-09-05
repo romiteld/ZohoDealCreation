@@ -5,6 +5,8 @@ Enhanced integrations module with PostgreSQL cluster integration
 import os
 import time
 import requests
+import aiohttp
+import asyncio
 import base64
 import uuid
 import logging

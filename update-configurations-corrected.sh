@@ -204,7 +204,7 @@ Updated all applications to use appropriate storage accounts after resource migr
 ## Testing Required
 
 ### 1. Email Intake API
-- Test: \`curl https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/health\`
+- Test: \`curl https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health\`
 - Verify: File uploads work correctly
 - Check: Attachment processing functions
 
@@ -293,7 +293,7 @@ echo "----------------------"
 
 # Test Container App
 echo "Testing well-intake-api health..."
-curl -s -f https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/health > /dev/null && echo "✅ well-intake-api is healthy" || echo "⚠️ well-intake-api health check failed"
+curl -s -f https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health > /dev/null && echo "✅ well-intake-api is healthy" || echo "⚠️ well-intake-api health check failed"
 
 # Test Web Apps
 echo "Testing well-zoho-oauth..."

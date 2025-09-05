@@ -10,8 +10,8 @@ When you move from Azure App Services to Azure Container Apps, Microsoft's add-i
 ## Current Manifest Information
 
 ### Latest Version: 1.1.0.1
-- **Manifest URL**: `https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml`
-- **API Endpoint**: `well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io`
+- **Manifest URL**: `https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml`
+- **API Endpoint**: `well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io`
 
 ### Recent Changes in Version 1.1.0.x
 1. **API Endpoints** - Updated to point to Azure Container Apps
@@ -57,7 +57,7 @@ Choose the appropriate method based on your access level and requirements:
    - Mac: `Cmd + Shift + Delete`
 5. Add the add-in again from URL:
    ```
-   https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml
+   https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
    ```
 
 ### Option B: Microsoft 365 Admin Center (Organization-wide)
@@ -70,7 +70,7 @@ Choose the appropriate method based on your access level and requirements:
 4. Click on the app and select **Update**
 5. Upload the new manifest from:
    ```
-   https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml
+   https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
    ```
 6. Review and approve the update
 7. Wait 6-24 hours for propagation to all users
@@ -86,7 +86,7 @@ Choose the appropriate method based on your access level and requirements:
 5. Click **Add apps** → **Add a custom app** → **Add from URL**
 6. Enter the manifest URL:
    ```
-   https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml
+   https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
    ```
 7. Click **Install**
 
@@ -102,7 +102,7 @@ Connect-ExchangeOnline
 Get-App -OrganizationApp | Where-Object {$_.DisplayName -eq "The Well - Send to Zoho"} | Remove-App
 
 # Install new version
-New-App -OrganizationApp -Url "https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml"
+New-App -OrganizationApp -Url "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml"
 ```
 
 ## Verification Steps
@@ -124,13 +124,13 @@ Expected output:
 
 1. **Manifest Accessibility**:
    ```bash
-   curl -I https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml
+   curl -I https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
    # Should return 200 OK
    ```
 
 2. **API Health Check**:
    ```bash
-   curl https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/health
+   curl https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
    # Should return {"status": "healthy"}
    ```
 

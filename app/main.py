@@ -154,17 +154,22 @@ async def verify_user_auth(authorization: str = Header(None)):
 
 # Combined dependency: allow either Azure AD Bearer token OR API key
 async def verify_auth_or_api_key(request: Request, authorization: str = Header(None), x_api_key: str = Header(None)):
-    """Validate Authorization: Bearer <token> (Azure AD) or X-API-Key."""
-    # Try Microsoft Bearer first if provided
-    if authorization and authorization.startswith('Bearer '):
-        return await verify_user_auth(authorization)
-    # Fallback to API key if provided
+    """Validate Authorization: Bearer <token> (Azure AD) or X-API-Key.
+    Prefer a valid API key if present; otherwise try Bearer token.
+    This avoids failing when clients include unrelated Bearer tokens (e.g., Graph) alongside a valid API key.
+    """
+    # First, accept a valid API key if provided
     if x_api_key:
-        # Reuse existing API key logic
         api_env = os.getenv("API_KEY", "")
         if hmac.compare_digest(x_api_key, api_env):
             return {"type": "api_key", "user_id": "api_client"}
+        # If API key is present but invalid, return 403 immediately
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Invalid API Key")
+
+    # Next, try Microsoft Bearer token if provided
+    if authorization and authorization.startswith('Bearer '):
+        return await verify_user_auth(authorization)
+
     # If neither header present, unauthorized
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authorization or API key required")
 
@@ -305,6 +310,12 @@ app = FastAPI(
 
 # Configure CORS with strict domain allowlist
 ALLOWED_ORIGINS = [
+    # Azure Front Door domain
+    "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net",
+    
+    # Custom domain for Outlook Add-in (when DNS is configured)
+    "https://addin.emailthewell.com",
+    
     # Azure Container Apps domains
     "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
     "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io",
@@ -398,6 +409,7 @@ if os.getenv("ENVIRONMENT", "production") != "test":
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=r"chrome-extension:\/\/.*",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
@@ -699,6 +711,51 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         
         logger.info(f"Processing email from {request.sender_email}")
         
+        # If Graph context provided, enrich body and attachments from Microsoft Graph
+        if getattr(request, 'graph_access_token', None) and getattr(request, 'graph_message_id', None):
+            try:
+                token = request.graph_access_token
+                msg_id = request.graph_message_id
+                import aiohttp
+                async with aiohttp.ClientSession(headers={"Authorization": f"Bearer {token}"}) as session:
+                    # Expand attachments (common file attachments inline)
+                    url = f"https://graph.microsoft.com/v1.0/me/messages/{msg_id}?$select=subject,from,body,bodyPreview,conversationId,hasAttachments&$expand=attachments($select=id,name,contentType,size,isInline,@odata.type,contentBytes)"
+                    async with session.get(url) as r:
+                        if r.status == 200:
+                            data = await r.json()
+                            # Prefer full HTML or text from Graph
+                            if data.get('body', {}).get('content'):
+                                request.body = data['body']['content'][:100000]
+                            if data.get('subject') and not request.subject:
+                                request.subject = data['subject']
+                            # Map attachments
+                            atts = []
+                            for a in data.get('attachments', []) or []:
+                                otype = a.get('@odata.type', '')
+                                if otype.endswith('fileAttachment') and a.get('contentBytes'):
+                                    atts.append({
+                                        'filename': a.get('name') or 'attachment',
+                                        'content_base64': a.get('contentBytes') or '',
+                                        'content_type': a.get('contentType') or 'application/octet-stream'
+                                    })
+                                elif otype.endswith('itemAttachment'):
+                                    # Fetch nested item and include its body text inline to aid extraction
+                                    att_id = a.get('id')
+                                    if att_id:
+                                        nested_url = f"https://graph.microsoft.com/v1.0/me/messages/{msg_id}/attachments/{att_id}?$expand=item($select=subject,from,body,hasAttachments)"
+                                        async with session.get(nested_url) as nr:
+                                            if nr.status == 200:
+                                                ndata = await nr.json()
+                                                item = ndata.get('item') or {}
+                                                nbody = (item.get('body') or {}).get('content') or ''
+                                                if nbody:
+                                                    # Append nested email content to the main body for AI context
+                                                    request.body += "\n\n--- Forwarded/Attached Email ---\n" + nbody[:50000]
+                        else:
+                            logger.warning(f"Graph message fetch failed: {r.status}")
+            except Exception as e:
+                logger.warning(f"Graph enrichment failed: {e}")
+
         # Initialize correction learning and analytics if user provided corrections
         correction_service = None
         learning_analytics = None
@@ -1648,13 +1705,31 @@ async def get_manifest(request: Request):
             media_type="application/xml; charset=utf-8",
             headers={
                 "Cache-Control": "public, max-age=3600",
-                "X-Manifest-Version": "1.3.0.2"
+                "X-Manifest-Version": "1.5.0"
             }
         )
     
     # Fallback error if file not found
     logger.error(f"Manifest file not found at {manifest_path}")
     raise HTTPException(status_code=404, detail="Manifest.xml not found")
+
+@app.get("/manifest.json")
+async def get_manifest_json(request: Request):
+    """Serve Unified Outlook Add-in manifest (JSON format for modern Office)"""
+    manifest_path = os.path.join(os.path.dirname(__file__), "..", "addin", "manifest.json")
+    if os.path.exists(manifest_path):
+        return FileResponse(
+            manifest_path, 
+            media_type="application/json; charset=utf-8",
+            headers={
+                "Cache-Control": "public, max-age=3600",
+                "X-Manifest-Version": "1.5.0",
+                "X-Manifest-Type": "unified"
+            }
+        )
+    
+    logger.error(f"Manifest file not found at {manifest_path}")
+    raise HTTPException(status_code=404, detail="Manifest.json not found")
 
 @app.get("/commands.js")
 async def get_commands():

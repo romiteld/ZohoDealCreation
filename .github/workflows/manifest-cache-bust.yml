@@ -24,7 +24,7 @@ env:
   AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-  CONTAINER_REGISTRY: wellintakeregistry.azurecr.io
+  CONTAINER_REGISTRY: wellintakeacr0903.azurecr.io
   CONTAINER_APP_NAME: well-intake-api
   RESOURCE_GROUP: TheWell-Infra-East
   API_ENDPOINT: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
@@ -207,7 +207,7 @@ jobs:
       - name: Log in to Azure Container Registry
         if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
         run: |
-          az acr login --name wellintakeregistry
+          az acr login --name wellintakeacr0903
 
       - name: Build and push Docker image
         env:

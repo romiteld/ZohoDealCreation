@@ -36,6 +36,7 @@
   }
 
   const API_BASE_URL = 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
+  const API_KEY = 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
 
   async function previewCurrentEmail() {
     try {
@@ -62,8 +63,7 @@
       if (!emailData) throw new Error('No current message found.');
 
       setStatus('Requesting AI extraction (preview)...');
-      const headers = { 'Content-Type': 'application/json' };
-      if (graph?.token) headers['Authorization'] = `Bearer ${graph.token}`;
+      const headers = { 'Content-Type': 'application/json', 'X-API-Key': API_KEY };
       const resp = await fetch(`${API_BASE_URL}/intake/email`, {
         method: 'POST',
         headers,
@@ -72,7 +72,10 @@
           sender_name: emailData.from?.displayName || '',
           subject: emailData.subject || '',
           body: emailData.body || '',
-          dry_run: true
+          dry_run: true,
+          graph_access_token: graph?.token || undefined,
+          graph_message_id: graph?.message?.id || undefined,
+          graph_conversation_id: graph?.message?.conversationId || undefined
         })
       });
       if (!resp.ok) throw new Error(`API ${resp.status}`);
@@ -116,8 +119,7 @@
       if (!emailData) throw new Error('No current message found.');
 
       setStatus('Sending to The Well API...');
-      const headers = { 'Content-Type': 'application/json' };
-      if (graph?.token) headers['Authorization'] = `Bearer ${graph.token}`;
+      const headers = { 'Content-Type': 'application/json', 'X-API-Key': API_KEY };
       const resp = await fetch(`${API_BASE_URL}/intake/email`, {
         method: 'POST',
         headers,
@@ -127,7 +129,10 @@
           subject: emailData.subject || '',
           body: emailData.body || '',
           ai_extraction: {},
-          user_corrections: readForm()
+          user_corrections: readForm(),
+          graph_access_token: graph?.token || undefined,
+          graph_message_id: graph?.message?.id || undefined,
+          graph_conversation_id: graph?.message?.conversationId || undefined
         })
       });
       if (!resp.ok) throw new Error(`API ${resp.status}`);

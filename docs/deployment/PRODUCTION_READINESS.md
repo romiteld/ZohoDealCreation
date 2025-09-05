@@ -7,7 +7,7 @@ This application has **THREE main components**:
 
 ### 1. **Outlook Add-in (PRIMARY INTERFACE)** ✅ DEPLOYED
 - **Status**: Deployed and serving from Container App
-- **URL**: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io
+- **URL**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
 - **Manifest**: Version 1.1.0.1 (updated with new URLs)
 - **Functionality**: Adds "Send to Zoho" button to Outlook ribbon
 - **Files served**: commands.html, taskpane.html, all JS/icons
@@ -62,7 +62,7 @@ For Individual Users:
 1. Go to https://outlook.office.com
 2. Click "Get Add-ins" → "My add-ins" → "Custom Add-ins"
 3. Click "Add from URL"
-4. Enter: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml
+4. Enter: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
 5. Click "Install"
 
 For Organization (Microsoft 365 Admin):
@@ -134,7 +134,7 @@ az staticwebapp create --name well-voice-ui \
 
 | Service | Status | URL/Details |
 |---------|--------|-------------|
-| Container App | ✅ Running | https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io |
+| Container App | ✅ Running | https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io |
 | PostgreSQL | ✅ Connected | well-intake-db.postgres.database.azure.com |
 | Redis Cache | ✅ Connected | well-intake-cache-v2.redis.cache.windows.net |
 | Blob Storage | ✅ Created | wellintakestorage.blob.core.windows.net |
@@ -167,9 +167,9 @@ az staticwebapp create --name well-voice-ui \
 
 ## 🔗 Important URLs
 
-- **Manifest**: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/manifest.xml
-- **Health Check**: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/health
-- **Test Endpoint**: https://well-intake-api.orangedesert-c768ae6e.eastus.azurecontainerapps.io/test/kevin-sullivan
+- **Manifest**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
+- **Health Check**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
+- **Test Endpoint**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/test/kevin-sullivan
 
 ## 💡 Summary
 
