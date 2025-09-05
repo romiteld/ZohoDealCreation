@@ -95,6 +95,74 @@ class RedisCacheManager:
         self.fallback_mode = False
         self.fallback_reason = None
     
+    async def cache_domain_info(self, domain: str, company_info: Dict[str, Any]) -> bool:
+        """
+        Cache company information for a domain.
+        
+        Args:
+            domain: Email domain (e.g., "example.com")
+            company_info: Company information to cache
+            
+        Returns:
+            Success status
+        """
+        if not self._connected or not self.client:
+            await self.connect()
+            if not self._connected:
+                return False
+        
+        try:
+            key = f"domain::{domain.lower()}"
+            value = json.dumps({
+                "company_info": company_info,
+                "cached_at": datetime.utcnow().isoformat()
+            })
+            
+            # Cache for 7 days - domains are relatively stable
+            await self.client.setex(
+                key,
+                timedelta(days=7),
+                value
+            )
+            
+            logger.info(f"Cached domain info for: {domain}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error caching domain info: {e}")
+            return False
+    
+    async def get_domain_info(self, domain: str) -> Optional[Dict[str, Any]]:
+        """
+        Retrieve cached company information for a domain.
+        
+        Args:
+            domain: Email domain (e.g., "example.com")
+            
+        Returns:
+            Cached company info or None
+        """
+        if not self._connected or not self.client:
+            await self.connect()
+            if not self._connected:
+                return None
+        
+        try:
+            key = f"domain::{domain.lower()}"
+            cached = await self.client.get(key)
+            
+            if cached:
+                data = json.loads(cached)
+                logger.info(f"Domain cache hit for: {domain}")
+                return data.get("company_info")
+            
+            logger.debug(f"Domain cache miss for: {domain}")
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error retrieving domain info: {e}")
+            return None
+    
     async def connect(self) -> bool:
         """Establish connection to Azure Cache for Redis with circuit breaker and fallback."""
         # Check if already connected

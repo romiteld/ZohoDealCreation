@@ -6,13 +6,36 @@ const API_KEY = localStorage.getItem('apiKey') || 'e49d2dbcfa4547f5bdc371c5c06aa
 let extractedData = null;
 let currentFile = null;
 let userInfo = null;
+let authToken = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
+    await checkAuthentication();
     await loadUserInfo();
     setupEventListeners();
     updateDealNamePreview();
 });
+
+// Check if user is authenticated
+async function checkAuthentication() {
+    try {
+        const response = await fetch('/.auth/me');
+        if (!response.ok || response.status === 401) {
+            window.location.href = '/login.html';
+            return;
+        }
+        const data = await response.json();
+        if (!data || !data[0]) {
+            window.location.href = '/login.html';
+            return;
+        }
+        // Store auth status
+        sessionStorage.setItem('isAuthenticated', 'true');
+    } catch (error) {
+        console.error('Authentication check failed:', error);
+        window.location.href = '/login.html';
+    }
+}
 
 // Load user info from Azure AD
 async function loadUserInfo() {
@@ -21,12 +44,18 @@ async function loadUserInfo() {
         const data = await response.json();
         if (data && data[0]) {
             userInfo = data[0];
-            document.getElementById('userName').textContent = 
-                userInfo.user_claims?.find(c => c.typ === 'name')?.val || 'User';
+            const userName = userInfo.user_claims?.find(c => c.typ === 'name')?.val || 
+                            userInfo.user_claims?.find(c => c.typ === 'preferred_username')?.val || 
+                            'User';
+            document.getElementById('userName').textContent = userName;
+            
+            // Store user info in session
+            sessionStorage.setItem('userName', userName);
+            sessionStorage.setItem('userInfo', JSON.stringify(userInfo));
         }
     } catch (error) {
         console.error('Error loading user info:', error);
-        document.getElementById('userName').textContent = 'User';
+        document.getElementById('userName').textContent = sessionStorage.getItem('userName') || 'User';
     }
 }
 
@@ -87,13 +116,13 @@ async function handleFile(file) {
     }
 
     currentFile = file;
-    showStatus('Processing email file...', 'loading');
+    showStatus('Extracting email content with AI...', 'loading');
 
     try {
         let senderEmail, subject, bodyContent;
         
         if (file.name.endsWith('.msg')) {
-            // Use msg.reader library to properly parse .msg files
+            // Use msg.reader library to parse .msg files
             const arrayBuffer = await file.arrayBuffer();
             const msgReader = new MSGReader(arrayBuffer);
             const fileData = msgReader.getFileData();
@@ -115,53 +144,48 @@ async function handleFile(file) {
             extractUrlsFromEmail(emailContent);
         }
         
+        // Use the working /intake/email endpoint with LangGraph AI extraction
+        const requestBody = {
+            sender_email: senderEmail,
+            subject: subject || 'Email Upload',
+            body: bodyContent || 'No body content available',
+            dry_run: true, // Preview only, don't create in Zoho yet
+            user_corrections: {
+                job_title: 'Advisor',
+                location: 'Unknown',
+                company_name: 'Unknown'
+            }
+        };
+        
         const response = await fetch(`${API_BASE_URL}/intake/email`, {
             method: 'POST',
             headers: {
-                'X-API-Key': API_KEY || prompt('Please enter your API key:'),
+                'X-API-Key': API_KEY,
                 'Content-Type': 'application/json'
             },
-            body: JSON.stringify({
-                sender_email: senderEmail,
-                subject: subject,
-                body: bodyContent,
-                dry_run: true // Important: preview only, don't create in Zoho yet
-            })
+            body: JSON.stringify(requestBody)
         });
 
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error('API Error:', errorText);
             throw new Error(`Server error: ${response.status}`);
         }
 
         const data = await response.json();
         extractedData = data.extracted || data;
         
-        // Populate form
+        // Populate form with AI-extracted data
         populateForm(extractedData);
         
-        // Override with extracted data URLs if available
-        if (extractedData && extractedData.linkedin_url) {
-            document.getElementById('linkedin_url').value = extractedData.linkedin_url;
-        }
-        if (extractedData && extractedData.calendly_url) {
-            document.getElementById('calendly_url').value = extractedData.calendly_url;
-        }
-        
-        showStatus('Data extracted successfully! Please review and edit as needed.', 'success');
+        showStatus('Data extracted successfully! Review and submit to create deal.', 'success');
         document.getElementById('extractedForm').style.display = 'block';
+        updateDealNamePreview();
         
     } catch (error) {
         console.error('Error processing file:', error);
-        // If automatic extraction fails, show manual form
-        showStatus('Automatic extraction failed. Please fill in the details manually.', 'warning');
-        
-        // Show empty form for manual input
-        extractedData = {};
-        populateForm({});
+        showStatus('AI extraction failed. Please try again or fill manually.', 'error');
         document.getElementById('extractedForm').style.display = 'block';
-        
-        // Try to pre-fill filename as subject
-        document.getElementById('notes').value = `Source file: ${file.name}`;
     }
 }
 
@@ -202,6 +226,99 @@ function extractUrlsFromEmail(content) {
     }
 }
 
+// Poll for enrichment results
+async function pollForEnrichment(extractionId) {
+    // Add loading indicator to specific fields being enriched
+    const enrichmentFields = ['linkedin_url', 'company', 'website', 'industry'];
+    enrichmentFields.forEach(field => {
+        const element = document.getElementById(field);
+        if (element) {
+            element.classList.add('loading');
+            element.placeholder = 'Researching...';
+        }
+    });
+    
+    // Poll every 2 seconds for up to 10 attempts
+    let attempts = 0;
+    const maxAttempts = 10;
+    
+    const pollInterval = setInterval(async () => {
+        attempts++;
+        
+        try {
+            const response = await fetch(`${API_BASE_URL}/intake/email/status/${extractionId}`, {
+                headers: {
+                    'X-API-Key': API_KEY
+                }
+            });
+            
+            if (response.ok) {
+                const data = await response.json();
+                
+                if (data.status === 'completed' && data.enriched_data) {
+                    // Update form with enriched data
+                    updateFormWithEnrichedData(data.enriched_data);
+                    clearInterval(pollInterval);
+                    
+                    // Remove loading states
+                    enrichmentFields.forEach(field => {
+                        const element = document.getElementById(field);
+                        if (element) {
+                            element.classList.remove('loading');
+                            element.placeholder = '';
+                        }
+                    });
+                    
+                    showStatus('✓ Company research completed', 'success');
+                } else if (data.status === 'failed' || attempts >= maxAttempts) {
+                    clearInterval(pollInterval);
+                    
+                    // Remove loading states
+                    enrichmentFields.forEach(field => {
+                        const element = document.getElementById(field);
+                        if (element) {
+                            element.classList.remove('loading');
+                            element.placeholder = '';
+                        }
+                    });
+                }
+            }
+        } catch (error) {
+            console.error('Error polling for enrichment:', error);
+        }
+        
+        if (attempts >= maxAttempts) {
+            clearInterval(pollInterval);
+            enrichmentFields.forEach(field => {
+                const element = document.getElementById(field);
+                if (element) {
+                    element.classList.remove('loading');
+                    element.placeholder = '';
+                }
+            });
+        }
+    }, 2000);
+}
+
+// Update form with enriched data
+function updateFormWithEnrichedData(enrichedData) {
+    // Only update fields that have new data
+    if (enrichedData.company_name && !document.getElementById('company').value) {
+        document.getElementById('company').value = enrichedData.company_name;
+    }
+    if (enrichedData.website && !document.getElementById('website').value) {
+        document.getElementById('website').value = enrichedData.website;
+    }
+    if (enrichedData.industry && !document.getElementById('industry').value) {
+        document.getElementById('industry').value = enrichedData.industry;
+    }
+    if (enrichedData.linkedin_url && !document.getElementById('linkedin_url').value) {
+        document.getElementById('linkedin_url').value = enrichedData.linkedin_url;
+    }
+    
+    updateDealNamePreview();
+}
+
 // Populate form with extracted data
 function populateForm(data) {
     // Split candidate_name into first and last
@@ -211,15 +328,38 @@ function populateForm(data) {
         document.getElementById('contact_last').value = nameParts.slice(1).join(' ') || '';
     }
 
+    // Filter out "The Well" from company name since that's the recipient
+    let companyName = data.company_name || '';
+    if (companyName.toLowerCase().includes('the well') || 
+        companyName.toLowerCase().includes('well recruiting')) {
+        companyName = ''; // Clear it, this is the recipient not the candidate's company
+    }
+
+    // Clean up location - if it's a full address, try to extract just city/state
+    let location = data.location || '';
+    if (location.includes(',')) {
+        // Try to extract city, state from address like "21501 N. 78th Ave #100 Peoria, AZ 85382"
+        const parts = location.split(',');
+        if (parts.length >= 2) {
+            // Get last two parts for city, state
+            const city = parts[parts.length - 2].trim().split(' ').pop(); // Get last word before state
+            const stateZip = parts[parts.length - 1].trim();
+            const state = stateZip.split(' ')[0]; // Get state abbreviation
+            if (city && state) {
+                location = `${city}, ${state}`;
+            }
+        }
+    }
+
     // Map other fields
     const fieldMappings = {
         'email': data.email || data.candidate_email || '',
         'phone': data.phone || '',
-        'company': data.company_name || '',
+        'company': companyName,
         'website': data.website || '',
         'industry': data.industry || '',
         'job_title': data.job_title || 'Advisor',
-        'location': data.location || '',
+        'location': location,
         'linkedin_url': data.linkedin_url || '',
         'calendly_url': data.calendly_url || '',
         'referrer_name': data.referrer_name || '',
@@ -313,25 +453,33 @@ async function lookupCompany() {
 async function submitToZoho() {
     showStatus('Creating deal in Zoho...', 'loading');
 
+    // Ensure required fields have values
+    const firstName = document.getElementById('contact_first').value || 'Unknown';
+    const lastName = document.getElementById('contact_last').value || 'Contact';
+    const email = document.getElementById('email').value || 'unknown@example.com';
+    const company = document.getElementById('company').value || 'Unknown Company';
+    const jobTitle = document.getElementById('job_title').value || 'Advisor';
+    const location = document.getElementById('location').value || 'Unknown Location';
+
     const payload = {
-        sender_email: document.getElementById('email').value,
+        sender_email: email,
         subject: `Deal Creation: ${document.getElementById('dealNamePreview').textContent}`,
         body: `Manually created from uploaded email file`,
         user_corrections: {
-            candidate_name: `${document.getElementById('contact_first').value} ${document.getElementById('contact_last').value}`,
-            email: document.getElementById('email').value,
-            phone: document.getElementById('phone').value,
-            company_name: document.getElementById('company').value,
-            website: document.getElementById('website').value,
-            industry: document.getElementById('industry').value,
-            job_title: document.getElementById('job_title').value,
-            location: document.getElementById('location').value,
-            linkedin_url: document.getElementById('linkedin_url').value,
-            calendly_url: document.getElementById('calendly_url').value,
-            referrer_name: document.getElementById('referrer_name').value,
-            referrer_email: document.getElementById('referrer_email').value,
-            source: document.getElementById('source').value,
-            notes: document.getElementById('notes').value
+            candidate_name: `${firstName} ${lastName}`.trim(),
+            email: email,
+            phone: document.getElementById('phone').value || '',
+            company_name: company,
+            website: document.getElementById('website').value || '',
+            industry: document.getElementById('industry').value || '',
+            job_title: jobTitle,
+            location: location,
+            linkedin_url: document.getElementById('linkedin_url').value || '',
+            calendly_url: document.getElementById('calendly_url').value || '',
+            referrer_name: document.getElementById('referrer_name').value || '',
+            referrer_email: document.getElementById('referrer_email').value || '',
+            source: document.getElementById('source').value || 'Email Inbound',
+            notes: document.getElementById('notes').value || ''
         }
     };
 
@@ -339,13 +487,25 @@ async function submitToZoho() {
         const response = await fetch(`${API_BASE_URL}/intake/email`, {
             method: 'POST',
             headers: {
-                'X-API-Key': API_KEY || prompt('Please enter your API key:'),
+                'X-API-Key': API_KEY,
                 'Content-Type': 'application/json'
             },
             body: JSON.stringify(payload)
         });
 
         if (!response.ok) {
+            const errorText = await response.text();
+            console.error('Submission Error:', errorText);
+            
+            // Parse error message if it's JSON
+            try {
+                const errorData = JSON.parse(errorText);
+                if (errorData.message) {
+                    throw new Error(errorData.message);
+                }
+            } catch (e) {
+                // Not JSON, use generic error
+            }
             throw new Error(`Server error: ${response.status}`);
         }
 

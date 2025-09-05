@@ -251,7 +251,7 @@ class CompanyResearchService:
                     f"{self.firecrawl.base_url}/search",
                     headers=headers,
                     json=search_data,
-                    timeout=aiohttp.ClientTimeout(total=10)
+                    timeout=aiohttp.ClientTimeout(total=3)  # Reduced from 10s to 3s
                 ) as response:
                     if response.status == 200:
                         result = await response.json()

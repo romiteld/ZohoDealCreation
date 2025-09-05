@@ -87,7 +87,7 @@ async function handleFile(file) {
     }
 
     currentFile = file;
-    showStatus('Processing email file...', 'loading');
+    showStatus('Step 1 of 3: Reading email file...', 'loading');
 
     try {
         let senderEmail, subject, bodyContent;
@@ -114,6 +114,8 @@ async function handleFile(file) {
             bodyContent = emailContent;
             extractUrlsFromEmail(emailContent);
         }
+        
+        showStatus('Step 2 of 3: Analyzing email content...', 'loading');
         
         const response = await fetch(`${API_BASE_URL}/intake/email`, {
             method: 'POST',
@@ -147,13 +149,13 @@ async function handleFile(file) {
             document.getElementById('calendly_url').value = extractedData.calendly_url;
         }
         
-        showStatus('Data extracted successfully! Please review and edit as needed.', 'success');
+        showStatus('Step 3 of 3: Complete! Please review the extracted information below.', 'success');
         document.getElementById('extractedForm').style.display = 'block';
         
     } catch (error) {
         console.error('Error processing file:', error);
         // If automatic extraction fails, show manual form
-        showStatus('Automatic extraction failed. Please fill in the details manually.', 'warning');
+        showStatus('Email loaded. Please review and complete the information below.', 'info');
         
         // Show empty form for manual input
         extractedData = {};

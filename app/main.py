@@ -941,6 +941,26 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         logger.error(f"Error processing email: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.get("/intake/email/status/{extraction_id}", dependencies=[Depends(verify_api_key)])
+async def get_extraction_status(extraction_id: str, req: Request):
+    """Check the status of an email extraction/enrichment."""
+    try:
+        if not hasattr(req.app.state, 'cache_manager'):
+            raise HTTPException(status_code=503, detail="Cache not available")
+        
+        cache_key = f"extraction:{extraction_id}"
+        cached_data = await req.app.state.cache_manager.get_cache(cache_key)
+        
+        if not cached_data:
+            raise HTTPException(status_code=404, detail="Extraction not found")
+        
+        return cached_data
+        
+    except Exception as e:
+        logger.error(f"Error getting extraction status: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @app.get("/test/kevin-sullivan", dependencies=[Depends(verify_api_key)])
 async def test_kevin_sullivan(req: Request):
     """Test endpoint with Kevin Sullivan sample email"""

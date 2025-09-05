@@ -38,7 +38,6 @@ class ExtractedData(BaseModel):
     website: Optional[str] = Field(None, description="Company website URL.")
     phone: Optional[str] = Field(None, description="Contact phone number.")
     linkedin_url: Optional[str] = Field(None, description="LinkedIn profile URL.")
-    calendly_url: Optional[str] = Field(None, description="Calendly scheduling link.")
     notes: Optional[str] = Field(None, description="Additional notes or context from the email.")
     industry: Optional[str] = Field(None, description="Company industry or sector.")
     source: Optional[str] = Field(None, description="Lead source (e.g., Referral, Email Inbound).")

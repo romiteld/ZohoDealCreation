@@ -53,7 +53,6 @@ class ExtractionOutput(BaseModel):
     phone: Optional[str] = Field(default=None, description="Phone number if present")
     email: Optional[str] = Field(default=None, description="Email address of the candidate if different from sender")
     linkedin_url: Optional[str] = Field(default=None, description="LinkedIn profile URL if present")
-    calendly_url: Optional[str] = Field(default=None, description="Calendly link if present")
     notes: Optional[str] = Field(default=None, description="Additional context or notes from the email")
 
 
@@ -374,10 +373,14 @@ class EmailProcessingWorkflow:
         candidate_website = extracted.get('website')
         sender_domain = state['sender_domain']
         
-        # Use Firecrawl research service
+        # Use Firecrawl research service with caching
         try:
             from app.firecrawl_research import CompanyResearchService
+            from app.redis_cache_manager import RedisCacheManager
+            
             research_service = CompanyResearchService()
+            cache_manager = RedisCacheManager()
+            await cache_manager.connect()
             
             # Determine what to research
             research_domain = None
@@ -420,16 +423,34 @@ class EmailProcessingWorkflow:
             
             # Research the company using the best available domain
             if research_domain:
-                research_result = await research_service.research_company(
-                    email_domain=research_domain,
-                    company_guess=company_guess
-                )
+                # Check cache first
+                cached_info = await cache_manager.get_domain_info(research_domain)
+                if cached_info:
+                    logger.info(f"Using cached domain info for: {research_domain}")
+                    research_result = cached_info
+                else:
+                    # Fetch from Firecrawl
+                    research_result = await research_service.research_company(
+                        email_domain=research_domain,
+                        company_guess=company_guess
+                    )
+                    # Cache the result
+                    if research_result and research_result.get('confidence', 0) > 0.5:
+                        await cache_manager.cache_domain_info(research_domain, research_result)
             else:
                 # Fallback to sender domain
-                research_result = await research_service.research_company(
-                    email_domain=sender_domain,
-                    company_guess=company_guess
-                )
+                cached_info = await cache_manager.get_domain_info(sender_domain)
+                if cached_info:
+                    logger.info(f"Using cached domain info for: {sender_domain}")
+                    research_result = cached_info
+                else:
+                    research_result = await research_service.research_company(
+                        email_domain=sender_domain,
+                        company_guess=company_guess
+                    )
+                    # Cache if good confidence
+                    if research_result and research_result.get('confidence', 0) > 0.5:
+                        await cache_manager.cache_domain_info(sender_domain, research_result)
             
             # If we found a website through candidate search, use it for company info
             if candidate_info.get('website'):
@@ -578,7 +599,6 @@ class EmailProcessingWorkflow:
             "phone": extracted.get('phone') or research.get('phone'),
             # Prioritize extracted LinkedIn, fallback to Firecrawl research
             "linkedin_url": extracted.get('linkedin_url') or research.get('linkedin_url'),
-            "calendly_url": calendly_url,
             "notes": extracted.get('notes'),
             # Use Firecrawl website if found
             "website": research.get('website') or research.get('company_domain'),
@@ -713,7 +733,7 @@ class EmailProcessingCrew:
         try:
             import aiohttp, re
             async with aiohttp.ClientSession() as session:
-                async with session.get(url, timeout=5) as resp:
+                async with session.get(url, timeout=3) as resp:  # Reduced from 5s to 3s
                     if resp.status != 200:
                         return {}
                     html = await resp.text()
