@@ -5,6 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Signed Out - The Well</title>
     <link rel="icon" type="image/png" href="favicon.png">
+    <script>
+        // Clear all authentication data on load
+        window.onload = function() {
+            sessionStorage.clear();
+            localStorage.removeItem('apiKey');
+            localStorage.removeItem('isAuthenticated');
+            // Prevent auto-redirect to login
+            history.pushState(null, '', location.href);
+            window.onpopstate = function () {
+                history.go(1);
+            };
+        };
+    </script>
     <style>
         body {
             font-family: Arial, sans-serif;

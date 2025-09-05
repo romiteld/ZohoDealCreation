@@ -18,6 +18,11 @@ document.addEventListener('DOMContentLoaded', async () => {
 
 // Check if user is authenticated
 async function checkAuthentication() {
+    // Skip auth check if we're on the logout page
+    if (window.location.pathname === '/logout.html') {
+        return;
+    }
+    
     try {
         const response = await fetch('/.auth/me');
         if (!response.ok || response.status === 401) {
@@ -565,5 +570,9 @@ function processAnother() {
 
 // Logout
 function logout() {
-    window.location.href = '/.auth/logout';
+    // Clear all session data
+    sessionStorage.clear();
+    localStorage.removeItem('apiKey');
+    // Use the full logout URL with redirect
+    window.location.href = '/.auth/logout?post_logout_redirect_uri=/logout.html';
 }

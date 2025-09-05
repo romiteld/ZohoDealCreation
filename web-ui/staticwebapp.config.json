@@ -17,8 +17,12 @@
       "allowedRoles": ["anonymous", "authenticated"]
     },
     {
-      "route": "/.auth/logout",
-      "redirect": "/logout.html"
+      "route": "/style.css",
+      "allowedRoles": ["anonymous", "authenticated"]
+    },
+    {
+      "route": "/*.js",
+      "allowedRoles": ["anonymous", "authenticated"]
     },
     {
       "route": "/*",
