@@ -31,7 +31,7 @@
   <ns0:FormSettings>
     <ns0:Form xsi:type="ItemRead">
       <ns0:DesktopSettings>
-        <ns0:SourceLocation DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/taskpane.html?v=1.5.0.3" />
+        <ns0:SourceLocation DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/taskpane.html?v=...1" />
         <ns0:RequestedHeight>250</ns0:RequestedHeight>
       </ns0:DesktopSettings>
     </ns0:Form>
@@ -92,8 +92,8 @@
         </ns4:Images>
         
         <ns4:Urls>
-          <ns4:Url id="Commands.Url" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/commands.html?v=1.5.0.4" />
-          <ns4:Url id="Taskpane.Url" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/taskpane.html?v=1.5.0.4" />
+          <ns4:Url id="Commands.Url" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/commands.html?v=...1" />
+          <ns4:Url id="Taskpane.Url" DefaultValue="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/taskpane.html?v=...1" />
         </ns4:Urls>
         
         <ns4:ShortStrings>
