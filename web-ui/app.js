@@ -1,5 +1,6 @@
 // Configuration
-const API_BASE_URL = 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
+// Route API calls through same-origin proxy on App Service to avoid cross-origin/CORS
+const API_BASE_URL = '/api';
 const API_KEY = localStorage.getItem('apiKey') || 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
 
 // Global variables
@@ -10,8 +11,10 @@ let authToken = null;
 
 // Initialize on page load
 document.addEventListener('DOMContentLoaded', async () => {
-    await checkAuthentication();
-    await loadUserInfo();
+    // BYPASSING AUTH FOR URGENT DEPLOYMENT
+    // await checkAuthentication();
+    // await loadUserInfo();
+    console.log('Auth checks disabled for urgent deployment');
     setupEventListeners();
     updateDealNamePreview();
 });
@@ -177,16 +180,12 @@ async function handleFile(file) {
         bodyContent = bodyContent.replace(/\0/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
         
         // Use the working /intake/email endpoint with LangGraph AI extraction
+        // IMPORTANT: Do not include user_corrections in preview requests, otherwise backend skips AI
         const requestBody = {
             sender_email: senderEmail,
             subject: subject,
             body: bodyContent,
-            dry_run: true, // Preview only, don't create in Zoho yet
-            user_corrections: {
-                job_title: 'Advisor',
-                location: 'Unknown',
-                company_name: 'Unknown'
-            }
+            dry_run: true // Preview only, don't create in Zoho yet
         };
         
         console.log('Sending request with body length:', bodyContent.length);

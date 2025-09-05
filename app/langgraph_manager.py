@@ -65,13 +65,31 @@ class CompanyResearch(BaseModel):
 
 class EmailProcessingWorkflow:
     def __init__(self, openai_api_key: str = None):
-        # Initialize OpenAI client
-        self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
-        if not self.api_key:
-            raise ValueError("OpenAI API key is required")
-        
-        self.client = AsyncOpenAI(api_key=self.api_key)
-        logger.info("OpenAI client initialized for LangGraph workflow")
+        # Initialize OpenAI/Azure OpenAI client
+        azure_endpoint = os.getenv("AZURE_OPENAI_ENDPOINT")
+        azure_key = os.getenv("AZURE_OPENAI_KEY") or os.getenv("AZURE_OPENAI_API_KEY")
+        azure_api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview")
+        azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+
+        if azure_endpoint and azure_key and azure_deployment:
+            # Use Azure OpenAI
+            base_url = azure_endpoint.rstrip('/') + f"/openai/deployments/{azure_deployment}"
+            self.client = AsyncOpenAI(
+                api_key=azure_key,
+                base_url=base_url,
+                default_query={"api-version": azure_api_version}
+            )
+            self.model_name = azure_deployment  # In Azure, the deployment name is used as model
+            logger.info("Azure OpenAI client initialized for LangGraph workflow")
+        else:
+            # Use OpenAI (non-Azure)
+            self.api_key = openai_api_key or os.getenv("OPENAI_API_KEY")
+            if not self.api_key:
+                raise ValueError("OpenAI API key is required")
+            self.client = AsyncOpenAI(api_key=self.api_key)
+            # Default to GPT-5-mini if available, else caller may override
+            self.model_name = os.getenv("OPENAI_MODEL", "gpt-5-mini")
+            logger.info("OpenAI client initialized for LangGraph workflow")
         
         # Build the workflow
         self.graph = self._build_workflow()
@@ -214,14 +232,14 @@ class EmailProcessingWorkflow:
             system_prompt = enhanced_prompt
         else:
             system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis.
-            Extract key recruitment details from the email with ABSOLUTE ACCURACY.
+            Extract key recruitment details from the email with high accuracy.
             
-            ⚠️ CRITICAL ANTI-FABRICATION RULES:
-            1. NEVER invent or fabricate ANY information
-            2. If data is not EXPLICITLY stated in the email, return null/None
-            3. DO NOT guess names, companies, locations, or contact details
-            4. DO NOT infer information that isn't directly stated
-            5. When uncertain, return null rather than a guess
+            EXTRACTION GUIDELINES:
+            1. Extract information that is clearly stated or strongly implied in the email
+            2. Use reasonable inference for obvious cases (e.g., email domain often indicates company)
+            3. For names, accept variations (First Last, Last First, nicknames)
+            4. For locations, accept cities, states, regions, or "Remote"
+            5. Return "Unknown" (not null) when information is unclear but attempted
             
             CRITICAL RULES FOR FORWARDED EMAILS:
             - Check if this is a forwarded email (look for "-----Original Message-----", "From:", "Date:", "Subject:", "Begin forwarded message:", etc.)
@@ -237,14 +255,14 @@ class EmailProcessingWorkflow:
             - Do NOT confuse the person sending the referral with the candidate being referred
             
             DATA EXTRACTION RULES:
-            - ONLY extract information that is EXPLICITLY stated in the email
-            - If information is not present, return null/None - NEVER make it up
+            - Extract information that is clearly stated or reasonably inferred from context
+            - If information is unclear, return "Unknown" rather than null
             - candidate_name: The person being discussed as a potential hire (NOT the referrer)
             - referrer_name: The person who forwarded the email or made the introduction
-            - email: The CANDIDATE's email address (not the referrer's) - MUST be an actual email in the message
-            - phone: Extract from email body or Calendly link parameters if present
-            - company_name: The CANDIDATE's current company (not the recruiting firm) - ONLY if explicitly mentioned
-            - location: ONLY if explicitly stated - DO NOT guess based on area codes or domains
+            - email: The CANDIDATE's email address (check signatures, From fields, Calendly links)
+            - phone: Extract from email body, signatures, or Calendly link parameters
+            - company_name: The CANDIDATE's current company (can infer from email domain if clear)
+            - location: City, state, region, or "Remote" (can infer from context like area codes)
             
             CALENDLY EXTRACTION:
             - Look for Calendly URLs (calendly.com)
@@ -259,7 +277,8 @@ class EmailProcessingWorkflow:
             
             {learning_hints}
             
-            Be precise and NEVER assume or invent information. Leave fields null if uncertain."""
+            Be accurate but pragmatic. Use reasonable inference where appropriate.
+            Return "Unknown" for unclear fields rather than null."""
         
         user_prompt = f"""Analyze this recruitment email and extract the key details:
         
@@ -283,7 +302,7 @@ class EmailProcessingWorkflow:
                         prop_value["additionalProperties"] = False
             
             response = await self.client.chat.completions.create(
-                model="gpt-5-mini",  # Using GPT-5-mini as per requirement
+                model=self.model_name,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}

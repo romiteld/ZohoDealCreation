@@ -318,6 +318,8 @@ ALLOWED_ORIGINS = [
     
     # Azure Static Web App
     "https://proud-ocean-087af290f.2.azurestaticapps.net",
+    # Temporary Azure Storage Static Website (UI)
+    "https://wellintakewebui78196327.z13.web.core.windows.net",
     
     # Azure Container Apps domains
     "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
@@ -412,7 +414,8 @@ if os.getenv("ENVIRONMENT", "production") != "test":
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
-    allow_origin_regex=r"chrome-extension:\/\/.*",
+    # Allow Chrome extension and any Azure Static Web App domains
+    allow_origin_regex=r"chrome-extension:\/\/.*|https:\/\/.*\\.azurestaticapps\\.net",
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allow_headers=["*"],
