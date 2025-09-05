@@ -316,6 +316,9 @@ ALLOWED_ORIGINS = [
     # Custom domain for Outlook Add-in (when DNS is configured)
     "https://addin.emailthewell.com",
     
+    # Azure Static Web App
+    "https://proud-ocean-087af290f.2.azurestaticapps.net",
+    
     # Azure Container Apps domains
     "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
     "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io",
@@ -684,10 +687,24 @@ async def health_check():
 async def process_email(request: EmailRequest, req: Request, _auth=Depends(verify_auth_or_api_key)):
     """Process email and create Zoho CRM records with learning from user corrections"""
     try:
-        # Input validation
+        # Input validation and sanitization
         import re
         
-        # Validate email format
+        # CRITICAL: Remove null bytes and control characters from all input fields
+        # This prevents 500 errors from corrupted .msg file parsing
+        if request.sender_email:
+            request.sender_email = request.sender_email.replace('\x00', '').strip()
+            request.sender_email = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', request.sender_email)
+        
+        if request.subject:
+            request.subject = request.subject.replace('\x00', '').strip()
+            request.subject = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', request.subject)
+        
+        if request.body:
+            request.body = request.body.replace('\x00', '')
+            request.body = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', request.body)
+        
+        # Validate email format after cleaning
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         if not re.match(email_pattern, request.sender_email):
             raise HTTPException(

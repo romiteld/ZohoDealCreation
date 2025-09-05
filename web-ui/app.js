@@ -16,30 +16,23 @@ document.addEventListener('DOMContentLoaded', async () => {
     updateDealNamePreview();
 });
 
-// Check if user is authenticated
+// Check if user is authenticated - NO REDIRECTS, just check status
 async function checkAuthentication() {
-    // Skip auth check if we're on the logout page
-    if (window.location.pathname === '/logout.html') {
-        return;
-    }
-    
     try {
         const response = await fetch('/.auth/me');
-        if (!response.ok || response.status === 401) {
-            window.location.href = '/login.html';
-            return;
-        }
         const data = await response.json();
-        if (!data || !data[0]) {
-            window.location.href = '/login.html';
-            return;
+        
+        if (data && data[0]) {
+            // User is authenticated
+            sessionStorage.setItem('isAuthenticated', 'true');
+            return true;
         }
-        // Store auth status
-        sessionStorage.setItem('isAuthenticated', 'true');
     } catch (error) {
-        console.error('Authentication check failed:', error);
-        window.location.href = '/login.html';
+        console.error('Auth check error:', error);
     }
+    
+    // Not authenticated - but DON'T redirect, Azure handles that
+    return false;
 }
 
 // Load user info from Azure AD
@@ -128,17 +121,34 @@ async function handleFile(file) {
         
         if (file.name.endsWith('.msg')) {
             // Use msg.reader library to parse .msg files
-            const arrayBuffer = await file.arrayBuffer();
-            const msgReader = new MSGReader(arrayBuffer);
-            const fileData = msgReader.getFileData();
-            
-            senderEmail = fileData.senderEmail || 'unknown@example.com';
-            subject = fileData.subject || file.name.replace(/\.msg$/i, '');
-            bodyContent = fileData.body || fileData.bodyHTML || `Email from file: ${file.name}`;
-            
-            // Extract URLs from parsed content
-            if (bodyContent) {
-                extractUrlsFromEmail(bodyContent);
+            try {
+                const arrayBuffer = await file.arrayBuffer();
+                const msgReader = new MSGReader(arrayBuffer);
+                const fileData = msgReader.getFileData();
+                
+                senderEmail = fileData.senderEmail || 'unknown@example.com';
+                subject = fileData.subject || file.name.replace(/\.msg$/i, '');
+                bodyContent = fileData.body || fileData.bodyHTML || `Email from file: ${file.name}`;
+                
+                // Ensure body content is a string and not too large
+                if (typeof bodyContent !== 'string') {
+                    bodyContent = String(bodyContent);
+                }
+                // Truncate if too large (API might have limits)
+                if (bodyContent.length > 50000) {
+                    bodyContent = bodyContent.substring(0, 50000) + '... [truncated]';
+                }
+                
+                // Extract URLs from parsed content
+                if (bodyContent) {
+                    extractUrlsFromEmail(bodyContent);
+                }
+            } catch (parseError) {
+                console.error('Error parsing .msg file:', parseError);
+                // Fallback: send minimal valid data
+                senderEmail = 'unknown@example.com';
+                subject = file.name.replace(/\.msg$/i, '');
+                bodyContent = `Unable to parse .msg file: ${file.name}. Error: ${parseError.message}`;
             }
         } else {
             // .eml files can be read as text
@@ -146,14 +156,31 @@ async function handleFile(file) {
             senderEmail = extractEmailFromFile(emailContent) || 'unknown@example.com';
             subject = extractSubjectFromFile(emailContent) || file.name.replace(/\.eml$/i, '');
             bodyContent = emailContent;
+            
+            // Truncate if too large
+            if (bodyContent && bodyContent.length > 50000) {
+                bodyContent = bodyContent.substring(0, 50000) + '... [truncated]';
+            }
+            
             extractUrlsFromEmail(emailContent);
         }
+        
+        // Ensure all values are valid strings (not undefined/null)
+        senderEmail = senderEmail || 'unknown@example.com';
+        subject = subject || 'Email Upload';
+        bodyContent = bodyContent || 'No body content available';
+        
+        // Clean up ALL fields - remove any null bytes or invalid characters
+        // CRITICAL: This prevents 500 errors from corrupted .msg files
+        senderEmail = senderEmail.replace(/\0/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+        subject = subject.replace(/\0/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '').trim();
+        bodyContent = bodyContent.replace(/\0/g, '').replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
         
         // Use the working /intake/email endpoint with LangGraph AI extraction
         const requestBody = {
             sender_email: senderEmail,
-            subject: subject || 'Email Upload',
-            body: bodyContent || 'No body content available',
+            subject: subject,
+            body: bodyContent,
             dry_run: true, // Preview only, don't create in Zoho yet
             user_corrections: {
                 job_title: 'Advisor',
@@ -161,6 +188,8 @@ async function handleFile(file) {
                 company_name: 'Unknown'
             }
         };
+        
+        console.log('Sending request with body length:', bodyContent.length);
         
         const response = await fetch(`${API_BASE_URL}/intake/email`, {
             method: 'POST',
@@ -174,7 +203,22 @@ async function handleFile(file) {
         if (!response.ok) {
             const errorText = await response.text();
             console.error('API Error:', errorText);
-            throw new Error(`Server error: ${response.status}`);
+            console.error('Request was:', requestBody);
+            
+            // Try to parse error details
+            let errorMessage = `Server error: ${response.status}`;
+            try {
+                const errorJson = JSON.parse(errorText);
+                if (errorJson.detail) {
+                    errorMessage = errorJson.detail || errorMessage;
+                }
+            } catch (e) {
+                // If not JSON, use the raw text if available
+                if (errorText && errorText.length < 200) {
+                    errorMessage = errorText;
+                }
+            }
+            throw new Error(errorMessage);
         }
 
         const data = await response.json();

@@ -60,15 +60,8 @@
         <button onclick="window.location.href='/.auth/login/aad?post_login_redirect_uri=/'">Sign in with Microsoft</button>
     </div>
     <script>
-        // Automatically redirect if already authenticated
-        fetch('/.auth/me')
-            .then(response => response.json())
-            .then(data => {
-                if (data && data[0]) {
-                    window.location.href = '/';
-                }
-            })
-            .catch(() => {});
+        // Clear any stale session data
+        sessionStorage.clear();
     </script>
 </body>
 </html>

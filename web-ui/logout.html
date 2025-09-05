@@ -9,13 +9,7 @@
         // Clear all authentication data on load
         window.onload = function() {
             sessionStorage.clear();
-            localStorage.removeItem('apiKey');
-            localStorage.removeItem('isAuthenticated');
-            // Prevent auto-redirect to login
-            history.pushState(null, '', location.href);
-            window.onpopstate = function () {
-                history.go(1);
-            };
+            localStorage.clear();
         };
     </script>
     <style>
