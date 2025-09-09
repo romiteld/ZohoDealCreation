@@ -25,6 +25,10 @@ from app.service_bus_manager import (
 )
 from app.integrations import ZohoApiClient as ZohoIntegration, AzureBlobStorageClient as AzureBlobStorage, PostgreSQLClient
 from app.business_rules import BusinessRulesEngine
+from app.monitoring import MonitoringService
+from app.correction_learning import CorrectionLearningService, CorrectionRecord
+from app.learning_analytics import LearningAnalytics, ExtractionMetric, TestStrategy
+from app.azure_ai_search_manager import AzureAISearchManager
 
 # Load environment variables
 load_dotenv('.env.local')
@@ -65,17 +69,30 @@ class ProcessingMetrics:
     avg_time_per_email: float
     api_calls: int
     errors: List[str]
+    
+    # Learning metrics
+    pattern_matches_used: int = 0
+    corrections_applied: int = 0
+    templates_used: int = 0
+    confidence_scores: List[float] = None
+    
+    def __post_init__(self):
+        if self.confidence_scores is None:
+            self.confidence_scores = []
 
 
 class BatchEmailProcessor:
-    """Process multiple emails in batches using GPT-5-mini"""
+    """Process multiple emails in batches using GPT-5-mini with comprehensive learning integration"""
     
     def __init__(
         self,
         openai_api_key: str = None,
         service_bus_manager: ServiceBusManager = None,
         zoho_client: ZohoIntegration = None,
-        postgres_client: PostgreSQLClient = None
+        postgres_client: PostgreSQLClient = None,
+        learning_service: CorrectionLearningService = None,
+        analytics_service: LearningAnalytics = None,
+        search_manager: AzureAISearchManager = None
     ):
         """
         Initialize batch processor
@@ -103,11 +120,52 @@ class BatchEmailProcessor:
         # Business rules engine
         self.business_rules = BusinessRulesEngine()
         
+        # Initialize monitoring service
+        try:
+            self.monitoring = MonitoringService()
+            logger.info("Batch processor monitoring initialized")
+        except Exception as e:
+            logger.warning(f"Failed to initialize monitoring: {e}")
+            self.monitoring = None
+        
         # Blob storage for attachments
         self.blob_storage = AzureBlobStorage(
             connection_string=os.getenv("AZURE_STORAGE_CONNECTION_STRING"),
             container_name=os.getenv("AZURE_CONTAINER_NAME", "email-attachments")
         )
+        
+        # Learning and analytics services
+        self.learning_service = learning_service
+        self.analytics_service = analytics_service
+        self.search_manager = search_manager
+        
+        # Initialize learning services if not provided
+        if not self.learning_service and self.postgres_client:
+            try:
+                self.learning_service = CorrectionLearningService(
+                    db_client=self.postgres_client,
+                    use_azure_search=bool(search_manager)
+                )
+                logger.info("Correction learning service initialized for batch processing")
+            except Exception as e:
+                logger.warning(f"Could not initialize learning service: {e}")
+        
+        if not self.analytics_service:
+            try:
+                self.analytics_service = LearningAnalytics(
+                    search_manager=search_manager,
+                    app_insights_key=os.getenv("APPINSIGHTS_INSTRUMENTATION_KEY")
+                )
+                logger.info("Learning analytics service initialized for batch processing")
+            except Exception as e:
+                logger.warning(f"Could not initialize analytics service: {e}")
+        
+        if not self.search_manager and os.getenv("AZURE_SEARCH_ENDPOINT"):
+            try:
+                self.search_manager = AzureAISearchManager()
+                logger.info("Azure AI Search manager initialized for batch processing")
+            except Exception as e:
+                logger.warning(f"Could not initialize search manager: {e}")
         
         # Processing configuration
         self.max_retries = 3
@@ -121,16 +179,168 @@ class BatchEmailProcessor:
         
         logger.info(f"Batch processor initialized with model: {self.model}")
     
-    def _create_batch_prompt(self, emails: List[Dict[str, Any]]) -> str:
+    def _calculate_batch_cost(self, total_tokens: int) -> float:
         """
-        Create optimized prompt for batch processing
+        Calculate estimated cost for batch processing based on tokens used
+        
+        Args:
+            total_tokens: Total tokens consumed
+        
+        Returns:
+            Estimated cost in USD
+        """
+        # GPT-5-mini pricing: $0.25 per 1M input tokens, $1.00 per 1M output tokens
+        # Assume 80% input, 20% output for batch processing
+        if self.model == "gpt-5-mini":
+            input_tokens = total_tokens * 0.8
+            output_tokens = total_tokens * 0.2
+            input_cost = (input_tokens / 1_000_000) * 0.25
+            output_cost = (output_tokens / 1_000_000) * 1.00
+            return input_cost + output_cost
+        else:
+            # Fallback pricing
+            return (total_tokens / 1_000_000) * 1.00
+    
+    async def _create_enhanced_batch_prompt(
+        self, 
+        emails: List[Dict[str, Any]], 
+        use_learning: bool = True
+    ) -> Tuple[str, Dict[str, Any]]:
+        """
+        Create enhanced batch prompt using learning patterns and company templates
         
         Args:
             emails: List of email dictionaries
+            use_learning: Whether to apply learning patterns
         
         Returns:
-            Formatted prompt string
+            Tuple of (enhanced prompt, learning_context)
         """
+        learning_context = {
+            "templates_used": 0,
+            "patterns_applied": 0,
+            "corrections_found": 0,
+            "domain_insights": {}
+        }
+        
+        # Base prompt structure
+        prompt = """You are a Senior Data Analyst specializing in recruitment email analysis.
+        Process the following batch of emails and extract key recruitment details.
+        
+        CRITICAL RULES:
+        1. ONLY extract information EXPLICITLY stated in each email
+        2. Return null/None for missing information - NEVER make it up
+        3. Each email should be processed independently
+        4. Maintain high accuracy and consistency across the batch
+        5. Use domain-specific patterns when available
+        
+        For each email, extract:
+        - candidate_name: The person being referred for the job
+        - job_title: The specific position mentioned
+        - location: City and state if available
+        - company_name: Any company explicitly mentioned
+        - referrer_name: ONLY if explicitly stated as "referred by"
+        - phone: Contact phone number if present
+        - website: Company website if mentioned
+        - industry: Industry or sector if mentioned
+        - confidence_score: Your confidence in the extraction (0.0 to 1.0)
+        
+        """
+        
+        # Add learning-enhanced guidance if services available
+        if use_learning and (self.learning_service or self.search_manager):
+            domain_patterns = await self._get_domain_patterns(emails)
+            if domain_patterns:
+                prompt += "\n\nDOMAIN-SPECIFIC PATTERNS TO APPLY:\n"
+                for domain, patterns in domain_patterns.items():
+                    if patterns:
+                        prompt += f"\nFor emails from {domain}:\n"
+                        for pattern in patterns[:3]:  # Limit to top 3 patterns
+                            prompt += f"- {pattern.get('description', '')}\n"
+                        learning_context["domain_insights"][domain] = len(patterns)
+                        learning_context["patterns_applied"] += len(patterns[:3])
+        
+        # Add company templates if available
+        if self.search_manager:
+            templates = await self._get_company_templates(emails)
+            if templates:
+                prompt += "\n\nCOMPANY TEMPLATES TO REFERENCE:\n"
+                for template in templates[:5]:  # Limit to top 5 templates
+                    prompt += f"- {template.get('company')}: {template.get('pattern')}\n"
+                learning_context["templates_used"] = len(templates[:5])
+        
+        prompt += "\n\nEMAILS TO PROCESS:\n"
+        
+        # Add emails with enhanced context
+        for i, email in enumerate(emails):
+            prompt += f"\n\n--- EMAIL {i} ---\n"
+            prompt += f"From: {email.get('sender_email', 'unknown')}\n"
+            prompt += f"Subject: {email.get('subject', 'No subject')}\n"
+            
+            # Add domain context if available
+            domain = email.get('sender_email', '').split('@')[-1] if '@' in email.get('sender_email', '') else ''
+            if domain in learning_context.get("domain_insights", {}):
+                prompt += f"Domain Context: {learning_context['domain_insights'][domain]} patterns available\n"
+            
+            prompt += f"Body:\n{email.get('body', 'No content')}\n"
+        
+        prompt += "\n\nReturn ONLY valid JSON array with extracted data for each email."
+        
+        return prompt, learning_context
+    
+    async def _get_domain_patterns(self, emails: List[Dict[str, Any]]) -> Dict[str, List[Dict]]:
+        """Get learning patterns for email domains in the batch"""
+        if not self.learning_service:
+            return {}
+        
+        domain_patterns = {}
+        domains = set()
+        
+        for email in emails:
+            sender_email = email.get('sender_email', '')
+            if '@' in sender_email:
+                domain = sender_email.split('@')[-1]
+                domains.add(domain)
+        
+        try:
+            for domain in domains:
+                patterns = await self.learning_service.get_domain_patterns(domain)
+                if patterns:
+                    domain_patterns[domain] = patterns
+        except Exception as e:
+            logger.warning(f"Could not fetch domain patterns: {e}")
+        
+        return domain_patterns
+    
+    async def _get_company_templates(self, emails: List[Dict[str, Any]]) -> List[Dict]:
+        """Get company-specific templates from Azure AI Search"""
+        if not self.search_manager:
+            return []
+        
+        try:
+            # Extract company names mentioned in emails for template lookup
+            companies = set()
+            for email in emails:
+                body = email.get('body', '').lower()
+                # Simple company extraction (could be enhanced)
+                words = body.split()
+                for word in words:
+                    if len(word) > 3 and word.isalpha():
+                        companies.add(word.capitalize())
+            
+            templates = []
+            for company in list(companies)[:10]:  # Limit company lookups
+                template = await self.search_manager.get_company_template(company)
+                if template:
+                    templates.append(template)
+            
+            return templates
+        except Exception as e:
+            logger.warning(f"Could not fetch company templates: {e}")
+            return []
+    
+    def _create_batch_prompt(self, emails: List[Dict[str, Any]]) -> str:
+        """Legacy prompt creation for backward compatibility"""
         prompt = """You are a Senior Data Analyst specializing in recruitment email analysis.
         Process the following batch of emails and extract key recruitment details.
         
@@ -199,6 +409,26 @@ class BatchEmailProcessor:
         
         try:
             logger.info(f"Processing batch {batch_message.batch_id} with {batch_message.total_count} emails")
+            
+            # Create batch status record
+            if self.postgres_client:
+                try:
+                    await self.postgres_client.create_batch_status(
+                        batch_message.batch_id, 
+                        batch_message.total_count,
+                        metadata={
+                            "model": self.model,
+                            "priority": getattr(batch_message, 'priority', 0),
+                            "created_by": "batch_processor"
+                        }
+                    )
+                    # Update to processing status
+                    await self.postgres_client.update_batch_status(
+                        batch_message.batch_id,
+                        status='processing'
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to create batch status: {e}")
             
             # Create batch prompt
             prompt = self._create_batch_prompt(batch_message.emails)
@@ -315,13 +545,50 @@ class BatchEmailProcessor:
                         is_duplicate
                     )
                     
-                    # Store in database for deduplication
-                    if not is_duplicate and self.postgres_client:
-                        await self.postgres_client.store_processed_email(
-                            original_email.get("sender_email"),
-                            enhanced_data.candidate_name,
-                            zoho_result["deal_id"]
-                        )
+                    # Store comprehensive email processing history
+                    if self.postgres_client:
+                        try:
+                            # Extract email body hash for deduplication
+                            import hashlib
+                            email_body = original_email.get("body", "")
+                            email_body_hash = hashlib.md5(email_body.encode('utf-8')).hexdigest() if email_body else None
+                            
+                            # Prepare comprehensive processing data
+                            processing_data = {
+                                'internet_message_id': original_email.get('internet_message_id'),
+                                'sender_email': original_email.get("sender_email"),
+                                'reply_to_email': original_email.get('reply_to'),
+                                'primary_email': zoho_result.get("primary_email") or original_email.get("sender_email"),
+                                'subject': original_email.get("subject"),
+                                'zoho_deal_id': zoho_result.get("deal_id"),
+                                'zoho_account_id': zoho_result.get("account_id"),
+                                'zoho_contact_id': zoho_result.get("contact_id"),
+                                'deal_name': zoho_result.get("deal_name"),
+                                'company_name': enhanced_data.company_name,
+                                'contact_name': enhanced_data.candidate_name,
+                                'processing_status': 'success' if not is_duplicate else 'duplicate_found',
+                                'error_message': None,
+                                'raw_extracted_data': enhanced_data.model_dump() if hasattr(enhanced_data, 'model_dump') else enhanced_data.__dict__,
+                                'email_body_hash': email_body_hash
+                            }
+                            
+                            # Store processing record
+                            processing_id = await self.postgres_client.store_email_processing(processing_data)
+                            logger.info(f"Stored batch email processing record with ID: {processing_id}")
+                            
+                        except Exception as storage_error:
+                            logger.warning(f"Failed to store batch email processing history: {storage_error}")
+                            # Fallback to basic storage
+                            if not is_duplicate:
+                                try:
+                                    await self.postgres_client.store_processed_email(
+                                        original_email.get("sender_email"),
+                                        enhanced_data.candidate_name,
+                                        zoho_result["deal_id"]
+                                    )
+                                except Exception as fallback_error:
+                                    logger.warning(f"Fallback storage also failed: {fallback_error}")
+                                    metrics.errors.append(f"Storage failed: {fallback_error}")
                     
                     results.append({
                         "email_index": email_index,
@@ -342,6 +609,44 @@ class BatchEmailProcessor:
                     
                 except Exception as e:
                     logger.error(f"Error processing email {i}: {e}")
+                    
+                    # Store failed processing record
+                    if self.postgres_client:
+                        try:
+                            email_index = email_data.get("email_index", i) if 'email_data' in locals() else i
+                            if email_index < len(batch_message.emails):
+                                failed_email = batch_message.emails[email_index]
+                                
+                                # Extract email body hash for failed record
+                                import hashlib
+                                email_body = failed_email.get("body", "")
+                                email_body_hash = hashlib.md5(email_body.encode('utf-8')).hexdigest() if email_body else None
+                                
+                                # Store failed processing record
+                                processing_data = {
+                                    'internet_message_id': failed_email.get('internet_message_id'),
+                                    'sender_email': failed_email.get("sender_email"),
+                                    'reply_to_email': failed_email.get('reply_to'),
+                                    'primary_email': failed_email.get("sender_email"),
+                                    'subject': failed_email.get("subject"),
+                                    'zoho_deal_id': None,
+                                    'zoho_account_id': None,
+                                    'zoho_contact_id': None,
+                                    'deal_name': None,
+                                    'company_name': None,
+                                    'contact_name': None,
+                                    'processing_status': 'failed',
+                                    'error_message': str(e),
+                                    'raw_extracted_data': {},
+                                    'email_body_hash': email_body_hash
+                                }
+                                
+                                await self.postgres_client.store_email_processing(processing_data)
+                                logger.info(f"Stored failed batch email processing record for email {i}")
+                                
+                        except Exception as storage_error:
+                            logger.warning(f"Failed to store failed email processing record: {storage_error}")
+                    
                     errors.append({
                         "email_index": i,
                         "error": str(e)
@@ -366,6 +671,80 @@ class BatchEmailProcessor:
                        f"{metrics.processed_emails}/{metrics.total_emails} processed, "
                        f"{metrics.failed_emails} failed in {processing_time:.2f}s")
             
+            # Log batch metrics to Application Insights
+            if self.monitoring:
+                try:
+                    # Custom batch metrics
+                    batch_metrics = {
+                        "batch_id": batch_message.batch_id,
+                        "total_emails": metrics.total_emails,
+                        "processed_emails": metrics.processed_emails,
+                        "failed_emails": metrics.failed_emails,
+                        "success_rate": metrics.processed_emails / max(metrics.total_emails, 1),
+                        "processing_time_seconds": processing_time,
+                        "avg_time_per_email": metrics.avg_time_per_email,
+                        "tokens_used": metrics.total_tokens_used,
+                        "api_calls": metrics.api_calls,
+                        "cost_estimate": self._calculate_batch_cost(metrics.total_tokens_used),
+                        "status": status.value if hasattr(status, 'value') else str(status)
+                    }
+                    
+                    # Track as custom event
+                    await self.monitoring.track_custom_event(
+                        "batch_processing_completed",
+                        batch_metrics
+                    )
+                    
+                    # Track performance metrics
+                    await self.monitoring.track_performance_metric(
+                        "batch_processing_time",
+                        processing_time,
+                        {"batch_size": metrics.total_emails}
+                    )
+                    
+                    await self.monitoring.track_performance_metric(
+                        "batch_success_rate", 
+                        metrics.processed_emails / max(metrics.total_emails, 1),
+                        {"batch_id": batch_message.batch_id}
+                    )
+                    
+                    # Track cost metrics
+                    if metrics.total_tokens_used > 0:
+                        cost = self._calculate_batch_cost(metrics.total_tokens_used)
+                        await self.monitoring.track_cost_metric(
+                            self.model,
+                            metrics.total_tokens_used,
+                            cost,
+                            custom_dimensions={"operation": "batch_processing", "batch_id": batch_message.batch_id}
+                        )
+                    
+                    logger.info(f"Batch metrics logged to Application Insights for batch {batch_message.batch_id}")
+                    
+                except Exception as monitoring_error:
+                    logger.warning(f"Failed to log batch metrics: {monitoring_error}")
+            
+            # Update batch status in database
+            if self.postgres_client:
+                try:
+                    await self.postgres_client.update_batch_status(
+                        batch_message.batch_id,
+                        status=status.value if hasattr(status, 'value') else str(status).lower(),
+                        processed_emails=metrics.processed_emails,
+                        failed_emails=metrics.failed_emails,
+                        processing_time_seconds=processing_time,
+                        tokens_used=metrics.total_tokens_used,
+                        estimated_cost=self._calculate_batch_cost(metrics.total_tokens_used),
+                        metadata={
+                            "model": self.model,
+                            "api_calls": metrics.api_calls,
+                            "success_rate": metrics.processed_emails / max(metrics.total_emails, 1),
+                            "avg_time_per_email": metrics.avg_time_per_email
+                        }
+                    )
+                    logger.info(f"Updated batch status in database for batch {batch_message.batch_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to update batch status: {e}")
+            
             return BatchProcessingResult(
                 batch_id=batch_message.batch_id,
                 status=status,
@@ -379,6 +758,19 @@ class BatchEmailProcessor:
             
         except Exception as e:
             logger.error(f"Critical error processing batch {batch_message.batch_id}: {e}")
+            
+            # Update batch status to failed
+            if self.postgres_client:
+                try:
+                    await self.postgres_client.update_batch_status(
+                        batch_message.batch_id,
+                        status='failed',
+                        failed_emails=batch_message.total_count,
+                        processing_time_seconds=time.time() - start_time,
+                        error_message=str(e)
+                    )
+                except Exception as status_error:
+                    logger.warning(f"Failed to update batch status to failed: {status_error}")
             
             return BatchProcessingResult(
                 batch_id=batch_message.batch_id,
@@ -600,3 +992,292 @@ class BatchProcessingOrchestrator:
             await asyncio.gather(*self.processing_tasks.values(), return_exceptions=True)
         
         logger.info("Batch processing stopped")
+
+
+class EnhancedBatchEmailProcessor(BatchEmailProcessor):
+    """Enhanced batch processor with comprehensive learning integration"""
+    
+    async def _store_email_processing_comprehensive(
+        self,
+        original_email: Dict[str, Any],
+        extracted_data: ExtractedData,
+        zoho_result: Dict[str, Any],
+        confidence_score: float,
+        processing_time_ms: int,
+        learning_context: Dict[str, Any]
+    ):
+        """Store comprehensive email processing data with learning metrics"""
+        if not self.postgres_client:
+            return
+        
+        try:
+            import hashlib
+            email_body = original_email.get("body", "")
+            email_body_hash = hashlib.md5(email_body.encode('utf-8')).hexdigest() if email_body else None
+            
+            processing_data = {
+                'internet_message_id': original_email.get('internet_message_id'),
+                'sender_email': original_email.get("sender_email"),
+                'reply_to_email': original_email.get('reply_to'),
+                'primary_email': zoho_result.get("primary_email") or original_email.get("sender_email"),
+                'subject': original_email.get("subject"),
+                'zoho_deal_id': zoho_result.get("deal_id"),
+                'zoho_account_id': zoho_result.get("account_id"),
+                'zoho_contact_id': zoho_result.get("contact_id"),
+                'deal_name': zoho_result.get("deal_name"),
+                'company_name': extracted_data.company_name,
+                'contact_name': extracted_data.candidate_name,
+                'processing_status': 'batch_success',
+                'error_message': None,
+                'raw_extracted_data': extracted_data.model_dump(),
+                'email_body_hash': email_body_hash,
+                # Learning-specific fields
+                'confidence_score': confidence_score,
+                'processing_time_ms': processing_time_ms,
+                'patterns_used': learning_context.get('patterns_applied', 0),
+                'templates_used': learning_context.get('templates_used', 0),
+                'learning_applied': bool(learning_context.get('patterns_applied', 0) > 0 or learning_context.get('templates_used', 0) > 0)
+            }
+            
+            processing_id = await self.postgres_client.store_email_processing(processing_data)
+            logger.debug(f"Stored comprehensive batch processing record with ID: {processing_id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to store comprehensive processing data: {e}")
+    
+    async def _create_extraction_metric(
+        self,
+        email_domain: str,
+        extracted_data: ExtractedData,
+        confidence_score: float,
+        processing_time_ms: int,
+        learning_context: Dict[str, Any]
+    ):
+        """Create extraction metric for learning analytics"""
+        if not self.analytics_service:
+            return
+        
+        try:
+            from app.learning_analytics import ExtractionMetric
+            import uuid
+            
+            metric = ExtractionMetric(
+                extraction_id=str(uuid.uuid4()),
+                email_domain=email_domain,
+                field_scores={
+                    'candidate_name': confidence_score,
+                    'job_title': confidence_score,
+                    'location': confidence_score,
+                    'company_name': confidence_score
+                },
+                overall_confidence=confidence_score,
+                processing_time_ms=processing_time_ms,
+                used_template=learning_context.get('templates_used', 0) > 0,
+                used_corrections=learning_context.get('patterns_applied', 0) > 0,
+                pattern_matches=learning_context.get('patterns_applied', 0)
+            )
+            
+            await self.analytics_service.record_extraction_metric(metric)
+            logger.debug(f"Recorded extraction metric for domain: {email_domain}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to create extraction metric: {e}")
+    
+    async def _store_batch_learning_insights(
+        self,
+        batch_id: str,
+        metrics: ProcessingMetrics,
+        learning_context: Dict[str, Any]
+    ):
+        """Store batch-level learning insights for continuous improvement"""
+        if not self.analytics_service:
+            return
+        
+        try:
+            insights = {
+                'batch_id': batch_id,
+                'total_emails': metrics.total_emails,
+                'success_rate': metrics.processed_emails / max(metrics.total_emails, 1),
+                'avg_confidence': sum(metrics.confidence_scores) / max(len(metrics.confidence_scores), 1) if metrics.confidence_scores else 0.0,
+                'patterns_effectiveness': learning_context.get('patterns_applied', 0) / max(metrics.total_emails, 1),
+                'templates_effectiveness': learning_context.get('templates_used', 0) / max(metrics.total_emails, 1),
+                'avg_processing_time': metrics.avg_time_per_email,
+                'domain_distribution': learning_context.get('domain_insights', {}),
+                'error_rate': metrics.failed_emails / max(metrics.total_emails, 1),
+                'learning_applied_count': metrics.pattern_matches_used + metrics.templates_used
+            }
+            
+            await self.analytics_service.store_batch_insights(batch_id, insights)
+            logger.info(f"Stored batch learning insights for {batch_id}")
+            
+        except Exception as e:
+            logger.warning(f"Failed to store batch learning insights: {e}")
+    
+    async def get_batch_learning_report(self, batch_ids: List[str]) -> Dict[str, Any]:
+        """Generate learning effectiveness report for multiple batches"""
+        if not self.analytics_service:
+            return {"error": "Analytics service not available"}
+        
+        try:
+            report = {
+                "batch_count": len(batch_ids),
+                "total_emails_analyzed": 0,
+                "overall_success_rate": 0.0,
+                "learning_impact": {
+                    "patterns_usage": 0.0,
+                    "templates_usage": 0.0,
+                    "confidence_improvement": 0.0
+                },
+                "performance_trends": [],
+                "domain_insights": {},
+                "recommendations": []
+            }
+            
+            # Aggregate data from all batches
+            for batch_id in batch_ids:
+                insights = await self.analytics_service.get_batch_insights(batch_id)
+                if insights:
+                    report["total_emails_analyzed"] += insights.get("total_emails", 0)
+                    report["overall_success_rate"] += insights.get("success_rate", 0.0)
+                    
+                    # Track learning usage
+                    report["learning_impact"]["patterns_usage"] += insights.get("patterns_effectiveness", 0.0)
+                    report["learning_impact"]["templates_usage"] += insights.get("templates_effectiveness", 0.0)
+                    
+                    # Aggregate domain insights
+                    for domain, count in insights.get("domain_distribution", {}).items():
+                        if domain not in report["domain_insights"]:
+                            report["domain_insights"][domain] = 0
+                        report["domain_insights"][domain] += count
+            
+            # Calculate averages
+            if len(batch_ids) > 0:
+                report["overall_success_rate"] /= len(batch_ids)
+                report["learning_impact"]["patterns_usage"] /= len(batch_ids)
+                report["learning_impact"]["templates_usage"] /= len(batch_ids)
+            
+            # Generate recommendations
+            if report["learning_impact"]["patterns_usage"] < 0.3:
+                report["recommendations"].append("Consider expanding pattern matching rules for better accuracy")
+            
+            if report["overall_success_rate"] < 0.8:
+                report["recommendations"].append("Review failed extractions to identify common issues")
+            
+            if len(report["domain_insights"]) > 0:
+                top_domain = max(report["domain_insights"], key=report["domain_insights"].get)
+                report["recommendations"].append(f"Focus learning improvements on {top_domain} domain")
+            
+            return report
+            
+        except Exception as e:
+            logger.error(f"Failed to generate batch learning report: {e}")
+            return {"error": str(e)}
+    
+    async def optimize_batch_processing(self) -> Dict[str, Any]:
+        """Analyze processing patterns and suggest optimizations"""
+        try:
+            optimization_report = {
+                "current_performance": {},
+                "bottlenecks": [],
+                "recommendations": [],
+                "learning_effectiveness": {}
+            }
+            
+            if self.analytics_service:
+                # Get performance metrics
+                performance = await self.analytics_service.get_performance_summary()
+                optimization_report["current_performance"] = performance
+                
+                # Identify bottlenecks
+                if performance.get("avg_processing_time", 0) > 2000:  # > 2 seconds
+                    optimization_report["bottlenecks"].append("High processing time - consider prompt optimization")
+                
+                if performance.get("confidence_score", 0) < 0.7:
+                    optimization_report["bottlenecks"].append("Low confidence scores - review extraction patterns")
+                
+                # Learning effectiveness analysis
+                learning_stats = await self.analytics_service.get_learning_effectiveness()
+                optimization_report["learning_effectiveness"] = learning_stats
+                
+                if learning_stats.get("pattern_hit_rate", 0) < 0.4:
+                    optimization_report["recommendations"].append("Expand pattern library for better matching")
+                
+                if learning_stats.get("template_usage", 0) < 0.3:
+                    optimization_report["recommendations"].append("Create more company-specific templates")
+            
+            # System-level optimizations
+            if not self.search_manager:
+                optimization_report["recommendations"].append("Enable Azure AI Search for better pattern matching")
+            
+            if not self.learning_service:
+                optimization_report["recommendations"].append("Enable correction learning for continuous improvement")
+            
+            return optimization_report
+            
+        except Exception as e:
+            logger.error(f"Failed to generate optimization report: {e}")
+            return {"error": str(e)}
+
+
+# Factory function for creating enhanced batch processors
+def create_enhanced_batch_processor(
+    openai_api_key: str = None,
+    service_bus_manager: ServiceBusManager = None,
+    zoho_client: ZohoIntegration = None,
+    postgres_client: PostgreSQLClient = None,
+    enable_learning: bool = True
+) -> EnhancedBatchEmailProcessor:
+    """
+    Create an enhanced batch processor with learning integration
+    
+    Args:
+        openai_api_key: OpenAI API key
+        service_bus_manager: Service Bus manager instance
+        zoho_client: Zoho API client
+        postgres_client: PostgreSQL client
+        enable_learning: Whether to enable learning features
+    
+    Returns:
+        EnhancedBatchEmailProcessor instance
+    """
+    # Initialize learning services if enabled
+    learning_service = None
+    analytics_service = None
+    search_manager = None
+    
+    if enable_learning:
+        # Initialize search manager
+        if os.getenv("AZURE_SEARCH_ENDPOINT"):
+            try:
+                search_manager = AzureAISearchManager()
+            except Exception as e:
+                logger.warning(f"Could not initialize search manager: {e}")
+        
+        # Initialize learning service
+        if postgres_client:
+            try:
+                learning_service = CorrectionLearningService(
+                    db_client=postgres_client,
+                    use_azure_search=bool(search_manager)
+                )
+            except Exception as e:
+                logger.warning(f"Could not initialize learning service: {e}")
+        
+        # Initialize analytics service
+        try:
+            analytics_service = LearningAnalytics(
+                search_manager=search_manager,
+                app_insights_key=os.getenv("APPINSIGHTS_INSTRUMENTATION_KEY")
+            )
+        except Exception as e:
+            logger.warning(f"Could not initialize analytics service: {e}")
+    
+    return EnhancedBatchEmailProcessor(
+        openai_api_key=openai_api_key,
+        service_bus_manager=service_bus_manager,
+        zoho_client=zoho_client,
+        postgres_client=postgres_client,
+        learning_service=learning_service,
+        analytics_service=analytics_service,
+        search_manager=search_manager
+    )

@@ -131,12 +131,32 @@ class PostgreSQLClient:
             UNIQUE(record_type, lookup_key, lookup_value)
         );
         
+        -- Batch processing status tracking
+        CREATE TABLE IF NOT EXISTS batch_processing_status (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            batch_id TEXT UNIQUE NOT NULL,
+            status TEXT NOT NULL, -- 'pending', 'processing', 'completed', 'failed', 'partial'
+            total_emails INTEGER NOT NULL,
+            processed_emails INTEGER DEFAULT 0,
+            failed_emails INTEGER DEFAULT 0,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            started_at TIMESTAMP WITH TIME ZONE,
+            completed_at TIMESTAMP WITH TIME ZONE,
+            processing_time_seconds NUMERIC,
+            tokens_used INTEGER DEFAULT 0,
+            estimated_cost NUMERIC DEFAULT 0.0,
+            error_message TEXT,
+            metadata JSONB DEFAULT '{}'::jsonb
+        );
+        
         -- Create indexes
         CREATE INDEX IF NOT EXISTS idx_email_history_message_id ON email_processing_history(internet_message_id);
         CREATE INDEX IF NOT EXISTS idx_email_history_primary_email ON email_processing_history(primary_email);
         CREATE INDEX IF NOT EXISTS idx_email_history_processed_at ON email_processing_history(processed_at);
         CREATE INDEX IF NOT EXISTS idx_company_cache_domain ON company_enrichment_cache(domain);
         CREATE INDEX IF NOT EXISTS idx_zoho_mapping_lookup ON zoho_record_mapping(record_type, lookup_key, lookup_value);
+        CREATE INDEX IF NOT EXISTS idx_batch_status_batch_id ON batch_processing_status(batch_id);
+        CREATE INDEX IF NOT EXISTS idx_batch_status_created_at ON batch_processing_status(created_at);
         
         -- Vector similarity index
         CREATE INDEX IF NOT EXISTS idx_email_vectors_embedding ON email_vectors 
@@ -382,6 +402,148 @@ class PostgreSQLClient:
         if self.enhanced_client:
             return await self.enhanced_client.get_cost_analytics()
         return {}
+    
+    # Batch processing status methods
+    async def create_batch_status(self, batch_id: str, total_emails: int, metadata: Dict = None) -> str:
+        """Create a new batch processing status record."""
+        await self.init_pool()
+        
+        insert_sql = """
+        INSERT INTO batch_processing_status (
+            batch_id, status, total_emails, metadata
+        ) VALUES ($1, $2, $3, $4)
+        RETURNING id;
+        """
+        
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(
+                insert_sql,
+                batch_id,
+                'pending',
+                total_emails,
+                json.dumps(metadata or {})
+            )
+            return str(row['id'])
+    
+    async def update_batch_status(self, batch_id: str, status: str = None, processed_emails: int = None,
+                                  failed_emails: int = None, processing_time_seconds: float = None,
+                                  tokens_used: int = None, estimated_cost: float = None,
+                                  error_message: str = None, metadata: Dict = None) -> bool:
+        """Update batch processing status."""
+        await self.init_pool()
+        
+        # Build dynamic update query
+        updates = []
+        values = []
+        param_counter = 1
+        
+        if status is not None:
+            updates.append(f"status = ${param_counter}")
+            values.append(status)
+            param_counter += 1
+            
+            # Set timestamps based on status
+            if status == 'processing':
+                updates.append(f"started_at = NOW()")
+            elif status in ['completed', 'failed', 'partial']:
+                updates.append(f"completed_at = NOW()")
+        
+        if processed_emails is not None:
+            updates.append(f"processed_emails = ${param_counter}")
+            values.append(processed_emails)
+            param_counter += 1
+        
+        if failed_emails is not None:
+            updates.append(f"failed_emails = ${param_counter}")
+            values.append(failed_emails)
+            param_counter += 1
+            
+        if processing_time_seconds is not None:
+            updates.append(f"processing_time_seconds = ${param_counter}")
+            values.append(processing_time_seconds)
+            param_counter += 1
+            
+        if tokens_used is not None:
+            updates.append(f"tokens_used = ${param_counter}")
+            values.append(tokens_used)
+            param_counter += 1
+            
+        if estimated_cost is not None:
+            updates.append(f"estimated_cost = ${param_counter}")
+            values.append(estimated_cost)
+            param_counter += 1
+            
+        if error_message is not None:
+            updates.append(f"error_message = ${param_counter}")
+            values.append(error_message)
+            param_counter += 1
+            
+        if metadata is not None:
+            updates.append(f"metadata = ${param_counter}")
+            values.append(json.dumps(metadata))
+            param_counter += 1
+        
+        if not updates:
+            return True  # No updates to make
+        
+        # Add batch_id as the last parameter
+        values.append(batch_id)
+        update_sql = f"""
+        UPDATE batch_processing_status 
+        SET {', '.join(updates)}
+        WHERE batch_id = ${param_counter}
+        """
+        
+        async with self.pool.acquire() as conn:
+            result = await conn.execute(update_sql, *values)
+            return result == "UPDATE 1"
+    
+    async def get_batch_status(self, batch_id: str) -> Optional[Dict]:
+        """Get batch processing status."""
+        await self.init_pool()
+        
+        query = "SELECT * FROM batch_processing_status WHERE batch_id = $1"
+        
+        async with self.pool.acquire() as conn:
+            row = await conn.fetchrow(query, batch_id)
+            if row:
+                result = dict(row)
+                # Parse JSON metadata
+                if result.get('metadata'):
+                    try:
+                        result['metadata'] = json.loads(result['metadata'])
+                    except json.JSONDecodeError:
+                        result['metadata'] = {}
+                return result
+            return None
+    
+    async def list_batch_statuses(self, limit: int = 50, status_filter: str = None) -> List[Dict]:
+        """List batch processing statuses."""
+        await self.init_pool()
+        
+        base_query = "SELECT * FROM batch_processing_status"
+        params = []
+        
+        if status_filter:
+            base_query += " WHERE status = $1"
+            params.append(status_filter)
+            
+        base_query += " ORDER BY created_at DESC LIMIT $" + str(len(params) + 1)
+        params.append(limit)
+        
+        async with self.pool.acquire() as conn:
+            rows = await conn.fetch(base_query, *params)
+            results = []
+            for row in rows:
+                result = dict(row)
+                # Parse JSON metadata
+                if result.get('metadata'):
+                    try:
+                        result['metadata'] = json.loads(result['metadata'])
+                    except json.JSONDecodeError:
+                        result['metadata'] = {}
+                results.append(result)
+            return results
 
 class AzureBlobStorageClient:
     """Handles uploading files to Azure Blob Storage."""

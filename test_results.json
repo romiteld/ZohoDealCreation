@@ -1,0 +1,41 @@
+{
+  "test_session": {
+    "start_time": "2025-09-09T16:27:06.079609",
+    "end_time": "2025-09-09T16:27:06.989424",
+    "duration_seconds": 0.909815
+  },
+  "summary": {
+    "total_tests": 3,
+    "passed": 0,
+    "failed": 3,
+    "errors": 0,
+    "skipped": 0,
+    "success_rate": 0.0
+  },
+  "results": [
+    {
+      "test_file": "test_agent_integrations.py",
+      "test_class": "Quick",
+      "test_method": "test_agent_integrations.py::TestStorageIntegration::test_comprehensive_storage_vs_basic",
+      "status": "failed",
+      "duration": 0.0,
+      "error_message": ""
+    },
+    {
+      "test_file": "test_data_validation.py",
+      "test_class": "Quick",
+      "test_method": "test_data_validation.py::TestDataValidation::test_email_payload_validation",
+      "status": "failed",
+      "duration": 0.0,
+      "error_message": ""
+    },
+    {
+      "test_file": "test_migrated_infrastructure.py",
+      "test_class": "Quick",
+      "test_method": "test_migrated_infrastructure.py::TestContainerApp::test_health_endpoint",
+      "status": "failed",
+      "duration": 0.0,
+      "error_message": ""
+    }
+  ]
+}

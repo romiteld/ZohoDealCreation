@@ -46,8 +46,18 @@ class CorrectionRecord(BaseModel):
 class CorrectionLearningService:
     """Service to manage correction learning and AI improvement with Azure AI Search"""
     
-    def __init__(self, db_client, use_azure_search: bool = True):
-        self.db = db_client
+    def __init__(self, connection_manager, use_azure_search: bool = True):
+        # Accept both old-style db_client and new connection_manager
+        if hasattr(connection_manager, 'get_connection'):
+            self.connection_manager = connection_manager
+            self.db = None  # Will use connection manager for all operations
+            logger.info("CorrectionLearningService initialized with DatabaseConnectionManager")
+        else:
+            # Fallback to old-style db_client for backward compatibility
+            self.db = connection_manager
+            self.connection_manager = None
+            logger.info("CorrectionLearningService initialized with legacy db_client")
+        
         self.use_azure_search = use_azure_search
         
         # Initialize Azure AI Search if enabled
@@ -60,10 +70,12 @@ class CorrectionLearningService:
                 logger.warning(f"Could not initialize Azure AI Search: {e}")
                 self.search_manager = None
         
-        self._ensure_tables()
+        # Tables are already created by the connection manager
+        if not self.connection_manager:
+            self._ensure_tables_legacy()
     
-    def _ensure_tables(self):
-        """Ensure correction tables exist in database"""
+    def _ensure_tables_legacy(self):
+        """Ensure correction tables exist in database (legacy method for old db_client)"""
         try:
             # Create corrections table
             self.db.execute("""
@@ -110,6 +122,35 @@ class CorrectionLearningService:
         except Exception as e:
             logger.warning(f"Could not create correction tables: {e}")
     
+    async def _execute_query(self, query: str, *args, fetch_mode: str = 'execute'):
+        """Execute query using either connection manager or legacy db client"""
+        if self.connection_manager:
+            return await self.connection_manager.execute_query(query, *args, fetch_mode=fetch_mode)
+        else:
+            # Legacy synchronous db client
+            if fetch_mode == 'execute':
+                return self.db.execute(query, *args)
+            elif fetch_mode == 'fetchval':
+                return self.db.fetchval(query, *args)
+            elif fetch_mode == 'fetchrow':
+                return self.db.fetchrow(query, *args)
+            elif fetch_mode == 'fetch':
+                return self.db.fetch(query, *args)
+            else:
+                raise ValueError(f"Invalid fetch_mode: {fetch_mode}")
+    
+    async def _execute_transaction(self, queries: List[tuple]) -> List[Any]:
+        """Execute multiple queries in a transaction"""
+        if self.connection_manager:
+            return await self.connection_manager.execute_transaction(queries)
+        else:
+            # Legacy client - execute queries sequentially (not ideal but maintains compatibility)
+            results = []
+            for query, args, fetch_mode in queries:
+                result = await self._execute_query(query, *args, fetch_mode=fetch_mode)
+                results.append(result)
+            return results
+    
     async def store_correction(
         self,
         email_domain: str,
@@ -154,18 +195,19 @@ class CorrectionLearningService:
                     logger.warning(f"Could not store in Azure AI Search: {e}")
             
             # Store correction record in PostgreSQL
-            if self.db:
-                self.db.execute("""
+            if self.connection_manager or self.db:
+                await self._execute_query("""
                     INSERT INTO ai_corrections 
                     (email_domain, original_extraction, user_corrections, field_corrections, email_snippet)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4, $5)
+                """, 
                     email_domain,
                     json.dumps(original_extraction),
                     json.dumps(user_corrections),
                     json.dumps(field_corrections),
-                    email_snippet[:500] if email_snippet else None
-                ))
+                    email_snippet[:500] if email_snippet else None,
+                    fetch_mode='execute'
+                )
                 
                 # Update learning patterns
                 for field, correction in field_corrections.items():
@@ -193,35 +235,36 @@ class CorrectionLearningService:
         """Update or create a learning pattern"""
         try:
             # Check if pattern exists
-            result = self.db.execute("""
+            result = await self._execute_query("""
                 SELECT id, frequency FROM learning_patterns
-                WHERE field_name = %s 
-                AND from_value = %s 
-                AND to_value = %s 
-                AND email_domain = %s
-            """, (field_name, str(from_value), str(to_value), email_domain))
+                WHERE field_name = $1 
+                AND from_value = $2 
+                AND to_value = $3 
+                AND email_domain = $4
+            """, field_name, str(from_value), str(to_value), email_domain, fetch_mode='fetchrow')
             
             if result:
                 # Update frequency
-                pattern_id = result[0]['id']
-                self.db.execute("""
+                pattern_id = result['id']
+                await self._execute_query("""
                     UPDATE learning_patterns 
                     SET frequency = frequency + 1, last_seen = NOW()
-                    WHERE id = %s
-                """, (pattern_id,))
+                    WHERE id = $1
+                """, pattern_id, fetch_mode='execute')
             else:
                 # Create new pattern
-                self.db.execute("""
+                await self._execute_query("""
                     INSERT INTO learning_patterns 
                     (field_name, pattern_type, from_value, to_value, email_domain)
-                    VALUES (%s, %s, %s, %s, %s)
-                """, (
+                    VALUES ($1, $2, $3, $4, $5)
+                """, 
                     field_name,
                     'value_correction',
                     str(from_value),
                     str(to_value),
-                    email_domain
-                ))
+                    email_domain,
+                    fetch_mode='execute'
+                )
             
         except Exception as e:
             logger.warning(f"Could not update learning pattern: {e}")

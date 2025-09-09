@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-**Well Intake API** - An intelligent email processing system that automates CRM record creation in Zoho from recruitment emails. Uses LangGraph with GPT-5-mini for structured data extraction through a three-node workflow (Extract → Research → Validate). Deployed on Azure Container Apps with PostgreSQL for deduplication.
+**Well Intake API** - An intelligent email processing system that automates CRM record creation in Zoho from recruitment emails. Uses LangGraph with GPT-5 for structured data extraction through a three-node workflow (Extract → Research → Validate). Deployed on Azure Container Apps with PostgreSQL for deduplication.
 
 ## Architecture
 
@@ -93,7 +93,7 @@ curl https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/h
 ## Critical Constraints
 
 ⚠️ **NEVER CHANGE** - System requirements that must not be modified:
-- **AI Model**: Always use `gpt-5-mini` with `temperature=1`
+- **AI Model**: Always use `gpt-5` with `temperature=1`
 - **Owner Assignment**: Use `ZOHO_DEFAULT_OWNER_EMAIL` environment variable, never hardcode IDs
 - **Zoho API**: Use v8 endpoints (not v6)
 - **Field Names**: Use `Source` (not `Lead_Source`), `Source_Detail` for referrer names
@@ -144,7 +144,7 @@ USE_LANGGRAPH=true  # CRITICAL: Enables LangGraph
 
 # OpenAI
 OPENAI_API_KEY=sk-proj-...
-OPENAI_MODEL=gpt-5-mini  # DO NOT CHANGE
+OPENAI_MODEL=gpt-5  # DO NOT CHANGE
 
 # Azure
 DATABASE_URL=postgresql://...

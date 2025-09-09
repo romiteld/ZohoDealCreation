@@ -1,0 +1,105 @@
+{
+  "test_start": "2025-09-09T16:07:08.136976",
+  "redis_connected": true,
+  "fallback_mode": false,
+  "basic_operations": {
+    "cache_set_success": 3,
+    "cache_get_success": 3,
+    "data_integrity_ok": 3,
+    "total_tests": 3
+  },
+  "performance": {
+    "avg_miss_time_ms": 33.07032585144043,
+    "avg_hit_time_ms": 32.58922100067139,
+    "performance_improvement_pct": 1.454793197171015,
+    "speed_ratio": 1.0147626987082363
+  },
+  "cost_savings": {
+    "total_requests": 50,
+    "cache_hits": 33,
+    "hit_rate": 66.0,
+    "cost_without_cache": 0.00625,
+    "cost_with_cache": 0.0025375000000000003,
+    "savings": 0.0037125,
+    "savings_percentage": 59.4,
+    "redis_metrics": {
+      "hits": 46,
+      "misses": 10,
+      "errors": 0,
+      "savings": 0.005175,
+      "hit_rate": "82.14%",
+      "total_requests": 56,
+      "estimated_monthly_savings": 0.15525,
+      "health_status": "healthy",
+      "connection_failures": 0,
+      "timeout_failures": 0,
+      "fallback_activations": 0,
+      "uptime_percentage": "100.00%",
+      "is_connected": true,
+      "fallback_mode": false,
+      "fallback_reason": null,
+      "circuit_breaker_open": false,
+      "circuit_breaker_failures": 0,
+      "last_failure_time": null,
+      "next_retry_time": null,
+      "last_connection_attempt": "2025-09-09T16:07:07.747371",
+      "last_successful_operation": "2025-09-09T16:07:10.717603",
+      "redis_memory_used": "434.03K",
+      "redis_connected_clients": 5,
+      "redis_uptime_seconds": 504241,
+      "redis_version": "6.0.14"
+    }
+  },
+  "cache_strategies": {
+    "classifications": {
+      "referral": {
+        "expected": "referral",
+        "actual": "referral",
+        "correct": true
+      },
+      "recruiter": {
+        "expected": "recruiter",
+        "actual": "recruiter",
+        "correct": true
+      },
+      "application": {
+        "expected": "application",
+        "actual": "recruiter",
+        "correct": false
+      }
+    },
+    "ttl_assignments": {
+      "referral": {
+        "should_cache": false,
+        "ttl_hours": 48.0,
+        "pattern_key": null
+      },
+      "recruiter": {
+        "should_cache": false,
+        "ttl_hours": 168.0,
+        "pattern_key": "recruiter:linkedin"
+      },
+      "application": {
+        "should_cache": false,
+        "ttl_hours": 168.0,
+        "pattern_key": null
+      }
+    },
+    "pattern_recognition": {
+      "total_patterns": 4,
+      "pattern_types": [
+        "referral",
+        "recruiter",
+        "recruiter",
+        "application"
+      ]
+    }
+  },
+  "invalidation": {
+    "items_cached": 3,
+    "items_deleted": 24,
+    "items_remaining": 0,
+    "invalidation_effective": true
+  },
+  "test_end": "2025-09-09T16:07:11.087219"
+}
