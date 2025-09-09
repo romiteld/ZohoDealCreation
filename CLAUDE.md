@@ -226,6 +226,20 @@ Check LangGraph is enabled: `USE_LANGGRAPH=true`
 
 ## Recent Updates
 
+### 2025-09-09: CDN Proxy Routing Fix
+✅ **Fixed Flask Proxy CDN Management Routes**
+- **Issue**: CDN endpoints returning 404 through proxy despite working directly on backend
+- **Root Cause**: Conflict between IIS web.config URL rewrites and Flask routing
+- **Solution**: Removed IIS `/api/*` rewrite rule, let Flask handle all API routing
+- **New Routes**:
+  - `/api/cdn/*` → Backend `/api/cdn/*` (CDN management)
+  - `/cdn/*` → Backend `/api/cdn/*` (Alias route for convenience)
+- **Endpoints Now Working**:
+  - `GET /api/cdn/status` - CDN configuration and metrics
+  - `POST /api/cdn/purge` - Purge specific paths from CDN cache
+  - `GET /cdn/status` - Alias for CDN status
+  - `POST /cdn/purge` - Alias for CDN purge
+
 ### 2025-08-29: GPT-5-mini 400K Context Optimization
 ✅ **Complete Azure Infrastructure Enhancement**
 - **PostgreSQL with pgvector**: 400K context window support, similarity search

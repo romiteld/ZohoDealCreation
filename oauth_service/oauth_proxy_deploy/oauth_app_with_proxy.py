@@ -202,8 +202,8 @@ def proxy_api(path):
         return jsonify({'error': 'Service temporarily unavailable'}), 503
     
     try:
-        # Build target URL
-        target_url = urljoin(MAIN_API_URL, f'/{path}')
+        # Build target URL - Flask now handles /api/* routing directly
+        target_url = urljoin(MAIN_API_URL, f'/api/{path}')
         if request.query_string:
             target_url += '?' + request.query_string.decode()
         
@@ -286,6 +286,90 @@ def proxy_api(path):
         
     except Exception as e:
         logger.error(f"Error proxying request: {str(e)}")
+        record_circuit_failure()
+        return jsonify({'error': 'Internal proxy error', 'message': str(e)}), 500
+
+@app.route('/cdn/<path:path>', methods=['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'])
+def proxy_cdn(path):
+    """Alias route: forward /cdn/* to backend /api/cdn/*"""
+    client_ip = request.remote_addr
+
+    if not check_rate_limit(client_ip):
+        logger.warning(f"Rate limit exceeded for {client_ip}")
+        return jsonify({'error': 'Rate limit exceeded'}), 429
+
+    if not check_circuit_breaker():
+        logger.warning("Circuit breaker is open")
+        return jsonify({'error': 'Service temporarily unavailable'}), 503
+
+    try:
+        # Build target URL - route to /api/cdn/* on backend
+        target_url = urljoin(MAIN_API_URL, f'/api/cdn/{path}')
+        if request.query_string:
+            target_url += '?' + request.query_string.decode()
+
+        logger.info(f"Proxying {request.method} request to {target_url}")
+
+        headers = {key: value for key, value in request.headers if key.lower() not in ['host', 'content-length', 'connection']}
+        if MAIN_API_KEY:
+            headers['X-API-Key'] = MAIN_API_KEY
+        headers['X-Forwarded-For'] = client_ip
+        headers['X-Forwarded-Proto'] = request.scheme
+        headers['X-Forwarded-Host'] = request.host
+        headers['X-Original-URL'] = request.url
+
+        data = None
+        json_data = None
+        files = None
+        if request.method in ['POST', 'PUT', 'PATCH']:
+            if request.is_json:
+                json_data = request.get_json()
+            elif request.files:
+                files = {key: (file.filename, file.stream, file.content_type) for key, file in request.files.items()}
+                data = request.form.to_dict()
+            else:
+                data = request.get_data()
+
+        proxy_response = requests.request(
+            method=request.method,
+            url=target_url,
+            headers=headers,
+            data=data,
+            json=json_data,
+            files=files,
+            timeout=PROXY_TIMEOUT,
+            stream=True,
+            allow_redirects=False
+        )
+
+        record_circuit_success()
+
+        response_headers = {}
+        for key, value in proxy_response.headers.items():
+            if key.lower() not in ['content-encoding', 'content-length', 'connection']:
+                response_headers[key] = value
+
+        def generate():
+            for chunk in proxy_response.iter_content(chunk_size=PROXY_CHUNK_SIZE):
+                if chunk:
+                    yield chunk
+
+        return Response(
+            stream_with_context(generate()),
+            status=proxy_response.status_code,
+            headers=response_headers
+        )
+
+    except requests.exceptions.Timeout:
+        logger.error(f"Timeout proxying CDN request to {path}")
+        record_circuit_failure()
+        return jsonify({'error': 'Request timeout'}), 504
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error proxying CDN request: {str(e)}")
+        record_circuit_failure()
+        return jsonify({'error': 'Connection error to backend service'}), 502
+    except Exception as e:
+        logger.error(f"Error proxying CDN request: {str(e)}")
         record_circuit_failure()
         return jsonify({'error': 'Internal proxy error', 'message': str(e)}), 500
 

@@ -25,6 +25,8 @@ An intelligent email processing system that automatically converts recruitment e
 - **🚀 CI/CD Pipeline**: GitHub Actions for automatic version increment and cache busting
 - **💾 Redis Caching**: Intelligent caching with automatic invalidation on deployment
 - **📊 Manifest Analytics**: Track version adoption, cache performance, and error rates
+- **🌐 CDN Management**: Azure Front Door integration with cache purging capabilities
+- **🔀 Proxy Routing**: Flask-based routing with /api/* and /cdn/* endpoint support
 
 ## 🏗️ Architecture Overview
 
@@ -184,6 +186,7 @@ Developer Push → GitHub Actions → Version Increment → Cache Clear → Dock
 | GET | `/health` | Service health with proxy status | None |
 | GET/POST | `/oauth/token` | Get/refresh Zoho access token | None |
 | ALL | `/api/*` | Proxy to Container Apps API | Automatic |
+| ALL | `/cdn/*` | CDN management (alias for /api/cdn/*) | Automatic |
 | GET | `/proxy/health` | Backend API health check | None |
 | GET | `/manifest.xml` | Outlook Add-in manifest | None |
 
@@ -194,6 +197,8 @@ Developer Push → GitHub Actions → Version Increment → Cache Clear → Dock
 | POST | `/api/intake/email` | Process email and create Zoho records | Handled by proxy |
 | GET | `/api/test/kevin-sullivan` | Test pipeline with sample data | Handled by proxy |
 | GET | `/api/health` | Backend health check | Handled by proxy |
+| GET | `/api/cdn/status` | CDN configuration and metrics | Handled by proxy |
+| POST | `/api/cdn/purge` | Purge CDN cache for specific paths | Handled by proxy |
 
 ### Request Format
 
