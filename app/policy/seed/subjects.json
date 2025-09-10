@@ -1,0 +1,72 @@
+[
+  {
+    "variant_id": "subject_control",
+    "text": "TalentWell Weekly Digest - {week_of}",
+    "alpha": 10,
+    "beta": 10,
+    "is_control": true
+  },
+  {
+    "variant_id": "subject_standout",
+    "text": "This Week's Standout Candidates - {week_of}",
+    "alpha": 8,
+    "beta": 12,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_top_talent",
+    "text": "Top Talent Alert: {count} Exceptional Candidates",
+    "alpha": 7,
+    "beta": 13,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_action",
+    "text": "Action Required: Review {count} Priority Candidates",
+    "alpha": 9,
+    "beta": 11,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_highlights",
+    "text": "Weekly Highlights: {count} Candidates Ready for Next Steps",
+    "alpha": 8,
+    "beta": 12,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_personal",
+    "text": "Steve, Your Weekly Candidate Review is Ready",
+    "alpha": 11,
+    "beta": 9,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_urgent",
+    "text": "🔥 Hot Candidates: Review Before They're Gone",
+    "alpha": 6,
+    "beta": 14,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_data",
+    "text": "Data-Driven: {count} Candidates Match Your Criteria",
+    "alpha": 7,
+    "beta": 13,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_exclusive",
+    "text": "Exclusive: Pre-Screened Candidates for Your Review",
+    "alpha": 8,
+    "beta": 12,
+    "is_control": false
+  },
+  {
+    "variant_id": "subject_summary",
+    "text": "Executive Summary: This Week's Best Candidates",
+    "alpha": 9,
+    "beta": 11,
+    "is_control": false
+  }
+]

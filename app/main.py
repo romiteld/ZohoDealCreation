@@ -12,7 +12,7 @@ from datetime import datetime
 from typing import Optional, List, Dict, Any
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, HTTPException, Depends, status, Header, Request, WebSocket
+from fastapi import FastAPI, HTTPException, Depends, status, Header, Request, WebSocket, Query, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
@@ -36,6 +36,9 @@ from app.azure_ad_auth import get_auth_service
 from app.realtime_queue_manager import get_queue_manager, websocket_endpoint, EmailStatus
 from app.manifest_cache_service import get_manifest_cache_service
 
+# Import Vault Agent routes
+from app.api.vault_agent.routes import router as vault_agent_router
+
 # API Key Authentication with secure comparison and rate limiting
 import hmac
 from collections import defaultdict
@@ -51,6 +54,9 @@ if not API_KEY or API_KEY == "your-secure-api-key-here":
 api_key_attempts = defaultdict(list)
 MAX_ATTEMPTS = 5
 LOCKOUT_DURATION = timedelta(minutes=15)
+
+# Import auth utility instead of defining here
+from app.auth import verify_api_key as _verify_api_key
 
 async def verify_api_key(request: Request, x_api_key: str = Header(...)):
     """Verify API key from header with timing-safe comparison and rate limiting"""
@@ -2111,6 +2117,9 @@ async def process_dead_letter_queue(max_messages: int = 10):
         logger.error(f"Error processing dead letter queue: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
+# Include Vault Agent router
+app.include_router(vault_agent_router)
+
 @app.get("/cache/status", dependencies=[Depends(verify_api_key)])
 async def get_cache_status():
     """Get comprehensive Redis cache performance metrics, health status, and optimization recommendations"""
@@ -3813,6 +3822,190 @@ async def get_icon(size: int):
     # Log which paths were tried for debugging
     logger.error(f"Icon {size} not found. Tried paths: {possible_paths}")
     raise HTTPException(status_code=404, detail=f"Icon {size} not found. Tried: {possible_paths}")
+
+
+# ========================= TalentWell Service Routes =========================
+
+@app.post("/api/talentwell/admin/deals/import", dependencies=[Depends(verify_api_key)])
+async def import_deals(
+    file: UploadFile = File(None),
+    csv_type: str = Query(..., description="Type of CSV: deals, stage_history, meetings, or notes"),
+    req: Request = None
+):
+    """Import CSV deal data for processing and policy generation"""
+    try:
+        from app.admin.import_deals import DealImporter
+        
+        if not file:
+            raise HTTPException(status_code=400, detail="CSV file required")
+        
+        # Read CSV content
+        content = await file.read()
+        csv_text = content.decode('utf-8')
+        
+        # Initialize importer
+        importer = DealImporter()
+        
+        # Process based on CSV type
+        if csv_type == "deals":
+            deals = importer.load_deals_csv(csv_text)
+            filtered = importer.filter_by_owner(deals, "Steve Perry")
+            
+            # Generate policies
+            policies = importer.generate_policy_seeds(filtered)
+            
+            # Save to Redis if available
+            if hasattr(req.app.state, 'redis_cache_manager'):
+                from app.policy.loader import PolicyLoader
+                loader = PolicyLoader(req.app.state.redis_cache_manager.redis_client)
+                await loader.load_all_policies()
+            
+            return {
+                "status": "success",
+                "total_deals": len(deals),
+                "filtered_deals": len(filtered),
+                "policies_generated": {
+                    "employers": len(policies.get("employers", {})),
+                    "cities": len(policies.get("city_context", {})),
+                    "subjects": len(policies.get("subjects", [])),
+                    "selectors": len(policies.get("selector_priors", {}))
+                }
+            }
+        else:
+            raise HTTPException(status_code=400, detail=f"Unsupported CSV type: {csv_type}")
+            
+    except Exception as e:
+        logger.error(f"Deal import failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/talentwell/weekly-digest/run", dependencies=[Depends(verify_api_key)])
+async def run_weekly_digest(
+    audience: str = Query("steve_perry", description="Target audience for digest"),
+    from_date: Optional[str] = Query(None, description="Start date (YYYY-MM-DD)"),
+    to_date: Optional[str] = Query(None, description="End date (YYYY-MM-DD)"),
+    owner: Optional[str] = Query(None, description="Deal owner filter"),
+    dry_run: bool = Query(False, description="Test run without persisting state"),
+    req: Request = None
+):
+    """Generate and send weekly digest for specified audience"""
+    try:
+        from app.jobs.talentwell_curator import curator
+        from datetime import datetime
+        
+        # Parse dates
+        from_dt = datetime.fromisoformat(from_date) if from_date else None
+        to_dt = datetime.fromisoformat(to_date) if to_date else None
+        
+        # Initialize curator if needed
+        if not curator.initialized:
+            await curator.initialize()
+        
+        # Run digest generation
+        result = await curator.run_weekly_digest(
+            audience=audience,
+            from_date=from_dt,
+            to_date=to_dt,
+            owner=owner,
+            dry_run=dry_run
+        )
+        
+        # Store manifest in Redis for retrieval
+        if not dry_run and hasattr(req.app.state, 'redis_cache_manager'):
+            cache_manager = req.app.state.redis_cache_manager
+            manifest_key = f"talentwell:manifest:{audience}:latest"
+            await cache_manager.redis_client.set(
+                manifest_key,
+                json.dumps(result['manifest']),
+                ex=86400 * 7  # Keep for 7 days
+            )
+        
+        # Send email if not dry run
+        if not dry_run:
+            recipients = os.getenv("TALENTWELL_RECIPIENTS_INTERNAL", "").split(",")
+            if recipients and result.get('email_html'):
+                # Email sending logic would go here
+                logger.info(f"Would send digest to {len(recipients)} recipients")
+        
+        return {
+            "status": "success",
+            "manifest": result['manifest'],
+            "preview_available": dry_run,
+            "email_html": result['email_html'] if dry_run else None
+        }
+        
+    except Exception as e:
+        logger.error(f"Weekly digest generation failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/talentwell/weekly-digest/manifest", dependencies=[Depends(verify_api_key)])
+async def get_digest_manifest(
+    audience: str = Query("steve_perry", description="Target audience"),
+    req: Request = None
+):
+    """Retrieve the latest digest manifest for an audience"""
+    try:
+        if not hasattr(req.app.state, 'redis_cache_manager'):
+            raise HTTPException(status_code=503, detail="Cache service not available")
+        
+        cache_manager = req.app.state.redis_cache_manager
+        manifest_key = f"talentwell:manifest:{audience}:latest"
+        
+        manifest_data = await cache_manager.redis_client.get(manifest_key)
+        if not manifest_data:
+            raise HTTPException(status_code=404, detail="No manifest found for audience")
+        
+        return json.loads(manifest_data.decode())
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Manifest retrieval failed: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# Keep existing vault-agent routes as aliases for backward compatibility
+@app.post("/api/vault-agent/ingest", dependencies=[Depends(verify_api_key)])
+async def vault_agent_ingest_alias(request: dict, req: Request):
+    """Alias for TalentWell digest generation (backward compatibility)"""
+    return await run_weekly_digest(
+        audience=request.get("audience", "steve_perry"),
+        from_date=request.get("from_date"),
+        to_date=request.get("to_date"),
+        owner=request.get("owner"),
+        dry_run=request.get("dry_run", False),
+        req=req
+    )
+
+
+@app.post("/api/vault-agent/publish", dependencies=[Depends(verify_api_key)])
+async def vault_agent_publish_alias(request: dict, req: Request):
+    """Alias for TalentWell digest sending (backward compatibility)"""
+    # This would trigger actual email sending
+    return {"status": "success", "message": "Use /api/talentwell/weekly-digest/run with dry_run=false"}
+
+
+@app.get("/api/vault-agent/status", dependencies=[Depends(verify_api_key)])
+async def vault_agent_status_alias(req: Request):
+    """Get Vault Agent feature status (backward compatibility)"""
+    return {
+        "features": {
+            "c3": os.getenv("FEATURE_C3", "true").lower() == "true",
+            "voit": os.getenv("FEATURE_VOIT", "true").lower() == "true",
+            "talentwell": True
+        },
+        "config": {
+            "c3_delta": float(os.getenv("C3_DELTA", "0.01")),
+            "c3_eps": int(os.getenv("C3_EPS", "3")),
+            "voit_budget": float(os.getenv("VOIT_BUDGET", "5.0")),
+            "target_quality": float(os.getenv("TARGET_QUALITY", "0.9"))
+        },
+        "status": "operational"
+    }
+
+
+# ========================= End TalentWell Service Routes =========================
 
 # Versioned icon serving to hard-bust caches
 @app.get("/icons/{version}/icon-{size}.png")

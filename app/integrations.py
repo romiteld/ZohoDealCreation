@@ -41,6 +41,43 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+# Zoho API configuration
+ZOHO_BASE_URL = "https://www.zohoapis.com/crm"
+
+
+def get_zoho_headers(access_token: Optional[str] = None) -> Dict[str, str]:
+    """Get Zoho API headers with authentication"""
+    if not access_token:
+        # Get token from OAuth service
+        oauth_url = f"{os.getenv('ZOHO_OAUTH_SERVICE_URL', '')}/api/token"
+        try:
+            response = requests.get(oauth_url)
+            if response.status_code == 200:
+                access_token = response.json().get('access_token')
+        except Exception as e:
+            logger.error(f"Failed to get Zoho token: {e}")
+    
+    return {
+        "Authorization": f"Bearer {access_token}" if access_token else "",
+        "Content-Type": "application/json"
+    }
+
+
+async def fetch_deal_from_zoho(deal_id: str) -> Optional[Dict[str, Any]]:
+    """Fetch deal details from Zoho"""
+    headers = get_zoho_headers()
+    url = f"{ZOHO_BASE_URL}/v8/Deals/{deal_id}"
+    
+    try:
+        response = requests.get(url, headers=headers)
+        if response.status_code == 200:
+            data = response.json()
+            return data.get('data', [{}])[0] if 'data' in data else None
+    except Exception as e:
+        logger.error(f"Failed to fetch deal {deal_id}: {e}")
+    
+    return None
+
 class PostgreSQLClient:
     """Client for Azure Cosmos DB for PostgreSQL with vector support."""
     

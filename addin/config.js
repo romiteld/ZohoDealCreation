@@ -10,8 +10,9 @@
  * 3. Or use Azure AD authentication for more secure access
  */
 
-// Production configuration - Using Azure Front Door
-window.API_BASE_URL = 'https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net';
+// Production configuration - Using Azure Container Apps directly
+// Note: Changed from Azure Front Door to Container Apps URL to avoid CSP violations
+window.API_BASE_URL = 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
 
 // API Key - Should be injected during deployment or handled server-side
 // WARNING: Never hardcode API keys in client-side code

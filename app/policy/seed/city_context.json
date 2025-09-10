@@ -1,0 +1,93 @@
+{
+  "new_york_ny": "New York Metro",
+  "brooklyn_ny": "New York Metro",
+  "queens_ny": "New York Metro",
+  "bronx_ny": "New York Metro",
+  "manhattan_ny": "New York Metro",
+  "jersey_city_nj": "New York Metro",
+  "newark_nj": "New York Metro",
+  "stamford_ct": "New York Metro",
+  "white_plains_ny": "New York Metro",
+  
+  "san_francisco_ca": "San Francisco Bay Area",
+  "san_jose_ca": "San Francisco Bay Area",
+  "oakland_ca": "San Francisco Bay Area",
+  "palo_alto_ca": "San Francisco Bay Area",
+  "mountain_view_ca": "San Francisco Bay Area",
+  "sunnyvale_ca": "San Francisco Bay Area",
+  "redwood_city_ca": "San Francisco Bay Area",
+  "berkeley_ca": "San Francisco Bay Area",
+  "fremont_ca": "San Francisco Bay Area",
+  
+  "los_angeles_ca": "Los Angeles Metro",
+  "santa_monica_ca": "Los Angeles Metro",
+  "pasadena_ca": "Los Angeles Metro",
+  "long_beach_ca": "Los Angeles Metro",
+  "burbank_ca": "Los Angeles Metro",
+  "glendale_ca": "Los Angeles Metro",
+  "irvine_ca": "Los Angeles Metro",
+  "anaheim_ca": "Los Angeles Metro",
+  
+  "chicago_il": "Chicago Metro",
+  "evanston_il": "Chicago Metro",
+  "naperville_il": "Chicago Metro",
+  "schaumburg_il": "Chicago Metro",
+  "oak_park_il": "Chicago Metro",
+  
+  "boston_ma": "Boston Metro",
+  "cambridge_ma": "Boston Metro",
+  "somerville_ma": "Boston Metro",
+  "quincy_ma": "Boston Metro",
+  "newton_ma": "Boston Metro",
+  
+  "washington_dc": "Washington DC Metro",
+  "arlington_va": "Washington DC Metro",
+  "alexandria_va": "Washington DC Metro",
+  "bethesda_md": "Washington DC Metro",
+  "silver_spring_md": "Washington DC Metro",
+  
+  "seattle_wa": "Seattle Metro",
+  "bellevue_wa": "Seattle Metro",
+  "redmond_wa": "Seattle Metro",
+  "tacoma_wa": "Seattle Metro",
+  "everett_wa": "Seattle Metro",
+  
+  "austin_tx": "Austin Metro",
+  "round_rock_tx": "Austin Metro",
+  "cedar_park_tx": "Austin Metro",
+  
+  "dallas_tx": "Dallas-Fort Worth Metro",
+  "fort_worth_tx": "Dallas-Fort Worth Metro",
+  "plano_tx": "Dallas-Fort Worth Metro",
+  "irving_tx": "Dallas-Fort Worth Metro",
+  "arlington_tx": "Dallas-Fort Worth Metro",
+  
+  "houston_tx": "Houston Metro",
+  "sugar_land_tx": "Houston Metro",
+  "the_woodlands_tx": "Houston Metro",
+  "katy_tx": "Houston Metro",
+  
+  "atlanta_ga": "Atlanta Metro",
+  "sandy_springs_ga": "Atlanta Metro",
+  "alpharetta_ga": "Atlanta Metro",
+  "marietta_ga": "Atlanta Metro",
+  
+  "miami_fl": "Miami Metro",
+  "miami_beach_fl": "Miami Metro",
+  "fort_lauderdale_fl": "Miami Metro",
+  "coral_gables_fl": "Miami Metro",
+  "boca_raton_fl": "Miami Metro",
+  
+  "philadelphia_pa": "Philadelphia Metro",
+  "camden_nj": "Philadelphia Metro",
+  "wilmington_de": "Philadelphia Metro",
+  
+  "denver_co": "Denver Metro",
+  "aurora_co": "Denver Metro",
+  "boulder_co": "Denver Metro",
+  
+  "phoenix_az": "Phoenix Metro",
+  "scottsdale_az": "Phoenix Metro",
+  "tempe_az": "Phoenix Metro",
+  "mesa_az": "Phoenix Metro"
+}

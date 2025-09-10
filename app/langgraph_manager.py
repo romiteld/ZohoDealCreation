@@ -23,6 +23,15 @@ from langgraph.types import Send
 from app.redis_cache_manager import get_cache_manager
 from app.cache_strategies import get_strategy_manager
 
+# C³ and VoIT imports
+from app.cache.c3 import (
+    C3Entry, DependencyCertificate, 
+    c3_reuse_or_rebuild, update_calibration, 
+    generate_cache_key, score
+)
+from app.cache.redis_io import load_c3_entry, save_c3_entry
+from app.orchestrator.voit import voit_controller
+
 # Load environment variables
 load_dotenv('.env.local')
 load_dotenv()
@@ -281,10 +290,47 @@ class EmailProcessingWorkflow:
             logger.warning(f"Could not store processing feedback: {e}")
     
     async def process_email_with_learning(self, email_body: str, sender_domain: str, learning_hints: str = None) -> Dict[str, Any]:
-        """Enhanced email processing with comprehensive learning integration and metrics"""
+        """Enhanced email processing with C³ cache and VoIT orchestration."""
         import time
+        import hashlib
         
         logger.info(f"Starting learning-enhanced email processing for domain: {sender_domain}")
+        
+        # Try C³ cache first if enabled
+        if os.getenv("FEATURE_C3", "false").lower() == "true":
+            cache_mgr = get_cache_manager()
+            if cache_mgr and cache_mgr.redis_client:
+                # Generate canonical record for C³
+                canonical = {
+                    "email_body": email_body,
+                    "sender_domain": sender_domain,
+                    "learning_hints": learning_hints
+                }
+                
+                cache_key = generate_cache_key(canonical, channel="email")
+                entry = await load_c3_entry(cache_mgr.redis_client, cache_key)
+                
+                if entry:
+                    # Generate embedding for request
+                    hash_val = hashlib.sha256(email_body.encode()).hexdigest()
+                    embed = [float(int(hash_val[i:i+2], 16))/255 for i in range(0, min(64, len(hash_val)), 2)]
+                    
+                    req_context = {
+                        "embed": embed,
+                        "fields": {"sender_domain": sender_domain},
+                        "touched_selectors": []
+                    }
+                    
+                    mode, payload = c3_reuse_or_rebuild(
+                        req_context, entry,
+                        float(os.getenv("C3_DELTA", "0.01")),
+                        int(os.getenv("C3_EPS", "3"))
+                    )
+                    
+                    if mode == "reuse":
+                        logger.info("C³ cache hit - returning cached extraction")
+                        cached_result = json.loads(entry.artifact.decode())
+                        return cached_result
         
         # Initialize learning services
         correction_service = None
@@ -366,6 +412,59 @@ class EmailProcessingWorkflow:
             
             # Log comprehensive results
             logger.info(f"Enhanced processing complete - Total: {total_time:.2f}s, Quality: {result.get('quality_score', 0):.2f}, Confidence: {result.get('extraction_confidence', 0):.2f}")
+            
+            # Apply VoIT orchestration if enabled
+            if os.getenv("FEATURE_VOIT", "false").lower() == "true":
+                artifact_ctx = {
+                    "spans": [
+                        {
+                            "id": "extraction",
+                            "quality": result.get('extraction_confidence', 0.5),
+                            "cached_text": json.dumps(result.get('extraction_result', {})),
+                            "ctx": {
+                                "retrieval_dispersion": 0.2,
+                                "rule_conflicts": len(result.get('validation_flags', [])) * 0.1,
+                                "c3_margin": 0.3,
+                                "needs_fact_check": bool(result.get('company_research'))
+                            }
+                        }
+                    ]
+                }
+                voit_result = voit_controller(artifact_ctx)
+                logger.info(f"VoIT orchestration applied: {voit_result.get('total_quality', 0):.2f}")
+            
+            # Save to C³ cache if enabled
+            if os.getenv("FEATURE_C3", "false").lower() == "true":
+                cache_mgr = get_cache_manager()
+                if cache_mgr and cache_mgr.redis_client:
+                    # Generate canonical record
+                    canonical = {
+                        "email_body": email_body,
+                        "sender_domain": sender_domain,
+                        "learning_hints": learning_hints
+                    }
+                    cache_key = generate_cache_key(canonical, channel="email")
+                    
+                    # Generate embedding
+                    hash_val = hashlib.sha256(email_body.encode()).hexdigest()
+                    embed = [float(int(hash_val[i:i+2], 16))/255 for i in range(0, min(64, len(hash_val)), 2)]
+                    
+                    # Create new C³ entry
+                    new_entry = C3Entry(
+                        artifact=json.dumps(result).encode(),
+                        dc=DependencyCertificate(spans={}, invariants={}),
+                        probes={},
+                        calib_scores=[],
+                        tau_delta=1e9,
+                        meta={
+                            "embed": embed,
+                            "fields": {"sender_domain": sender_domain},
+                            "created_at": time.time(),
+                            "template_version": "v1"
+                        }
+                    )
+                    await save_c3_entry(cache_mgr.redis_client, cache_key, new_entry)
+                    logger.info(f"Saved result to C³ cache: {cache_key}")
             
             return {
                 'final_output': result.get('final_output') or ExtractedData(),
@@ -1033,6 +1132,19 @@ class EmailProcessingWorkflow:
             except Exception as e:
                 logger.warning(f"Failed to cache extraction: {e}")
             
+            # Apply enhancement to extraction result
+            try:
+                from app.enhanced_extraction import enhance_extraction_result
+                enhanced_result = await enhance_extraction_result(
+                    result,
+                    state.get('email_content', ''),
+                    sender_domain
+                )
+                logger.info(f"Enhanced extraction with automatic lookups: {enhanced_result}")
+                result = enhanced_result
+            except Exception as e:
+                logger.warning(f"Could not enhance extraction: {e}")
+            
             return {
                 "extraction_result": result,
                 "messages": [{"role": "assistant", "content": f"Extracted: {result}"}]
@@ -1080,7 +1192,11 @@ class EmailProcessingWorkflow:
             if not research_domain and candidate_email and '@' in candidate_email:
                 email_domain = candidate_email.split('@')[1]
                 # Skip generic email domains for company research
-                generic_domains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com', 'icloud.com']
+                generic_domains = [
+                    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 
+                    'aol.com', 'icloud.com', 'me.com', 'mac.com', 'msn.com',
+                    'live.com', 'protonmail.com', 'ymail.com'
+                ]
                 if email_domain not in generic_domains:
                     research_domain = email_domain
                     logger.info(f"Using candidate email domain for research: {research_domain}")

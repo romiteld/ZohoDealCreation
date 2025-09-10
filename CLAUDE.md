@@ -257,6 +257,36 @@ Check LangGraph is enabled: `USE_LANGGRAPH=true`
 - **Scale**: Process thousands of emails/hour with Service Bus
 - **Reliability**: Zero-downtime deployments, automatic retries
 
+### 2025-09-09: C³ and VoIT Features
+✅ **Conformal Counterfactual Cache (C³) and Value-of-Insight Tree (VoIT)**
+- **C³ Cache**: Risk-bounded caching with conformal guarantees
+  - `C3_DELTA=0.01`: 1% stale-risk tolerance  
+  - `C3_EPS=3`: Edit distance tolerance in characters
+  - Stores embeddings in Redis, computes cosine distance locally
+  - Automatic calibration via conformal quantiles
+- **VoIT Orchestration**: Budget-aware reasoning depth controller
+  - `VOIT_BUDGET=5.0`: Effort units for processing
+  - `TARGET_QUALITY=0.9`: Target quality score
+  - Dynamically selects between GPT-5-nano/mini/full
+  - Optimizes quality vs cost vs latency tradeoff
+- **Vault Agent API**: Canonical record management
+  - `POST /api/vault-agent/ingest`: Normalize and store records
+  - `POST /api/vault-agent/publish`: Apply C³+VoIT and publish to channels
+  - `GET /api/vault-agent/status`: Check feature flags and config
+
+### Environment Variables (Azure Container Apps)
+```bash
+# C³ Configuration
+FEATURE_C3=true         # Enable C³ cache
+FEATURE_VOIT=true       # Enable VoIT orchestration
+C3_DELTA=0.01          # Risk bound (1%)
+C3_EPS=3               # Edit tolerance (characters)
+VOIT_BUDGET=5.0        # Processing budget
+TARGET_QUALITY=0.9     # Target quality score
+```
+
+Target significant cost reductions through intelligent caching and adaptive reasoning.
+
 ### 2025-08-26: LangGraph Migration
 ✅ **LangGraph Implementation**
 - Replaced CrewAI with LangGraph v0.2.74

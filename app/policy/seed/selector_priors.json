@@ -1,0 +1,82 @@
+{
+  "talentwell_digest": {
+    "tau_delta": 0.015,
+    "ttl_alpha": 4,
+    "ttl_beta": 6,
+    "min_ttl": 86400,
+    "max_ttl": 604800,
+    "description": "Weekly digest candidate cards"
+  },
+  "candidate_profile": {
+    "tau_delta": 0.01,
+    "ttl_alpha": 3,
+    "ttl_beta": 7,
+    "min_ttl": 43200,
+    "max_ttl": 259200,
+    "description": "Individual candidate profiles"
+  },
+  "company_research": {
+    "tau_delta": 0.02,
+    "ttl_alpha": 5,
+    "ttl_beta": 5,
+    "min_ttl": 172800,
+    "max_ttl": 1209600,
+    "description": "Company and firm research data"
+  },
+  "meeting_transcript": {
+    "tau_delta": 0.005,
+    "ttl_alpha": 2,
+    "ttl_beta": 8,
+    "min_ttl": 3600,
+    "max_ttl": 86400,
+    "description": "Meeting transcript analysis"
+  },
+  "email_extraction": {
+    "tau_delta": 0.01,
+    "ttl_alpha": 3,
+    "ttl_beta": 7,
+    "min_ttl": 7200,
+    "max_ttl": 172800,
+    "description": "Email data extraction"
+  },
+  "referral_tracking": {
+    "tau_delta": 0.008,
+    "ttl_alpha": 4,
+    "ttl_beta": 6,
+    "min_ttl": 86400,
+    "max_ttl": 604800,
+    "description": "Referral source tracking"
+  },
+  "location_mapping": {
+    "tau_delta": 0.025,
+    "ttl_alpha": 6,
+    "ttl_beta": 4,
+    "min_ttl": 604800,
+    "max_ttl": 2592000,
+    "description": "Location to metro area mapping"
+  },
+  "skill_extraction": {
+    "tau_delta": 0.012,
+    "ttl_alpha": 3,
+    "ttl_beta": 7,
+    "min_ttl": 21600,
+    "max_ttl": 259200,
+    "description": "Technical skill extraction"
+  },
+  "compensation_data": {
+    "tau_delta": 0.007,
+    "ttl_alpha": 2,
+    "ttl_beta": 8,
+    "min_ttl": 3600,
+    "max_ttl": 43200,
+    "description": "Compensation and salary data"
+  },
+  "default": {
+    "tau_delta": 0.01,
+    "ttl_alpha": 3,
+    "ttl_beta": 7,
+    "min_ttl": 3600,
+    "max_ttl": 86400,
+    "description": "Default selector settings"
+  }
+}
