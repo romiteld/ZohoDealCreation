@@ -1,0 +1,110 @@
+name: Simple Deploy to Azure
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'addin/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - '.github/workflows/deploy-simple.yml'
+  workflow_dispatch:
+
+env:
+  REGISTRY: wellintakeacr0903.azurecr.io
+  IMAGE_NAME: well-intake-api
+  CONTAINER_APP: well-intake-api
+  RESOURCE_GROUP: TheWell-Infra-East
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Generate version
+        id: version
+        run: |
+          VERSION="2.0.0.$(date +%Y%m%d).$(date +%H%M%S)"
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-7)
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "image_tag=${VERSION}-${SHORT_SHA}" >> $GITHUB_OUTPUT
+          echo "📦 Version: ${VERSION}-${SHORT_SHA}"
+
+      - name: Log in to Azure Container Registry
+        run: |
+          echo "🔐 Logging in to Azure Container Registry..."
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+
+      - name: Build Docker image
+        run: |
+          echo "🔨 Building Docker image..."
+          docker build -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }} \
+                       -t ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest \
+                       --build-arg BUILDKIT_INLINE_CACHE=1 \
+                       .
+
+      - name: Push Docker image
+        run: |
+          echo "📤 Pushing Docker image..."
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+
+      - name: Deploy to Azure Container Apps using CLI
+        run: |
+          echo "🚀 Deploying to Azure Container Apps..."
+          
+          # Install Azure CLI if not present
+          curl -sL https://aka.ms/InstallAzureCLIDeb | sudo bash
+          
+          # Login with service principal (simple method)
+          az login --service-principal \
+            -u "${{ secrets.AZURE_CLIENT_ID }}" \
+            -p "${{ secrets.AZURE_CLIENT_SECRET }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+          
+          # Set subscription
+          az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          
+          # Update container app
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+          
+          echo "✅ Deployment initiated"
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for deployment to stabilize..."
+          sleep 30
+
+      - name: Health check
+        run: |
+          echo "🏥 Performing health check..."
+          for i in {1..10}; do
+            if curl -f https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health; then
+              echo "✅ Health check passed"
+              exit 0
+            fi
+            echo "Retry $i/10..."
+            sleep 10
+          done
+          echo "⚠️ Health check failed after 10 attempts"
+          exit 1
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ steps.version.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Registry**: ${{ env.REGISTRY }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container App**: ${{ env.CONTAINER_APP }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **API URL**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io" >> $GITHUB_STEP_SUMMARY

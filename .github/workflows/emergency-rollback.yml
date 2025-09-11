@@ -1,0 +1,187 @@
+name: Emergency Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      revision:
+        description: 'Revision to rollback to (leave empty for previous)'
+        required: false
+        type: string
+      reason:
+        description: 'Reason for rollback'
+        required: true
+        type: string
+
+env:
+  REGISTRY: wellintakeacr0903.azurecr.io
+  IMAGE_NAME: well-intake-api
+  CONTAINER_APP: well-intake-api
+  RESOURCE_GROUP: TheWell-Infra-East
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Validate inputs
+        run: |
+          if [[ -z "${{ github.event.inputs.reason }}" ]]; then
+            echo "❌ Rollback reason is required"
+            exit 1
+          fi
+          echo "🔄 Rollback initiated by ${{ github.actor }}"
+          echo "📝 Reason: ${{ github.event.inputs.reason }}"
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Get revision history
+        id: history
+        run: |
+          echo "📜 Getting revision history..."
+          
+          # Get all revisions
+          REVISIONS=$(az containerapp revision list \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "[?properties.active==\`true\`].{name:name, created:properties.createdTime, traffic:properties.trafficWeight}" \
+            --output json)
+          
+          echo "Available revisions:"
+          echo "$REVISIONS" | jq '.'
+          
+          # Get current revision
+          CURRENT=$(az containerapp show \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "properties.latestRevisionName" -o tsv)
+          
+          echo "current=${CURRENT}" >> $GITHUB_OUTPUT
+          
+          # Determine target revision
+          if [[ -n "${{ github.event.inputs.revision }}" ]]; then
+            TARGET="${{ github.event.inputs.revision }}"
+          else
+            # Get previous revision (second in list)
+            TARGET=$(echo "$REVISIONS" | jq -r '.[1].name // empty')
+            if [[ -z "$TARGET" ]]; then
+              echo "❌ No previous revision found"
+              exit 1
+            fi
+          fi
+          
+          echo "target=${TARGET}" >> $GITHUB_OUTPUT
+          echo "🎯 Target revision: ${TARGET}"
+
+      - name: Pre-rollback health check
+        run: |
+          echo "🏥 Checking current health..."
+          curl -f "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health" || true
+
+      - name: Execute rollback
+        id: rollback
+        run: |
+          echo "🔄 Rolling back to revision: ${{ steps.history.outputs.target }}"
+          
+          # Option 1: Direct traffic shift (fastest)
+          az containerapp ingress traffic set \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --revision-weight "${{ steps.history.outputs.target }}=100"
+          
+          echo "✅ Traffic shifted to previous revision"
+
+      - name: Verify rollback
+        run: |
+          echo "🔍 Verifying rollback..."
+          sleep 30
+          
+          # Check health
+          for i in {1..10}; do
+            if curl -f "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health"; then
+              echo "✅ Service is healthy after rollback"
+              break
+            fi
+            echo "Health check attempt $i/10..."
+            sleep 10
+          done
+          
+          # Verify active revision
+          ACTIVE=$(az containerapp show \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "properties.configuration.ingress.traffic[?weight==\`100\`].revisionName" -o tsv)
+          
+          if [[ "$ACTIVE" == "${{ steps.history.outputs.target }}" ]]; then
+            echo "✅ Rollback successful - now running revision: $ACTIVE"
+          else
+            echo "⚠️ Unexpected active revision: $ACTIVE"
+          fi
+
+      - name: Deactivate failed revision
+        if: success()
+        run: |
+          echo "🔄 Deactivating failed revision: ${{ steps.history.outputs.current }}"
+          az containerapp revision deactivate \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --revision "${{ steps.history.outputs.current }}" || true
+
+      - name: Create incident report
+        if: always()
+        run: |
+          echo "## 🚨 Emergency Rollback Report" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Initiated by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Reason**: ${{ github.event.inputs.reason }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **From revision**: ${{ steps.history.outputs.current }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **To revision**: ${{ steps.history.outputs.target }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Time**: $(date -u +%Y-%m-%dT%H:%M:%SZ)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Next Steps" >> $GITHUB_STEP_SUMMARY
+          echo "1. Investigate the issue that caused the rollback" >> $GITHUB_STEP_SUMMARY
+          echo "2. Fix the problem in the codebase" >> $GITHUB_STEP_SUMMARY
+          echo "3. Create a new deployment with the fix" >> $GITHUB_STEP_SUMMARY
+          echo "4. Document the incident and resolution" >> $GITHUB_STEP_SUMMARY
+
+  quick-rollback:
+    runs-on: ubuntu-latest
+    if: false  # Enable this job by changing to true for ultra-fast rollback
+    steps:
+      - name: Ultra-fast rollback using ACR
+        run: |
+          echo "🚀 Ultra-fast rollback using direct ACR authentication"
+          
+          # Login to ACR directly
+          echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ env.REGISTRY }} -u ${{ secrets.ACR_USERNAME }} --password-stdin
+          
+          # Pull the stable tag
+          docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+          
+          # Tag as latest
+          docker tag ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          # Push
+          docker push ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          # Trigger restart using Azure CLI with inline auth
+          az login --service-principal \
+            -u "${{ secrets.AZURE_CLIENT_ID }}" \
+            -p "${{ secrets.AZURE_CLIENT_SECRET }}" \
+            --tenant "${{ secrets.AZURE_TENANT_ID }}"
+          
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+          
+          echo "✅ Quick rollback completed"

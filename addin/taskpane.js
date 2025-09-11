@@ -15,6 +15,13 @@ let originalExtractedData = null;
 let currentExtractedData = null;  // Store current extracted data for learning
 
 // Initialize when Office is ready
+// IMPORTANT: Office.initialize is required for Outlook desktop clients
+// It must be defined even if using Office.onReady
+Office.initialize = function (reason) {
+    console.log('Office.initialize called with reason:', reason);
+    // Office.onReady will handle the actual initialization
+};
+
 // Test API connectivity function
 async function testAPIConnection() {
     console.log('Testing API connection...');
@@ -53,13 +60,17 @@ async function testAPIConnection() {
 }
 
 Office.onReady((info) => {
+    console.log('Office.onReady called with info:', info);
     if (info.host === Office.HostType.Outlook) {
+        console.log('Host is Outlook, initializing taskpane...');
         // Test API connection on startup
         testAPIConnection().then(result => {
             console.log('API connection test result:', result);
         });
         
         initializeTaskpane();
+    } else {
+        console.log('Host is not Outlook:', info.host);
     }
 });
 
@@ -67,25 +78,66 @@ Office.onReady((info) => {
  * Initialize the taskpane
  */
 async function initializeTaskpane() {
-    // Set up event listeners
-    document.getElementById('btnSend').addEventListener('click', handleSendToZoho);
-    document.getElementById('btnCancel').addEventListener('click', handleCancel);
-    document.getElementById('btnClose').addEventListener('click', handleClose);
+    console.log('initializeTaskpane called');
     
-    // Natural language corrections
-    document.getElementById('btnApplyCorrections').addEventListener('click', applyNaturalLanguageCorrections);
-    document.getElementById('btnSuggestFixes').addEventListener('click', showSuggestedFixes);
-    
-    // Custom fields
-    document.getElementById('btnAddField').addEventListener('click', showAddFieldModal);
-    document.getElementById('btnConfirmAddField').addEventListener('click', addCustomField);
-    document.getElementById('btnCancelAddField').addEventListener('click', hideAddFieldModal);
-    
-    // Track field changes to show edited indicator
-    setupFieldTracking();
-    
-    // Start extraction process
-    await extractAndPreview();
+    try {
+        // Verify Office.context is available
+        if (!Office || !Office.context || !Office.context.mailbox) {
+            console.error('Office.context.mailbox is not available');
+            showError('Office Add-in is not properly initialized. Please try reloading.');
+            return;
+        }
+        console.log('Office.context.mailbox is available');
+        
+        // Verify we have an item
+        if (!Office.context.mailbox.item) {
+            console.error('No email item available');
+            showError('No email selected. Please select an email and try again.');
+            return;
+        }
+        console.log('Email item is available');
+        
+        // Set up event listeners
+        document.getElementById('btnSend').addEventListener('click', handleSendToZoho);
+        document.getElementById('btnCancel').addEventListener('click', handleCancel);
+        document.getElementById('btnClose').addEventListener('click', handleClose);
+        
+        // Natural language corrections
+        document.getElementById('btnApplyCorrections').addEventListener('click', applyNaturalLanguageCorrections);
+        document.getElementById('btnSuggestFixes').addEventListener('click', showSuggestedFixes);
+        
+        // Custom fields
+        document.getElementById('btnAddField').addEventListener('click', showAddFieldModal);
+        document.getElementById('btnConfirmAddField').addEventListener('click', addCustomField);
+        document.getElementById('btnCancelAddField').addEventListener('click', hideAddFieldModal);
+        
+        // Track field changes to show edited indicator
+        setupFieldTracking();
+        
+        // Start extraction process
+        console.log('About to call extractAndPreview');
+        await extractAndPreview();
+        console.log('extractAndPreview completed successfully');
+        
+    } catch (error) {
+        console.error('Error in initializeTaskpane:', error);
+        console.error('Stack trace:', error.stack);
+        showError('Failed to initialize: ' + error.message);
+    }
+}
+
+/**
+ * Show error message to user
+ */
+function showError(message) {
+    console.error('Showing error:', message);
+    const errorDiv = document.getElementById('errorMessage');
+    if (errorDiv) {
+        errorDiv.textContent = message;
+        errorDiv.style.display = 'block';
+    }
+    // Hide loading state
+    showLoadingState(false);
 }
 
 /**
@@ -137,10 +189,12 @@ function updateFieldIndicator(fieldId) {
  * Extract email data and show preview
  */
 async function extractAndPreview() {
+    console.log('extractAndPreview function started');
     try {
         // Show loading state with more accurate message
         showLoadingState(true);
         updateLoadingMessage('Reading email content...');
+        console.log('Loading state shown');
         
         // Extract email data
         const item = Office.context.mailbox.item;

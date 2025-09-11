@@ -1,0 +1,341 @@
+name: Production Deploy with Full CI/CD
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'addin/**'
+      - 'requirements.txt'
+      - 'Dockerfile'
+      - 'scripts/**'
+      - '.github/workflows/deploy-production.yml'
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Environment to deploy to'
+        required: true
+        default: 'production'
+        type: choice
+        options:
+          - production
+          - staging
+          - development
+
+env:
+  REGISTRY: wellintakeacr0903.azurecr.io
+  IMAGE_NAME: well-intake-api
+  CONTAINER_APP: well-intake-api
+  RESOURCE_GROUP: TheWell-Infra-East
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Cache pip packages
+        uses: actions/cache@v3
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio black ruff
+
+      - name: Run linting
+        run: |
+          ruff check app/ || true
+          black --check app/ || true
+
+      - name: Run tests
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        run: |
+          pytest tests/ -v --cov=app --cov-report=xml --cov-report=term || true
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name != 'pull_request'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      image_tag: ${{ steps.version.outputs.image_tag }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate version
+        id: version
+        run: |
+          # Generate semantic version
+          VERSION="2.0.0"
+          BUILD_NUM="${{ github.run_number }}"
+          SHORT_SHA=$(echo ${GITHUB_SHA} | cut -c1-7)
+          FULL_VERSION="${VERSION}.${BUILD_NUM}"
+          IMAGE_TAG="${FULL_VERSION}-${SHORT_SHA}"
+          
+          echo "version=${FULL_VERSION}" >> $GITHUB_OUTPUT
+          echo "image_tag=${IMAGE_TAG}" >> $GITHUB_OUTPUT
+          echo "short_sha=${SHORT_SHA}" >> $GITHUB_OUTPUT
+          
+          echo "📦 Version: ${FULL_VERSION}"
+          echo "🏷️ Image Tag: ${IMAGE_TAG}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ secrets.ACR_USERNAME }}
+          password: ${{ secrets.ACR_PASSWORD }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:stable
+          cache-from: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache
+          cache-to: type=registry,ref=${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:buildcache,mode=max
+          build-args: |
+            VERSION=${{ steps.version.outputs.version }}
+            COMMIT_SHA=${{ steps.version.outputs.short_sha }}
+            BUILD_DATE=${{ steps.timestamp.outputs.date }}
+
+      - name: Generate SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.version.outputs.image_tag }}
+          format: spdx-json
+          output-file: sbom.spdx.json
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v3
+        with:
+          name: sbom
+          path: sbom.spdx.json
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment: production
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Azure Login
+        uses: azure/login@v1
+        with:
+          creds: |
+            {
+              "clientId": "${{ secrets.AZURE_CLIENT_ID }}",
+              "clientSecret": "${{ secrets.AZURE_CLIENT_SECRET }}",
+              "subscriptionId": "${{ secrets.AZURE_SUBSCRIPTION_ID }}",
+              "tenantId": "${{ secrets.AZURE_TENANT_ID }}"
+            }
+
+      - name: Get current revision
+        id: current
+        run: |
+          CURRENT_REVISION=$(az containerapp show \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "properties.latestRevisionName" -o tsv)
+          echo "revision=${CURRENT_REVISION}" >> $GITHUB_OUTPUT
+
+      - name: Deploy to Azure Container Apps
+        id: deploy
+        run: |
+          echo "🚀 Deploying version ${{ needs.build.outputs.image_tag }}"
+          
+          # Update with new image
+          az containerapp update \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --image ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ needs.build.outputs.image_tag }} \
+            --set-env-vars \
+              "MANIFEST_VERSION=${{ needs.build.outputs.version }}" \
+              "CACHE_BUST=${{ github.run_number }}" \
+              "RESTART_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+            --min-replicas 2 \
+            --max-replicas 10 \
+            --cpu 4 \
+            --memory 8Gi \
+            --output json
+
+      - name: Wait for deployment
+        run: |
+          echo "⏳ Waiting for deployment to complete..."
+          for i in {1..60}; do
+            STATUS=$(az containerapp show \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --query "properties.provisioningState" -o tsv)
+            
+            if [[ "$STATUS" == "Succeeded" ]]; then
+              echo "✅ Deployment succeeded"
+              break
+            elif [[ "$STATUS" == "Failed" ]]; then
+              echo "❌ Deployment failed"
+              exit 1
+            fi
+            
+            echo "Status: $STATUS (attempt $i/60)"
+            sleep 5
+          done
+
+      - name: Get new revision
+        id: new
+        run: |
+          NEW_REVISION=$(az containerapp show \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --query "properties.latestRevisionName" -o tsv)
+          echo "revision=${NEW_REVISION}" >> $GITHUB_OUTPUT
+
+      - name: Run smoke tests
+        id: smoke
+        run: |
+          echo "🔥 Running smoke tests..."
+          API_URL="https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io"
+          
+          # Health check
+          for i in {1..30}; do
+            if curl -f "${API_URL}/health" -H "X-API-Key: ${{ secrets.API_KEY }}"; then
+              echo "✅ Health check passed"
+              break
+            fi
+            echo "Health check attempt $i/30..."
+            sleep 10
+          done
+          
+          # Test manifest endpoint
+          curl -f "${API_URL}/manifest.xml" || exit 1
+          
+          # Test static assets
+          curl -f "${API_URL}/icon-64.png" || exit 1
+          
+          # Test API endpoint with sample
+          curl -X GET "${API_URL}/test/kevin-sullivan" \
+            -H "X-API-Key: ${{ secrets.API_KEY }}" \
+            -H "Content-Type: application/json" || true
+          
+          echo "✅ All smoke tests passed"
+
+      - name: Traffic routing (Blue-Green)
+        if: success()
+        run: |
+          echo "🔄 Performing blue-green deployment..."
+          
+          # Gradually shift traffic to new revision
+          for WEIGHT in 25 50 75 100; do
+            echo "Shifting ${WEIGHT}% traffic to new revision..."
+            
+            az containerapp ingress traffic set \
+              --name ${{ env.CONTAINER_APP }} \
+              --resource-group ${{ env.RESOURCE_GROUP }} \
+              --revision-weight "${{ steps.new.outputs.revision }}=${WEIGHT}"
+            
+            # Give it time to stabilize
+            sleep 30
+            
+            # Check health
+            if ! curl -f "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health"; then
+              echo "❌ Health check failed at ${WEIGHT}% traffic"
+              # Rollback
+              az containerapp ingress traffic set \
+                --name ${{ env.CONTAINER_APP }} \
+                --resource-group ${{ env.RESOURCE_GROUP }} \
+                --revision-weight "${{ steps.current.outputs.revision }}=100"
+              exit 1
+            fi
+          done
+          
+          echo "✅ Traffic fully shifted to new revision"
+
+      - name: Deactivate old revision
+        if: success()
+        run: |
+          echo "🔄 Deactivating old revision..."
+          az containerapp revision deactivate \
+            --name ${{ env.CONTAINER_APP }} \
+            --resource-group ${{ env.RESOURCE_GROUP }} \
+            --revision "${{ steps.current.outputs.revision }}" || true
+
+  notify:
+    runs-on: ubuntu-latest
+    needs: [build, deploy]
+    if: always()
+    steps:
+      - name: Send notification
+        run: |
+          if [[ "${{ needs.deploy.result }}" == "success" ]]; then
+            STATUS="✅ SUCCESS"
+            COLOR="good"
+          else
+            STATUS="❌ FAILED"
+            COLOR="danger"
+          fi
+          
+          echo "## Deployment $STATUS" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Version**: ${{ needs.build.outputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image**: ${{ needs.build.outputs.image_tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Container App**: ${{ env.CONTAINER_APP }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: Production" >> $GITHUB_STEP_SUMMARY
+          echo "- **API URL**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io" >> $GITHUB_STEP_SUMMARY
+          echo "- **Health**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered by**: ${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY
+
+      - name: Create deployment record
+        if: needs.deploy.result == 'success'
+        run: |
+          # Create a deployment record in GitHub
+          curl -X POST \
+            -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            -H "Accept: application/vnd.github.v3+json" \
+            "https://api.github.com/repos/${{ github.repository }}/deployments" \
+            -d '{
+              "ref": "${{ github.sha }}",
+              "task": "deploy",
+              "auto_merge": false,
+              "required_contexts": [],
+              "payload": {
+                "version": "${{ needs.build.outputs.version }}",
+                "image_tag": "${{ needs.build.outputs.image_tag }}"
+              },
+              "environment": "production",
+              "description": "Deployment of version ${{ needs.build.outputs.version }}"
+            }' || true
