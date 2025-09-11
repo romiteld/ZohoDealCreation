@@ -22,6 +22,56 @@ Office.initialize = function (reason) {
     // Office.onReady will handle the actual initialization
 };
 
+// Test function to debug initialization issues
+window.testInitialization = function() {
+    console.log('=== TEST INITIALIZATION ===');
+    console.log('Office available:', typeof Office !== 'undefined');
+    console.log('Office.context:', Office?.context);
+    console.log('Office.context.mailbox:', Office?.context?.mailbox);
+    console.log('Office.context.mailbox.item:', Office?.context?.mailbox?.item);
+    
+    // Test getting email data
+    if (Office?.context?.mailbox?.item) {
+        const item = Office.context.mailbox.item;
+        console.log('Email subject:', item.subject);
+        console.log('From:', item.from);
+        
+        // Try to get body
+        item.body.getAsync(Office.CoercionType.Text, (result) => {
+            console.log('Body result status:', result.status);
+            console.log('Body preview (first 200 chars):', result.value?.substring(0, 200));
+        });
+    } else {
+        console.log('No email item available');
+    }
+    
+    // Check DOM elements
+    console.log('DOM Elements:');
+    console.log('- previewForm:', !!document.getElementById('previewForm'));
+    console.log('- loadingState:', !!document.getElementById('loadingState'));
+    console.log('- candidateName:', !!document.getElementById('candidateName'));
+    
+    // Try to manually show the form with test data
+    const testData = {
+        candidateName: 'Test Candidate',
+        candidateEmail: 'test@example.com',
+        jobTitle: 'Test Position',
+        firmName: 'Test Company',
+        referrerName: 'Test Referrer',
+        source: 'Email Inbound'
+    };
+    
+    console.log('Populating form with test data...');
+    populateForm(testData);
+    
+    // Show the form
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('previewForm').style.display = 'block';
+    document.getElementById('footer').style.display = 'flex';
+    
+    console.log('Test complete - check if form is visible now');
+};
+
 // Test API connectivity function (health check only, no dummy data)
 async function testAPIConnection() {
     console.log('Testing API connection...');
@@ -214,7 +264,14 @@ async function extractAndPreview() {
         
         // Extract email data
         const item = Office.context.mailbox.item;
+        console.log('Extracting email data from item:', item);
         currentEmailData = await extractEmailData(item);
+        console.log('Email data extracted:', {
+            hasBody: !!currentEmailData?.body,
+            bodyLength: currentEmailData?.body?.length || 0,
+            subject: currentEmailData?.subject,
+            from: currentEmailData?.from
+        });
         
         // Update loading message for AI extraction
         updateLoadingMessage('AI is analyzing the email (this may take 5-10 seconds)...');
@@ -272,15 +329,20 @@ async function extractAndPreview() {
                 try {
                     responseText = await extractionResponse.text();
                     console.log('Raw response length:', responseText.length);
-                    console.log('First 500 chars:', responseText.substring(0, 500));
+                    console.log('Raw response text:', responseText);
+                    console.log('First 500 chars:', responseText ? responseText.substring(0, 500) : 'EMPTY RESPONSE');
+                    
+                    // Check if response is actually empty
+                    if (!responseText || responseText.trim() === '') {
+                        console.error('Empty response from API - using fallback extraction');
+                        extractedData = performLocalExtraction(currentEmailData);
+                        populateForm(extractedData);
+                        showPreviewForm();
+                        return;
+                    }
                     
                     // Try to parse the response
-                    if (responseText) {
-                        response = JSON.parse(responseText);
-                    } else {
-                        console.error('Empty response from API');
-                        throw new Error('Empty response');
-                    }
+                    response = JSON.parse(responseText);
                 } catch (parseError) {
                     console.error('Parse error:', parseError);
                     console.error('Response was:', responseText);
@@ -293,39 +355,49 @@ async function extractAndPreview() {
                 }
                 
                 // Handle the response - check for different response structures
+                console.log('Full API response:', response);
                 console.log('Response structure:', Object.keys(response));
+                console.log('Response type:', typeof response);
                 
                 // The API might return data in different formats
                 let extracted = null;
                 if (response.extracted) {
                     extracted = response.extracted;
+                    console.log('Found data in response.extracted');
                 } else if (response.data) {
                     extracted = response.data;
+                    console.log('Found data in response.data');
                 } else if (response.candidate_name || response.job_title) {
                     // Direct response
                     extracted = response;
+                    console.log('Using direct response');
                 } else {
                     console.error('Unexpected response structure:', response);
-                    extracted = {};
+                    console.log('Available keys in response:', Object.keys(response));
+                    // Try to use whatever we got
+                    extracted = response || {};
                 }
                 
                 console.log('Using extracted data:', extracted);
                 
-                // Map the response to our expected format - be more defensive
+                // Map the response to our expected format - handle nulls properly
                 extractedData = {
-                    candidateName: extracted.candidate_name || extracted.candidateName || '',
-                    candidateEmail: extracted.candidate_email || extracted.candidateEmail || extracted.email || '',
-                    candidatePhone: extracted.candidate_phone || extracted.candidatePhone || extracted.phone || '',
-                    linkedinUrl: extracted.linkedin_url || extracted.linkedinUrl || '',
-                    jobTitle: extracted.job_title || extracted.jobTitle || '',
-                    location: extracted.location || extracted.candidateLocation || '',
-                    firmName: extracted.company_name || extracted.firmName || extracted.firm_name || '',
-                    referrerName: extracted.referrer_name || extracted.referrerName || currentEmailData.from?.displayName || '',
-                    referrerEmail: extracted.referrer_email || extracted.referrerEmail || currentEmailData.from?.emailAddress || '',
-                    notes: extracted.notes || '',
-                    calendlyUrl: extracted.calendly_url || extracted.calendlyUrl || '',
-                    source: extracted.source || extracted.Source || 'Email Inbound'
+                    candidateName: extracted?.candidate_name || extracted?.candidateName || '',
+                    candidateEmail: extracted?.candidate_email || extracted?.candidateEmail || extracted?.email || '',
+                    candidatePhone: extracted?.candidate_phone || extracted?.candidatePhone || extracted?.phone || '',
+                    linkedinUrl: extracted?.linkedin_url || extracted?.linkedinUrl || '',
+                    jobTitle: extracted?.job_title || extracted?.jobTitle || '',
+                    location: extracted?.location || extracted?.candidateLocation || '',
+                    firmName: extracted?.company_name || extracted?.firmName || extracted?.firm_name || '',
+                    referrerName: extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName || '',
+                    referrerEmail: extracted?.referrer_email || extracted?.referrerEmail || currentEmailData?.from?.emailAddress || '',
+                    notes: extracted?.notes || '',
+                    calendlyUrl: extracted?.calendly_url || extracted?.calendlyUrl || '',
+                    source: extracted?.source || extracted?.Source || 'Email Inbound',
+                    sourceDetail: extracted?.source_detail || ''
                 };
+                
+                console.log('Mapped extractedData:', extractedData);
             } else {
                 // Log the error response
                 const errorText = await extractionResponse.text();
@@ -354,6 +426,7 @@ async function extractAndPreview() {
             
             // Fall back to local extraction
             extractedData = performLocalExtraction(currentEmailData);
+            console.log('Using local extraction due to API error');
         }
         
         // Store original extracted data for comparison
@@ -377,15 +450,30 @@ async function extractAndPreview() {
         const loadingState = document.getElementById('loadingState');
         const footer = document.getElementById('footer');
         
-        if (loadingState) loadingState.style.display = 'none';
+        console.log('Elements found:', {
+            previewForm: !!previewForm,
+            loadingState: !!loadingState,
+            footer: !!footer
+        });
+        
+        if (loadingState) {
+            loadingState.style.display = 'none';
+            console.log('Loading state hidden');
+        }
         if (previewForm) {
             previewForm.style.display = 'block';
             previewForm.style.visibility = 'visible';
             previewForm.style.opacity = '1';
+            console.log('Preview form shown with display:', previewForm.style.display);
+        } else {
+            console.error('CRITICAL: previewForm element not found!');
         }
         if (footer) {
             footer.style.display = 'flex';
             footer.style.visibility = 'visible';
+            console.log('Footer shown with display:', footer.style.display);
+        } else {
+            console.error('CRITICAL: footer element not found!');
         }
         
         console.log('Form display complete');
@@ -425,8 +513,9 @@ async function extractAndPreview() {
  * Local extraction fallback using regex patterns
  */
 function performLocalExtraction(emailData) {
-    const body = emailData.body || '';
-    const subject = emailData.subject || '';
+    console.log('performLocalExtraction called with emailData:', emailData);
+    const body = emailData?.body || '';
+    const subject = emailData?.subject || '';
     const extracted = {
         candidateName: '',
         candidateEmail: '',
@@ -435,8 +524,8 @@ function performLocalExtraction(emailData) {
         jobTitle: '',
         location: '',
         firmName: '',
-        referrerName: emailData.from?.displayName || '',
-        referrerEmail: emailData.from?.emailAddress || '',
+        referrerName: emailData?.from?.displayName || 'Unknown Sender',
+        referrerEmail: emailData?.from?.emailAddress || '',
         notes: '',
         calendlyUrl: '',
         source: 'Email Inbound'
@@ -445,6 +534,7 @@ function performLocalExtraction(emailData) {
     // Debug logging
     console.log('Extracting from email body:', body.substring(0, 500));
     console.log('Email subject:', subject);
+    console.log('From:', emailData?.from);
     
     // For Ashley Ethridge recruitment email, look for Invitee pattern
     // Check for "Invitee:" pattern first
@@ -642,6 +732,8 @@ function populateForm(data) {
     const candidateNameField = document.getElementById('candidateName');
     if (!candidateNameField) {
         console.error('CRITICAL: candidateName field not found! Form may not be loaded.');
+        console.error('Document body:', document.body);
+        console.error('All element IDs:', Array.from(document.querySelectorAll('[id]')).map(el => el.id));
         // Try to wait and retry
         setTimeout(() => {
             console.log('Retrying populateForm after delay...');
@@ -655,6 +747,14 @@ function populateForm(data) {
     setValue('candidateEmail', data.candidateEmail || data.candidate_email || data.email || '');
     setValue('candidatePhone', data.candidatePhone || data.candidate_phone || data.phone || '');
     setValue('linkedinUrl', data.linkedinUrl || data.linkedin_url || '');
+    
+    // Log what was actually set
+    console.log('Form values set:', {
+        candidateName: document.getElementById('candidateName')?.value,
+        candidateEmail: document.getElementById('candidateEmail')?.value,
+        candidatePhone: document.getElementById('candidatePhone')?.value,
+        linkedinUrl: document.getElementById('linkedinUrl')?.value
+    });
     
     // Job Details
     setValue('jobTitle', data.jobTitle || data.job_title || '');
