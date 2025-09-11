@@ -1235,15 +1235,44 @@ class ZohoApiClient(ZohoClient):
             logger.warning(f"Error checking Zoho account duplicate: {e}")
             return None
     
-    async def query_candidates(self, limit: int = 100, page: int = 1) -> List[Dict[str, Any]]:
+    async def query_candidates(self, 
+                              limit: int = 100, 
+                              page: int = 1,
+                              from_date: Optional[datetime] = None,
+                              to_date: Optional[datetime] = None,
+                              owner: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Query candidates from Zoho CRM for TalentWell digest.
         Fetches records where Published_to_Vault = true and Candidate_Status NOT IN ('Placed', 'Hired').
+        Applies optional date range and owner filters.
         Sorted ascending by Date_Published_to_Vault (oldest first).
         """
         try:
             # Build search criteria
-            search_criteria = "(Published_to_Vault:equals:true)and((Candidate_Status:not_equals:Placed)and(Candidate_Status:not_equals:Hired))"
+            criteria_parts = [
+                "(Published_to_Vault:equals:true)",
+                "((Candidate_Status:not_equals:Placed)and(Candidate_Status:not_equals:Hired))"
+            ]
+            
+            # Add date range filter if provided
+            if from_date and to_date:
+                # Format dates for Zoho API (YYYY-MM-DD)
+                from_str = from_date.strftime("%Y-%m-%d")
+                to_str = to_date.strftime("%Y-%m-%d")
+                criteria_parts.append(f"(Date_Published_to_Vault:between:[{from_str},{to_str}])")
+            elif from_date:
+                from_str = from_date.strftime("%Y-%m-%d")
+                criteria_parts.append(f"(Date_Published_to_Vault:greater_equal:{from_str})")
+            elif to_date:
+                to_str = to_date.strftime("%Y-%m-%d")
+                criteria_parts.append(f"(Date_Published_to_Vault:less_equal:{to_str})")
+            
+            # Add owner filter if provided
+            if owner:
+                criteria_parts.append(f"(Owner.email:equals:{owner})")
+            
+            # Combine all criteria with AND
+            search_criteria = "and".join(criteria_parts)
             
             # Build sort order
             sort_by = "Date_Published_to_Vault"

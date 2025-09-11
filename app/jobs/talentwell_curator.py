@@ -78,7 +78,8 @@ class TalentWellCurator:
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         owner: Optional[str] = None,
-        dry_run: bool = False
+        dry_run: bool = False,
+        ignore_cooldown: bool = False
     ) -> Dict[str, Any]:
         """Generate weekly digest for specified audience and date range."""
         
@@ -91,17 +92,26 @@ class TalentWellCurator:
         if not from_date:
             from_date = to_date - timedelta(days=7)
             
-        logger.info(f"Generating digest for {audience} from {from_date} to {to_date}")
+        logger.info(f"Generating digest for {audience} from {from_date} to {to_date}, owner={owner}, ignore_cooldown={ignore_cooldown}")
+        
+        # Track timing for Application Insights
+        import time
+        start_time = time.time()
         
         # Step 1: Query deals
         deals = await self._query_deals(audience, from_date, to_date, owner)
-        logger.info(f"Found {len(deals)} deals for processing")
+        logger.info(f"Found {len(deals)} deals for processing (ignore_cooldown={ignore_cooldown})")
         
-        # Step 2: Check deduplication
+        # Step 2: Check deduplication (unless ignore_cooldown is True)
         week_key = f"{to_date.year}-{to_date.isocalendar()[1]}"
         processed_key = f"talentwell:processed:{week_key}"
-        new_deals = await self._filter_processed_deals(deals, processed_key)
-        logger.info(f"{len(new_deals)} new deals after deduplication")
+        
+        if ignore_cooldown:
+            logger.info("Ignoring cooldown - including all candidates")
+            new_deals = deals
+        else:
+            new_deals = await self._filter_processed_deals(deals, processed_key)
+            logger.info(f"{len(new_deals)} new deals after deduplication")
         
         # Step 3: Process each deal with C³/VoIT
         cards = []
@@ -138,6 +148,32 @@ class TalentWellCurator:
             'dry_run': dry_run
         }
         
+        # Log performance metrics to Application Insights
+        duration = time.time() - start_time
+        logger.info(f"Digest generation complete: cards={len(cards)}, total_candidates={len(deals)}, "
+                   f"after_cooldown={len(new_deals)}, duration={duration:.2f}s, subject_variant={subject['variant_id']}, "
+                   f"ignore_cooldown={ignore_cooldown}")
+        
+        # Log to Application Insights with custom dimensions
+        if hasattr(logger, 'application_insights'):
+            logger.application_insights.track_event(
+                'WeeklyDigestGenerated',
+                properties={
+                    'audience': audience,
+                    'cards_count': len(cards),
+                    'total_candidates': len(deals),
+                    'after_cooldown': len(new_deals),
+                    'ignore_cooldown': str(ignore_cooldown),
+                    'subject_variant': subject['variant_id'],
+                    'dry_run': str(dry_run)
+                },
+                measurements={
+                    'duration_seconds': duration,
+                    'cards_count': len(cards),
+                    'candidates_filtered': len(deals) - len(new_deals)
+                }
+            )
+        
         return {
             'manifest': manifest,
             'email_html': html_content,
@@ -156,7 +192,7 @@ class TalentWellCurator:
         
         # Try to load from CSV cache first
         if self.redis_client:
-            cache_key = f"deals:cache:{audience}:{from_date.date()}:{to_date.date()}"
+            cache_key = f"deals:cache:{audience}:{from_date.date()}:{to_date.date()}:{owner or 'none'}"
             cached = await self.redis_client.get(cache_key)
             if cached:
                 logger.info("Using cached deal data")
@@ -164,13 +200,18 @@ class TalentWellCurator:
         
         # Query from Zoho API using new query_candidates method
         try:
-            from app.integrations import ZohoIntegrator
-            zoho_client = ZohoIntegrator()
+            from app.integrations import ZohoApiClient
+            zoho_client = ZohoApiClient()
             
-            # Fetch candidates with Brandon's criteria
-            candidates = await zoho_client.query_candidates(limit=100)
+            # Fetch candidates with Brandon's criteria - NOW PASSING THE FILTERS!
+            candidates = await zoho_client.query_candidates(
+                limit=100,
+                from_date=from_date,
+                to_date=to_date,
+                owner=owner
+            )
             
-            logger.info(f"Retrieved {len(candidates)} candidates from Zoho")
+            logger.info(f"Retrieved {len(candidates)} candidates from Zoho with filters: from={from_date}, to={to_date}, owner={owner}")
             return candidates
             
         except Exception as e:

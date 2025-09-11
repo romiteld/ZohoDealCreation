@@ -154,6 +154,29 @@ class WebhookPayload(BaseModel):
             raise ValueError("Repository must be in 'owner/repo' format")
         return v
 
+class WeeklyDigestFilters(BaseModel):
+    """Model for TalentWell weekly digest test-send filters."""
+    audience: Optional[str] = Field(default="global", description="Target audience for digest")
+    owner: Optional[str] = Field(None, description="Deal owner filter")
+    from_: Optional[str] = Field(None, alias="from", description="Start date (YYYY-MM-DD)")
+    to_date: Optional[str] = Field(None, alias="to", description="End date (YYYY-MM-DD)")  
+    max_candidates: Optional[int] = Field(default=6, description="Maximum number of candidates", ge=1, le=50)
+    recipients: Optional[List[str]] = Field(None, description="Email recipients")
+    dry_run: Optional[bool] = Field(default=False, description="Return HTML without sending")
+    fallback_if_empty: Optional[bool] = Field(default=True, description="Retry with wider criteria if no candidates found")
+    ignore_cooldown: Optional[bool] = Field(default=False, description="Ignore 4-week cooldown for recently sent candidates")
+    
+    @validator("from_", "to_date")
+    def validate_dates(cls, v):
+        """Validate date format if provided."""
+        if v:
+            try:
+                from datetime import datetime
+                datetime.strptime(v, "%Y-%m-%d")
+            except ValueError:
+                raise ValueError("Date must be in YYYY-MM-DD format")
+        return v
+
 class CacheOperation(BaseModel):
     """Model for tracking cache operations and their results."""
     operation_type: Literal["get", "set", "delete", "invalidate", "warmup"] = Field(..., description="Type of cache operation")

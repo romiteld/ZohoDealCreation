@@ -28,7 +28,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Import models and services
-from app.models import EmailPayload as EmailRequest, ProcessingResult as ZohoResponse, ExtractedData
+from app.models import EmailPayload as EmailRequest, ProcessingResult as ZohoResponse, ExtractedData, WeeklyDigestFilters
 from app.business_rules import BusinessRulesEngine
 from app.integrations import ZohoApiClient as ZohoIntegration, AzureBlobStorageClient as AzureBlobStorage, PostgreSQLClient
 from app.microsoft_graph_client import MicrosoftGraphClient
@@ -41,6 +41,7 @@ from app.api.vault_agent.routes import router as vault_agent_router
 
 # Import Admin routes
 from app.admin import policies_router
+from app.admin.import_exports_v2 import router as import_v2_router
 
 # API Key Authentication with secure comparison and rate limiting
 import hmac
@@ -558,6 +559,123 @@ blob_storage = AzureBlobStorage(
 )
 
 # Removed: SerperDev API (deprecated)
+
+async def run_curator_and_send(filters: WeeklyDigestFilters, req: Request) -> Dict[str, Any]:
+    """Helper function to run curator and optionally send digest emails"""
+    from datetime import datetime, timedelta
+    
+    # Parse dates from filters
+    from_date = None
+    to_date = None
+    if filters.from_:
+        from_date = datetime.strptime(filters.from_, "%Y-%m-%d")
+    if filters.to_date:
+        to_date = datetime.strptime(filters.to_date, "%Y-%m-%d")
+    
+    # Initialize curator
+    from app.jobs.talentwell_curator import TalentWellCurator
+    curator = TalentWellCurator()
+    await curator.initialize()
+    
+    # Run curator with initial filters
+    digest_result = await curator.run_weekly_digest(
+        audience=filters.audience,
+        from_date=from_date,
+        to_date=to_date,
+        owner=filters.owner,
+        dry_run=filters.dry_run,  # Use the actual dry_run setting from request
+        ignore_cooldown=filters.ignore_cooldown  # Pass ignore_cooldown parameter
+    )
+    
+    cards_count = digest_result['manifest']['cards_count']
+    
+    # Check for fallback if no candidates found
+    if cards_count == 0 and filters.fallback_if_empty:
+        logger.info("No candidates found, applying fallback strategy")
+        
+        # Fallback: widen date window to 30 days and remove owner filter
+        fallback_to_date = to_date or datetime.now()
+        fallback_from_date = fallback_to_date - timedelta(days=30)
+        
+        logger.info(f"Fallback: expanding date range to {fallback_from_date} - {fallback_to_date}, owner=None")
+        
+        digest_result = await curator.run_weekly_digest(
+            audience=filters.audience,
+            from_date=fallback_from_date,
+            to_date=fallback_to_date,
+            owner=None,  # Remove owner filter
+            dry_run=filters.dry_run,  # Use the actual dry_run setting from request
+            ignore_cooldown=filters.ignore_cooldown  # Maintain ignore_cooldown setting
+        )
+        cards_count = digest_result['manifest']['cards_count']
+    
+    # Determine recipients
+    recipients = []
+    if filters.recipients:
+        recipients = filters.recipients
+    else:
+        # Use default internal recipients
+        default_recipients = os.getenv('TALENTWELL_RECIPIENTS_INTERNAL', '')
+        if default_recipients:
+            recipients = [email.strip() for email in default_recipients.split(',') if email.strip()]
+    
+    # Validate recipients if not dry run
+    if not filters.dry_run and not recipients:
+        raise HTTPException(
+            status_code=422, 
+            detail="No recipients provided. Include 'to' field or set TALENTWELL_RECIPIENTS_INTERNAL environment variable"
+        )
+    
+    errors = []
+    sent = False
+    
+    # Check if we have no candidates after fallback
+    if cards_count == 0:
+        errors.append("No candidates")
+    
+    # Send email if not dry run and has recipients (even with 0 candidates, for testing)
+    if not filters.dry_run and recipients:
+        if cards_count > 0:
+            try:
+                from app.mail.send import mailer
+                
+                # Send to each recipient
+                for recipient in recipients:
+                    delivery_result = await mailer.send_test_digest(
+                        subject=digest_result['subject'],
+                        html_content=digest_result['email_html'],
+                        test_recipient=recipient
+                    )
+                    
+                    if not delivery_result.get('success', False):
+                        errors.append(f"Failed to send to {recipient}: {delivery_result.get('error', 'Unknown error')}")
+                
+                sent = len(errors) == 1 and errors[0] == "No candidates"  # Only "No candidates" error means email was skipped
+                
+            except Exception as e:
+                errors.append(f"Email sending failed: {str(e)}")
+        else:
+            # No candidates, so we don't send the email
+            sent = False
+    
+    # Build response
+    response = {
+        "sent": sent,
+        "subject": digest_result['subject'],
+        "cards_count": cards_count,
+        "manifest": digest_result['manifest']
+    }
+    
+    # Include HTML for dry runs or errors
+    if filters.dry_run or not sent:
+        response["email_html"] = digest_result['email_html']
+    
+    # Include errors if any
+    if errors:
+        response["errors"] = errors
+    
+    return response
+
 
 @app.get("/")
 async def root():
@@ -2317,6 +2435,9 @@ app.include_router(vault_agent_router)
 
 # Include Admin policies router
 app.include_router(policies_router)
+
+# Include Admin import v2 router
+app.include_router(import_v2_router)
 
 @app.get("/cache/status", dependencies=[Depends(verify_api_key)])
 async def get_cache_status():
@@ -4426,6 +4547,115 @@ async def test_send_digest(request: Request):
     except Exception as e:
         logger.error(f"Test send failed: {e}")
         raise HTTPException(status_code=500, detail=f"Test send failed: {str(e)}")
+
+
+@app.post("/api/talentwell/weekly-digest/test-send", dependencies=[Depends(verify_api_key)])
+async def weekly_digest_test_send(filters: WeeklyDigestFilters, req: Request):
+    """Generate and send TalentWell weekly digest with curator-driven filtering"""
+    try:
+        return await run_curator_and_send(filters, req)
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Weekly digest test-send failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Weekly digest test-send failed: {str(e)}")
+
+@app.post("/api/talentwell/weekly-digest/diagnose", dependencies=[Depends(verify_api_key)])
+async def diagnose_weekly_digest(filters: WeeklyDigestFilters, req: Request):
+    """Diagnose why weekly digest returns zero candidates - shows counts at each filter stage"""
+    try:
+        from datetime import datetime, timedelta
+        from app.integrations import ZohoApiClient
+        from app.jobs.talentwell_curator import TalentWellCurator
+        
+        # Parse dates from filters
+        from_date = None
+        to_date = None
+        if filters.from_:
+            from_date = datetime.strptime(filters.from_, "%Y-%m-%d")
+        if filters.to_date:
+            to_date = datetime.strptime(filters.to_date, "%Y-%m-%d")
+        
+        # Default date range if not provided
+        if not to_date:
+            to_date = datetime.now()
+        if not from_date:
+            from_date = to_date - timedelta(days=7)
+        
+        zoho_client = ZohoApiClient()
+        
+        # Stage 1: Get total vault candidates (no filters)
+        vault_total_candidates = await zoho_client.query_candidates(limit=200)
+        vault_total = len(vault_total_candidates)
+        
+        # Stage 2: Apply date/owner filters
+        matching_filter_candidates = await zoho_client.query_candidates(
+            limit=200,
+            from_date=from_date,
+            to_date=to_date,
+            owner=filters.owner
+        )
+        matching_filters = len(matching_filter_candidates)
+        
+        # Stage 3: Check cooldown (if not ignoring)
+        after_cooldown = matching_filters
+        if not filters.ignore_cooldown and matching_filter_candidates:
+            # Initialize curator to check cooldown
+            curator = TalentWellCurator()
+            await curator.initialize()
+            
+            # Check deduplication
+            week_key = f"{to_date.year}-{to_date.isocalendar()[1]:02d}"
+            processed_key = f"talentwell:processed:{week_key}"
+            
+            # Filter through cooldown check
+            new_deals = await curator._filter_processed_deals(
+                matching_filter_candidates, 
+                processed_key
+            )
+            after_cooldown = len(new_deals)
+        
+        # Stage 4: After validation (same as after cooldown for now)
+        after_validation = after_cooldown
+        
+        # Get sample locators (first 5)
+        sample_locators = []
+        for candidate in matching_filter_candidates[:5]:
+            sample_locators.append({
+                "locator": candidate.get("candidate_locator") or candidate.get("id"),
+                "published_at": candidate.get("date_published"),
+                "owner": candidate.get("owner_email") or "N/A",
+                "name": candidate.get("candidate_name") or "Unknown"
+            })
+        
+        # Log diagnostics to Application Insights
+        logger.info(f"Weekly digest diagnostics: vault_total={vault_total}, matching_filters={matching_filters}, "
+                   f"after_cooldown={after_cooldown}, filters={filters.dict()}")
+        
+        return {
+            "vault_total": vault_total,
+            "matching_filters": matching_filters,
+            "after_cooldown": after_cooldown,
+            "after_validation": after_validation,
+            "sample_locators": sample_locators,
+            "applied_filters": {
+                "audience": filters.audience,
+                "owner": filters.owner,
+                "from": from_date.isoformat(),
+                "to": to_date.isoformat(),
+                "max_candidates": filters.max_candidates,
+                "ignore_cooldown": filters.ignore_cooldown
+            },
+            "diagnostics": {
+                "cooldown_removed": matching_filters - after_cooldown if not filters.ignore_cooldown else 0,
+                "date_range_days": (to_date - from_date).days
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Weekly digest diagnosis failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Diagnosis failed: {str(e)}")
 
 
 @app.get("/api/talentwell/email-status", dependencies=[Depends(verify_api_key)])

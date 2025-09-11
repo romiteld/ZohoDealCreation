@@ -15,7 +15,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, Optional, List, Tuple, Union
 from contextlib import asynccontextmanager
 import chardet
-from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Body, Request
+from fastapi import APIRouter, UploadFile, File, HTTPException, Form, Body, Request, Depends, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field, validator
 import aiofiles
@@ -760,6 +760,57 @@ async def trigger_cleanup():
     """
     await import_service.cleanup_old_uploads()
     return {"status": "cleanup completed"}
+
+
+@router.post("/download-imports")
+async def download_import_files():
+    """
+    Download CSV import files from Azure Storage to /mnt/data/
+    """
+    import requests
+    
+    # Azure Storage URLs with SAS token
+    sas_token = "se=2025-09-12T23%3A59%3A59Z&sp=r&sv=2022-11-02&sr=c&sig=1SEOSJkGk%2B5llshpZHAdhbXge%2B5ttXuLhUqX%2Bfb5BRc%3D"
+    base_url = "https://wellintakestorage0903.blob.core.windows.net/imports"
+    
+    files_to_download = [
+        "Deals_2025_09_10_2.csv",
+        "Deals_Stage_History_2025_09_10.csv", 
+        "Meetings_2025_09_10_2.csv",
+        "Notes_Deals_2025_09_10.csv"
+    ]
+    
+    # Create target directory
+    target_dir = Path("/mnt/data")
+    target_dir.mkdir(parents=True, exist_ok=True)
+    
+    downloaded_files = []
+    errors = []
+    
+    for filename in files_to_download:
+        try:
+            url = f"{base_url}/{filename}?{sas_token}"
+            target_path = target_dir / filename
+            
+            response = requests.get(url, timeout=30)
+            if response.status_code == 200:
+                with open(target_path, 'wb') as f:
+                    f.write(response.content)
+                downloaded_files.append(str(target_path))
+                logger.info(f"Downloaded {filename} to {target_path}")
+            else:
+                errors.append(f"Failed to download {filename}: HTTP {response.status_code}")
+                
+        except Exception as e:
+            errors.append(f"Error downloading {filename}: {str(e)}")
+            logger.error(f"Error downloading {filename}: {str(e)}")
+    
+    return {
+        "status": "completed",
+        "downloaded_files": downloaded_files,
+        "errors": errors,
+        "target_directory": str(target_dir)
+    }
 
 
 # Add router to main app in your main.py:
