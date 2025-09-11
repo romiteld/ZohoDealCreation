@@ -13,6 +13,8 @@ from email.mime.multipart import MIMEMultipart
 from datetime import datetime
 import json
 
+logger = logging.getLogger(__name__)
+
 try:
     from azure.communication.email import EmailClient
     from azure.identity import DefaultAzureCredential
@@ -28,8 +30,6 @@ try:
 except ImportError:
     SENDGRID_AVAILABLE = False
     logger.warning("SendGrid not available")
-
-logger = logging.getLogger(__name__)
 
 
 @dataclass

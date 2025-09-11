@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Depends, status
-from pydantic import BaseModel
+from pydantic import BaseModel, EmailStr
 from typing import Dict, Any, List, Optional
 import hashlib
 import json
@@ -26,9 +26,14 @@ class IngestRequest(BaseModel):
     payload: Dict[str, Any]
     metadata: Dict[str, Any] = {}
 
+class EmailSpec(BaseModel):
+    to: List[EmailStr]
+    subject: Optional[str] = "TalentWell – Candidate Alert (Test)"
+
 class PublishRequest(BaseModel):
     locator: str
-    channels: List[str]              # ["zoho","email","jd_alignment","portal_card"]
+    channels: List[str]              # ["zoho_crm","email_campaign","jd_alignment","portal_card"]
+    email: Optional[EmailSpec] = None
 
 async def generate_embedding(text: str) -> List[float]:
     """Generate text embedding (placeholder - implement with OpenAI/sentence-transformers)."""
@@ -200,21 +205,78 @@ async def publish_record(request: PublishRequest) -> Dict[str, Any]:
                 )
                 await save_c3_entry(cache_mgr.redis_client, cache_key, new_entry)
         
-        # Generate channel-specific summaries
-        summaries = {}
+        # Generate channel-specific results
+        results = {}
         for channel in request.channels:
-            if channel == "email":
-                summaries[channel] = f"<html><body><h2>Deal Summary</h2><pre>{json.dumps(canonical.get('fields', {}), indent=2)}</pre></body></html>"
-            elif channel == "zoho":
-                summaries[channel] = {"deal": canonical.get("fields", {})}
+            if channel == "email_campaign":
+                # Handle email campaign channel
+                if not request.email or not request.email.to:
+                    raise HTTPException(
+                        status_code=422, 
+                        detail="email.to is required when channels include email_campaign"
+                    )
+                
+                # Import render and validation functions
+                from app.templates.render import render_single_candidate
+                from app.templates.validator import validate_digest_html
+                from app.mail.send_helper import send_html_email
+                
+                # Generate candidate card HTML
+                candidate_fields = canonical.get("fields", {})
+                card_html = f"""
+                <div class="candidate-card">
+                    <h3><strong>{candidate_fields.get('candidate_name', 'Unknown')}</strong></h3>
+                    <div class="candidate-location">
+                        <strong>Location:</strong> {candidate_fields.get('location', 'Unknown')}
+                    </div>
+                    <div class="candidate-details">
+                        <div class="skill-list">
+                            <div class="detail-label">Job Title:</div>
+                            <div>{candidate_fields.get('job_title', 'Unknown')}</div>
+                        </div>
+                        <div class="skill-list">
+                            <div class="detail-label">Company:</div>
+                            <div>{candidate_fields.get('company_name', 'Unknown')}</div>
+                        </div>
+                        <div class="availability-comp">
+                            <div><span class="detail-label">Email:</span> {candidate_fields.get('email', 'Not provided')}</div>
+                        </div>
+                    </div>
+                    <div class="ref-code">REF-{request.locator[-8:]}</div>
+                </div>
+                """
+                
+                # Render single candidate email
+                email_html = render_single_candidate(card_html)
+                
+                # Validate HTML structure
+                is_valid, errors = validate_digest_html(email_html)
+                if not is_valid:
+                    raise HTTPException(
+                        status_code=422,
+                        detail={"validation_errors": errors}
+                    )
+                
+                # Send email
+                send_result = await send_html_email(
+                    subject=request.email.subject,
+                    html=email_html,
+                    to=request.email.to
+                )
+                results["email_campaign"] = send_result
+                
+            elif channel == "zoho_crm":
+                results[channel] = {"status": "would_sync", "fields": canonical.get("fields", {})}
+            elif channel == "portal_card":
+                results[channel] = {"status": "would_update", "card_id": request.locator}
             elif channel == "jd_alignment":
-                summaries[channel] = {"alignment_score": 0.85, "matched_skills": ["Python", "FastAPI"]}
+                results[channel] = {"alignment_score": 0.85, "matched_skills": ["Python", "FastAPI"]}
             else:
-                summaries[channel] = canonical.get("fields", {})
+                results[channel] = canonical.get("fields", {})
         
         return {
             "published": request.channels,
-            "summaries": summaries,
+            "results": results,
             "cache_status": "hit" if artifact and os.getenv("FEATURE_C3") == "true" else "miss",
             "voit_applied": os.getenv("FEATURE_VOIT") == "true"
         }
