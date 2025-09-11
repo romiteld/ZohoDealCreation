@@ -1243,15 +1243,16 @@ class ZohoApiClient(ZohoClient):
                               owner: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Query candidates from Zoho CRM for TalentWell digest.
-        Fetches records where Published_to_Vault = true and Candidate_Status NOT IN ('Placed', 'Hired').
+        Fetches records where Publish_to_Vault = true and Lead_Status NOT IN ('Placed', 'Hired').
+        Uses Leads module (which Zoho calls Candidates).
         Applies optional date range and owner filters.
         Sorted ascending by Date_Published_to_Vault (oldest first).
         """
         try:
             # Build search criteria
             criteria_parts = [
-                "(Published_to_Vault:equals:true)",
-                "((Candidate_Status:not_equals:Placed)and(Candidate_Status:not_equals:Hired))"
+                "(Publish_to_Vault:equals:true)",
+                "((Lead_Status:not_equals:Placed)and(Lead_Status:not_equals:Hired))"
             ]
             
             # Add date range filter if provided
@@ -1287,7 +1288,7 @@ class ZohoApiClient(ZohoClient):
                 "per_page": limit
             }
             
-            response = self._make_request("GET", "Candidates/search", params=params)
+            response = self._make_request("GET", "Leads/search", params=params)
             
             if response.get("data"):
                 candidates = response["data"]
