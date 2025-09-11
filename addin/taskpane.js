@@ -197,8 +197,17 @@ async function extractAndPreview() {
             console.log('Response ok:', extractionResponse.ok);
             
             if (extractionResponse.ok) {
-                const response = await extractionResponse.json();
-                console.log('API Response:', response);
+                let response;
+                try {
+                    const responseText = await extractionResponse.text();
+                    console.log('Raw response text:', responseText);
+                    response = JSON.parse(responseText);
+                    console.log('Parsed API Response:', response);
+                } catch (parseError) {
+                    console.error('Failed to parse API response:', parseError);
+                    console.error('Response headers:', extractionResponse.headers);
+                    throw new Error('Invalid JSON response from API');
+                }
                 
                 // Access extracted data from the correct location in response
                 const extracted = response.extracted || response;
@@ -251,12 +260,16 @@ async function extractAndPreview() {
         
         // Store original extracted data for comparison
         originalExtractedData = { ...extractedData };
+        console.log('Final extractedData to populate:', extractedData);
         
         // Populate form with extracted data
+        console.log('Calling populateForm...');
         populateForm(extractedData);
         
         // Show preview form
+        console.log('Calling showPreviewForm...');
         showPreviewForm();
+        console.log('Form should now be visible');
         
     } catch (error) {
         console.error('Error in extraction:', error);
@@ -473,6 +486,7 @@ async function getAttachments(item) {
  * Populate form with extracted data
  */
 function populateForm(data) {
+    console.log('populateForm called with data:', data);
     // Store the current extracted data for learning
     currentExtractedData = data;
     
@@ -487,6 +501,7 @@ function populateForm(data) {
     setValue('location', data.location);
     setValue('firmName', data.firmName || data.firm_name || data.company_name);
     setValue('source', data.source || 'Email Inbound');
+    console.log('Form fields populated');
     
     // Referrer Information
     setValue('referrerName', data.referrerName || data.referrer_name || currentEmailData?.from?.displayName);
