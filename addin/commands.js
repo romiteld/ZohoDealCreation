@@ -348,6 +348,7 @@ async function sendToBackend(emailData) {
         sender_name: emailData.from?.displayName || '',
         subject: emailData.subject || '',
         body: emailData.body || '',
+        dry_run: true, // Get extracted data first for review
         attachments: (emailData.attachments || [])
           .filter(att => att.content && att.format === 'base64')
           .map(att => ({ filename: att.name, content_base64: att.content, content_type: att.contentType }))

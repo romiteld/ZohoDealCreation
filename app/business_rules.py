@@ -34,6 +34,19 @@ def format_deal_name(job_title: Optional[str], location: Optional[str], company_
         # Nothing available - this should trigger user prompt
         return None
 
+def format_client_deal_name(client_name: Optional[str], company_name: Optional[str]) -> str:
+    """
+    Formats deal name for client consultation emails.
+    Format: "Recruiting Services - [Client Name] ([Company])"
+    """
+    if not client_name:
+        return "Recruiting Services - Consultation"
+    
+    if company_name:
+        return f"Recruiting Services - {client_name} ({company_name})"
+    else:
+        return f"Recruiting Services - {client_name}"
+
 def clean_contact_name(name: Optional[str]) -> Tuple[Optional[str], Dict[str, str]]:
     """
     Removes honorifics from a name and splits into first/last.
@@ -56,7 +69,36 @@ def clean_contact_name(name: Optional[str]) -> Tuple[Optional[str], Dict[str, st
     
     return cleaned_name, {"first_name": first_name, "last_name": last_name}
 
-def determine_source(email_body: str, referrer_name: Optional[str]) -> Tuple[str, Optional[str]]:
+def is_client_consultation_email(email_body: str, subject: str = "", sender_email: str = "") -> bool:
+    """
+    Detects if this is a client consultation email rather than a candidate application.
+    """
+    lower_body = email_body.lower()
+    lower_subject = subject.lower()
+    lower_sender = sender_email.lower()
+    
+    # Calendly consultation indicators
+    consultation_keywords = [
+        "recruiting consult", "consultation", "recruiting services",
+        "discuss your recruiting", "hiring challenges", "recruiting goals",
+        "build your ideal team", "hiring solutions", "recruiting strategies"
+    ]
+    
+    # Check if it's a Calendly meeting about recruiting services
+    is_from_calendly = "calendly.com" in lower_body or "calendly.com" in lower_sender
+    
+    if is_from_calendly:
+        for keyword in consultation_keywords:
+            if keyword in lower_body or keyword in lower_subject:
+                return True
+    
+    # Also check for recruiting consult in subject even without calendly
+    if "recruiting consult" in lower_subject:
+        return True
+    
+    return False
+
+def determine_source(email_body: str, referrer_name: Optional[str], sender_email: str = "", subject: str = "") -> Tuple[str, Optional[str]]:
     """
     Determines the deal source based on email content and referrer info.
     """
@@ -64,9 +106,15 @@ def determine_source(email_body: str, referrer_name: Optional[str]) -> Tuple[str
         return "Referral", referrer_name
     
     lower_body = email_body.lower()
+    lower_sender = sender_email.lower()
+    
+    # Check if this is a consultation email - these are referrals even if from Calendly
+    if is_client_consultation_email(email_body, subject, sender_email):
+        return "Referral", "Client consultation scheduling"
+    
     if "twav" in lower_body or "advisor vault" in lower_body:
         return "Reverse Recruiting", "TWAV Platform"
-    if "calendly.com" in lower_body:
+    if "calendly.com" in lower_body or "calendly.com" in lower_sender:
         return "Website Inbound", "Calendly scheduling"
     return "Email Inbound", "Direct email contact"
 
@@ -86,12 +134,46 @@ def determine_distribution_network(referrer_name: Optional[str]) -> Optional[str
     return None
 
 
+def extract_manual_referrer(email_body: str, sender_email: str) -> Optional[str]:
+    """
+    Extract referrer information from manual referral emails.
+    """
+    import re
+    
+    lower_body = email_body.lower()
+    
+    # Patterns to look for referrer information
+    referrer_patterns = [
+        r'referral from\s+([^.\n]+)',
+        r'referred by\s+([^.\n]+)',
+        r'referrer:\s*([^.\n]+)',
+        r'from\s+([^@\s]+(?:\s+[^@\s]+)*)\s*(?:@|\sat\s)',  # "from josh whitehead at advisors excel"
+    ]
+    
+    for pattern in referrer_patterns:
+        match = re.search(pattern, lower_body)
+        if match:
+            referrer_name = match.group(1).strip()
+            # Clean up common endings
+            referrer_name = re.sub(r'\s+(at|@|from|of)\s.*$', '', referrer_name).strip()
+            if referrer_name and len(referrer_name) > 2:
+                return referrer_name.title()
+    
+    # Check if sender is from a known referral source (not internal)
+    if sender_email and not any(domain in sender_email.lower() for domain in ['emailthewell.com', 'calendly.com']):
+        # Extract name from email sender
+        if '@advisorsexcel.com' in sender_email.lower():
+            sender_name = sender_email.split('@')[0].replace('.', ' ').title()
+            return sender_name
+    
+    return None
+
 class BusinessRulesEngine:
     """
     Business rules engine for processing extracted data
     """
     
-    def process_data(self, ai_data: Dict, email_body: str, sender_email: str) -> Dict:
+    def process_data(self, ai_data: Dict, email_body: str, sender_email: str, subject: str = "") -> Dict:
         """
         Process extracted data through business rules
         
@@ -99,32 +181,78 @@ class BusinessRulesEngine:
             ai_data: Data extracted by AI
             email_body: Original email body
             sender_email: Sender's email address
+            subject: Email subject line
             
         Returns:
             Processed data with business rules applied
         """
         result = ai_data.copy() if ai_data else {}
         
-        # Format deal name - CRITICAL: Use exact format required by boss
-        job_title = result.get('job_title')
-        location = result.get('location')
-        company_name = result.get('company_name')
+        # Try to extract manual referrer information if not already provided
+        if not result.get('referrer'):
+            manual_referrer = extract_manual_referrer(email_body, sender_email)
+            if manual_referrer:
+                result['referrer'] = manual_referrer
         
-        # Don't use placeholder values - keep as None if missing
-        deal_name = format_deal_name(job_title, location, company_name)
-        if deal_name:
+        # Check if this is a client consultation email
+        is_consultation = is_client_consultation_email(email_body, subject, sender_email)
+        
+        if is_consultation:
+            # Handle as client consultation deal
+            client_name = result.get('candidate_name')  # In consultation emails, this is the client name
+            company_name = result.get('company_name')
+            
+            # Extract client info from Calendly data if available
+            if not client_name and "calendly.com" in email_body:
+                # Try to extract from email content
+                import re
+                # Look for "Invitee: [Name]" pattern
+                invitee_match = re.search(r'Invitee:\s*([^\n]+)', email_body)
+                if invitee_match:
+                    client_name = invitee_match.group(1).strip()
+                    result['candidate_name'] = client_name
+                
+                # Look for email in Calendly content
+                email_match = re.search(r'Invitee Email:\s*([^\n]+)', email_body)
+                if email_match:
+                    client_email = email_match.group(1).strip()
+                    result['email'] = client_email
+                    # Extract company from email domain
+                    if not company_name and '@' in client_email:
+                        domain = client_email.split('@')[1]
+                        # Simple company name extraction from domain
+                        company_guess = domain.split('.')[0].title()
+                        result['company_name'] = company_guess
+                        company_name = company_guess
+            
+            # Format as client consultation deal
+            deal_name = format_client_deal_name(client_name, company_name)
             result['deal_name'] = deal_name
+            result['is_client_consultation'] = True
+            result['job_title'] = "Recruiting Services"  # This is what we're selling
+            
         else:
-            # Mark that deal name needs user input
-            result['deal_name'] = None
-            result['requires_user_input'] = True
-            result['missing_fields'] = []
-            if not job_title:
-                result['missing_fields'].append('job_title')
-            if not location:
-                result['missing_fields'].append('location')
-            if not company_name:
-                result['missing_fields'].append('company_name')
+            # Handle as regular candidate application
+            # Format deal name - CRITICAL: Use exact format required by boss
+            job_title = result.get('job_title')
+            location = result.get('location')
+            company_name = result.get('company_name')
+            
+            # Don't use placeholder values - keep as None if missing
+            deal_name = format_deal_name(job_title, location, company_name)
+            if deal_name:
+                result['deal_name'] = deal_name
+            else:
+                # Mark that deal name needs user input
+                result['deal_name'] = None
+                result['requires_user_input'] = True
+                result['missing_fields'] = []
+                if not job_title:
+                    result['missing_fields'].append('job_title')
+                if not location:
+                    result['missing_fields'].append('location')
+                if not company_name:
+                    result['missing_fields'].append('company_name')
         
         # Clean contact name - don't use "Unknown" placeholders
         contact_name = result.get('candidate_name')
@@ -139,7 +267,7 @@ class BusinessRulesEngine:
         
         # Determine source
         referrer = result.get('referrer')
-        source_type, source_detail = determine_source(email_body, referrer)
+        source_type, source_detail = determine_source(email_body, referrer, sender_email, subject)
         result['source_type'] = source_type
         result['source_detail'] = source_detail
         

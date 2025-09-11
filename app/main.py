@@ -1481,7 +1481,8 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         processed_data = business_rules.process_data(
             extracted_data.model_dump() if hasattr(extracted_data, 'model_dump') else extracted_data,
             request.body,
-            request.sender_email
+            request.sender_email,
+            request.subject  # Pass subject for client consultation detection
         )
         
         # Check if user input is required for missing fields
@@ -1584,7 +1585,8 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
             contact_id=zoho_result["contact_id"],
             deal_name=zoho_result["deal_name"],
             primary_email=zoho_result["primary_email"],
-            message=message
+            message=message,
+            extracted=enhanced_data
         )
         
     except Exception as e:

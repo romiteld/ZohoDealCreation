@@ -513,7 +513,8 @@ class BatchEmailProcessor:
                     processed_data = self.business_rules.process_data(
                         extracted.model_dump(),
                         original_email.get("body", ""),
-                        original_email.get("sender_email", "")
+                        original_email.get("sender_email", ""),
+                        original_email.get("subject", "")
                     )
                     enhanced_data = ExtractedData(**processed_data)
                     

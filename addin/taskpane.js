@@ -198,20 +198,26 @@ async function extractAndPreview() {
             
             if (extractionResponse.ok) {
                 const response = await extractionResponse.json();
+                console.log('API Response:', response);
+                
+                // Access extracted data from the correct location in response
+                const extracted = response.extracted || response;
+                console.log('Extracted data:', extracted);
+                
                 // Map the response to our expected format
                 extractedData = {
-                    candidateName: response.candidate_name || '',
-                    candidateEmail: response.candidate_email || '',
-                    candidatePhone: response.phone || '',
-                    linkedinUrl: response.linkedin_url || '',
-                    jobTitle: response.job_title || '',
-                    location: response.location || '',
-                    firmName: response.company_name || '',
-                    referrerName: response.referrer_name || currentEmailData.from?.displayName || '',
+                    candidateName: extracted.candidate_name || '',
+                    candidateEmail: extracted.candidate_email || extracted.email || '',
+                    candidatePhone: extracted.phone || '',
+                    linkedinUrl: extracted.linkedin_url || '',
+                    jobTitle: extracted.job_title || '',
+                    location: extracted.location || '',
+                    firmName: extracted.company_name || '',
+                    referrerName: extracted.referrer_name || currentEmailData.from?.displayName || '',
                     referrerEmail: currentEmailData.from?.emailAddress || '',
-                    notes: response.notes || '',
-                    calendlyUrl: response.calendly_url || '',
-                    source: response.source || 'Email Inbound'
+                    notes: extracted.notes || '',
+                    calendlyUrl: extracted.calendly_url || '',
+                    source: extracted.source || 'Email Inbound'
                 };
             } else {
                 // Log the error response
