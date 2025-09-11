@@ -1,0 +1,11 @@
+Deal Id,Subject,Start Time,Participants,Opened,Clicked
+D001,Initial Discovery Call,2024-01-17T09:00:00Z,John Smith; Client Team,true,false
+D001,Technical Deep Dive,2024-01-22T14:00:00Z,John Smith; CTO; Dev Team,true,true
+D002,Proposal Presentation,2024-01-23T15:00:00Z,Jane Doe; Client Executive,false,true
+D002,Contract Review,2024-02-15T10:30:00Z,Jane Doe; Legal Team,true,false
+D003,Product Demo,2024-01-27T13:00:00Z,Mike Johnson; Product Manager,true,true
+D004,Requirements Gathering,2024-02-04T11:00:00Z,Sarah Wilson; Business Analyst,true,false
+D004,Solution Architecture Review,2024-02-09T16:00:00Z,Sarah Wilson; Technical Lead,true,true
+D004,Final Negotiation Meeting,2024-02-11T14:30:00Z,Sarah Wilson; Procurement,false,false
+D005,Kick-off Meeting,2024-02-08T10:00:00Z,Tom Brown; Project Team,true,false
+D005,Progress Review,2024-02-20T15:30:00Z,Tom Brown; Stakeholders,true,true

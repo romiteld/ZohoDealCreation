@@ -39,6 +39,9 @@ from app.manifest_cache_service import get_manifest_cache_service
 # Import Vault Agent routes
 from app.api.vault_agent.routes import router as vault_agent_router
 
+# Import Admin routes
+from app.admin import policies_router
+
 # API Key Authentication with secure comparison and rate limiting
 import hmac
 from collections import defaultdict
@@ -1138,7 +1141,18 @@ async def database_health_check():
 
 @app.post("/intake/email", response_model=ZohoResponse)
 async def process_email(request: EmailRequest, req: Request, _auth=Depends(verify_auth_or_api_key)):
-    """Process email and create Zoho CRM records with learning from user corrections"""
+    """Process email and create Zoho CRM records with bulletproof persistence and idempotency"""
+    
+    # Generate correlation ID for tracking this request
+    import uuid
+    import hashlib
+    import json
+    import asyncio
+    import os
+    from datetime import datetime
+    
+    correlation_id = str(uuid.uuid4())
+    
     try:
         # Input validation and sanitization
         import re
@@ -1157,19 +1171,29 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
             request.body = request.body.replace('\x00', '')
             request.body = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', request.body)
         
+        # Validate required fields
+        if not request.subject:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Subject is required for deal_name. Correlation ID: {correlation_id}"
+            )
+        
         # Validate email format after cleaning
         email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         if not re.match(email_pattern, request.sender_email):
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Invalid sender email format"
+                detail=f"Invalid sender email format. Correlation ID: {correlation_id}"
             )
+        
+        # Normalize email addresses (lowercase)
+        request.sender_email = request.sender_email.lower()
         
         # Validate body length (prevent excessive processing)
         if len(request.body) > 100000:  # 100KB limit
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                detail="Email body too large (max 100KB)"
+                detail=f"Email body too large (max 100KB). Correlation ID: {correlation_id}"
             )
         
         # Sanitize inputs to prevent injection attacks
@@ -1179,7 +1203,48 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         if request.subject and len(request.subject) > 500:
             request.subject = request.subject[:500]
         
-        logger.info(f"Processing email from {request.sender_email}")
+        # IDEMPOTENCY: Generate or use message_id
+        message_id = getattr(request, 'internet_message_id', None) or getattr(request, 'message_id', None)
+        if not message_id:
+            # Generate hash from subject+sender+timestamp for idempotency
+            timestamp = datetime.utcnow().strftime("%Y-%m-%d")
+            idempotency_string = f"{request.subject}:{request.sender_email}:{timestamp}"
+            message_id = hashlib.sha256(idempotency_string.encode()).hexdigest()
+        
+        logger.info(f"Processing email from {request.sender_email} with correlation_id: {correlation_id}, message_id: {message_id}")
+        
+        # IDEMPOTENCY CHECK: Check intake_audit table first
+        if hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
+            await req.app.state.postgres_client.init_pool()
+            
+            # Check if message was already processed
+            check_query = """
+            SELECT correlation_id, deal_id, response_payload, outcome
+            FROM intake_audit
+            WHERE message_id = $1
+              AND outcome = 'success'
+            ORDER BY created_at DESC
+            LIMIT 1
+            """
+            
+            async with req.app.state.postgres_client.pool.acquire() as conn:
+                existing_record = await conn.fetchrow(check_query, message_id)
+                
+                if existing_record:
+                    # Return existing result
+                    logger.info(f"Found existing successful processing for message_id: {message_id}")
+                    response_data = json.loads(existing_record['response_payload']) if existing_record['response_payload'] else {}
+                    
+                    return ZohoResponse(
+                        status="success",
+                        deal_id=response_data.get("deal_id"),
+                        account_id=response_data.get("account_id"),
+                        contact_id=response_data.get("contact_id"),
+                        deal_name=response_data.get("deal_name"),
+                        primary_email=response_data.get("primary_email"),
+                        message="Email already processed (idempotent response)",
+                        extracted=response_data.get("extracted")
+                    )
         
         # If Graph context provided, enrich body and attachments from Microsoft Graph
         if getattr(request, 'graph_access_token', None) and getattr(request, 'graph_message_id', None):
@@ -1502,130 +1567,258 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         from app.models import ExtractedData
         enhanced_data = ExtractedData(**processed_data)
         
-        # Check for duplicates using Cosmos DB
-        is_duplicate = False
-        if hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
-            is_duplicate = await req.app.state.postgres_client.check_duplicate(
-                request.sender_email,
-                enhanced_data.candidate_name
-            )
-        
-        if is_duplicate:
-            logger.info(f"Duplicate detected for {request.sender_email}")
+        # Parse deal information
+        deal_id = str(uuid.uuid4())  # Generate new deal ID
+        deal_name = request.subject or "Unknown Deal"
+        account_name = enhanced_data.company_name or "Unknown Company"
+        owner_email = os.environ.get('ZOHO_DEFAULT_OWNER_EMAIL', 'daniel.romitelli@emailthewell.com')
         
         # If dry_run, return preview without creating Zoho records
         if getattr(request, 'dry_run', False):
             return ZohoResponse(
                 status="preview",
                 message="Preview only - no Zoho records created",
-                extracted=enhanced_data
+                extracted=enhanced_data,
+                correlation_id=correlation_id
             )
 
-        # Create or update Zoho records
-        zoho_result = await req.app.state.zoho_integration.create_or_update_records(
-            enhanced_data,
-            request.sender_email,
-            attachment_urls,
-            is_duplicate
-        )
+        # Prepare raw JSON for storage
+        raw_json = {
+            "message_id": message_id,
+            "correlation_id": correlation_id,
+            "sender_email": request.sender_email,
+            "sender_name": request.sender_name,
+            "subject": request.subject,
+            "body": request.body[:10000],  # Truncate for storage
+            "extracted_data": enhanced_data.model_dump() if hasattr(enhanced_data, 'model_dump') else enhanced_data.__dict__,
+            "attachments": [{"filename": a.filename} for a in (request.attachments or [])]
+        }
         
-        # Store comprehensive email processing history
+        # TRANSACTION: Begin database transaction with retry logic
+        saved_to_db = False
+        saved_to_zoho = False
+        zoho_id = None
+        zoho_result = {}
+        
         if hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
-            try:
-                # Extract email body hash for deduplication
-                import hashlib
-                email_body_hash = hashlib.md5(request.body.encode('utf-8')).hexdigest() if request.body else None
-                
-                # Prepare comprehensive processing data
-                processing_data = {
-                    'internet_message_id': getattr(request, 'internet_message_id', None),
-                    'sender_email': request.sender_email,
-                    'reply_to_email': getattr(request, 'reply_to', None),
-                    'primary_email': zoho_result.get("primary_email") or request.sender_email,
-                    'subject': getattr(request, 'subject', None),
-                    'zoho_deal_id': zoho_result.get("deal_id"),
-                    'zoho_account_id': zoho_result.get("account_id"),
-                    'zoho_contact_id': zoho_result.get("contact_id"),
-                    'deal_name': zoho_result.get("deal_name"),
-                    'company_name': enhanced_data.company_name,
-                    'contact_name': enhanced_data.candidate_name,
-                    'processing_status': 'success' if not zoho_result.get("was_duplicate") else 'duplicate_found',
-                    'error_message': None,
-                    'raw_extracted_data': enhanced_data.model_dump() if hasattr(enhanced_data, 'model_dump') else enhanced_data.__dict__,
-                    'email_body_hash': email_body_hash
-                }
-                
-                # Store processing record
-                processing_id = await req.app.state.postgres_client.store_email_processing(processing_data)
-                logger.info(f"Stored email processing record with ID: {processing_id}")
-                
-            except Exception as storage_error:
-                logger.warning(f"Failed to store email processing history: {storage_error}")
-                # Don't fail the entire request if storage fails - fallback to old method if available
-                if not is_duplicate:
+            await req.app.state.postgres_client.init_pool()
+            
+            # Start transaction
+            async with req.app.state.postgres_client.pool.acquire() as conn:
+                async with conn.transaction():
                     try:
-                        await req.app.state.postgres_client.store_processed_email(
-                            request.sender_email,
+                        # Step 1: Upsert into deals table
+                        upsert_query = """
+                        INSERT INTO deals (
+                            deal_id, deal_name, owner_email, owner_name, stage,
+                            contact_name, contact_email, account_name, 
+                            source, source_detail, created_at, metadata
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        ON CONFLICT (deal_id) DO UPDATE SET
+                            deal_name = EXCLUDED.deal_name,
+                            modified_at = CURRENT_TIMESTAMP,
+                            metadata = EXCLUDED.metadata
+                        RETURNING deal_id;
+                        """
+                        
+                        await conn.fetchrow(
+                            upsert_query,
+                            deal_id,
+                            deal_name,
+                            owner_email,
+                            enhanced_data.referrer_name or "System",
+                            "New",  # Initial stage
                             enhanced_data.candidate_name,
-                            zoho_result["deal_id"]
+                            request.sender_email,
+                            account_name,
+                            enhanced_data.source or "Email Inbound",
+                            enhanced_data.source_detail,
+                            datetime.utcnow(),
+                            json.dumps(raw_json)
                         )
-                    except Exception as fallback_error:
-                        logger.warning(f"Fallback storage also failed: {fallback_error}")
+                        
+                        saved_to_db = True
+                        logger.info(f"Saved deal to database: {deal_id}")
+                        
+                        # Step 2: Call Zoho CRM API with retry logic
+                        max_retries = 3
+                        retry_delays = [1, 2, 4]  # Exponential backoff
+                        
+                        for attempt in range(max_retries):
+                            try:
+                                zoho_result = await req.app.state.zoho_integration.create_or_update_records(
+                                    enhanced_data,
+                                    request.sender_email,
+                                    attachment_urls,
+                                    False  # is_duplicate
+                                )
+                                
+                                saved_to_zoho = True
+                                zoho_id = zoho_result.get("deal_id")
+                                logger.info(f"Created Zoho records on attempt {attempt + 1}: {zoho_id}")
+                                break
+                                
+                            except Exception as zoho_error:
+                                error_str = str(zoho_error).lower()
+                                
+                                # Check if it's a retryable error
+                                if attempt < max_retries - 1:
+                                    if "rate limit" in error_str or "429" in error_str or "500" in error_str or "502" in error_str or "503" in error_str:
+                                        await asyncio.sleep(retry_delays[attempt])
+                                        logger.warning(f"Zoho API error on attempt {attempt + 1}, retrying: {zoho_error}")
+                                        continue
+                                    elif "token" in error_str or "unauthorized" in error_str:
+                                        # Try to refresh token
+                                        try:
+                                            # Token refresh is handled internally by ZohoIntegration
+                                            await asyncio.sleep(1)
+                                            continue
+                                        except:
+                                            pass
+                                
+                                # Final attempt failed
+                                raise zoho_error
+                        
+                        # Step 3: Log to intake_audit
+                        audit_query = """
+                        INSERT INTO intake_audit (
+                            correlation_id, message_id, operation_type, deal_id,
+                            request_payload, response_payload, outcome, 
+                            processing_time_ms, created_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+                        """
+                        
+                        response_payload = {
+                            "deal_id": deal_id,
+                            "zoho_id": zoho_id,
+                            "account_id": zoho_result.get("account_id"),
+                            "contact_id": zoho_result.get("contact_id"),
+                            "deal_name": zoho_result.get("deal_name", deal_name),
+                            "primary_email": zoho_result.get("primary_email", request.sender_email),
+                            "extracted": enhanced_data.model_dump() if hasattr(enhanced_data, 'model_dump') else enhanced_data.__dict__
+                        }
+                        
+                        await conn.execute(
+                            audit_query,
+                            uuid.UUID(correlation_id),
+                            message_id,
+                            "intake_email",
+                            deal_id,
+                            json.dumps(raw_json),
+                            json.dumps(response_payload),
+                            "success",
+                            2000,  # Approximate processing time
+                            datetime.utcnow()
+                        )
+                        
+                        logger.info(f"Transaction completed successfully for correlation_id: {correlation_id}")
+                        
+                    except Exception as tx_error:
+                        # Transaction will automatically rollback
+                        logger.error(f"Transaction failed, rolling back: {tx_error}")
+                        
+                        # Log failure to intake_audit (outside transaction)
+                        try:
+                            async with req.app.state.postgres_client.pool.acquire() as audit_conn:
+                                await audit_conn.execute(
+                                    """
+                                    INSERT INTO intake_audit (
+                                        correlation_id, message_id, operation_type, deal_id,
+                                        request_payload, outcome, error_message, created_at
+                                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                                    """,
+                                    uuid.UUID(correlation_id),
+                                    message_id,
+                                    "intake_email",
+                                    deal_id if saved_to_db else None,
+                                    json.dumps(raw_json),
+                                    "db_fail" if not saved_to_db else "zoho_fail",
+                                    str(tx_error)[:1000],
+                                    datetime.utcnow()
+                                )
+                        except:
+                            pass
+                        
+                        raise HTTPException(
+                            status_code=500,
+                            detail=f"Transaction failed: {str(tx_error)}. Correlation ID: {correlation_id}"
+                        )
         
-        # Determine message based on duplicate status
-        if zoho_result.get("was_duplicate"):
-            message = f"Email processed successfully (found existing records in Zoho)"
-        else:
-            message = "Email processed successfully"
-        
+        # Return success response
         return ZohoResponse(
             status="success",
-            deal_id=zoho_result["deal_id"],
-            account_id=zoho_result["account_id"],
-            contact_id=zoho_result["contact_id"],
-            deal_name=zoho_result["deal_name"],
-            primary_email=zoho_result["primary_email"],
-            message=message,
-            extracted=enhanced_data
+            deal_id=zoho_result.get("deal_id", deal_id),
+            account_id=zoho_result.get("account_id"),
+            contact_id=zoho_result.get("contact_id"),
+            deal_name=zoho_result.get("deal_name", deal_name),
+            primary_email=zoho_result.get("primary_email", request.sender_email),
+            message="Email processed successfully",
+            extracted=enhanced_data,
+            saved_to_db=saved_to_db,
+            saved_to_zoho=saved_to_zoho,
+            correlation_id=correlation_id
         )
         
     except Exception as e:
         logger.error(f"Error processing email: {str(e)}")
         
-        # Store failure record for debugging and analytics
+        # Log failure to intake_audit for comprehensive tracking
         if hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
             try:
-                # Extract email body hash for deduplication
-                import hashlib
-                email_body_hash = hashlib.md5(request.body.encode('utf-8')).hexdigest() if request.body else None
+                await req.app.state.postgres_client.init_pool()
                 
-                # Prepare error processing data
-                error_processing_data = {
-                    'internet_message_id': getattr(request, 'internet_message_id', None),
-                    'sender_email': request.sender_email,
-                    'reply_to_email': getattr(request, 'reply_to', None),
-                    'primary_email': request.sender_email,
-                    'subject': getattr(request, 'subject', None),
-                    'zoho_deal_id': None,
-                    'zoho_account_id': None,
-                    'zoho_contact_id': None,
-                    'deal_name': None,
-                    'company_name': None,
-                    'contact_name': None,
-                    'processing_status': 'failed',
-                    'error_message': str(e)[:1000],  # Truncate long error messages
-                    'raw_extracted_data': {},
-                    'email_body_hash': email_body_hash
+                # Get variables that may not exist if error occurred early
+                message_id = locals().get('message_id')
+                if not message_id:
+                    # Generate fallback message_id if error occurred before idempotency check
+                    timestamp = datetime.utcnow().strftime("%Y-%m-%d")
+                    subject = getattr(request, 'subject', '') or 'unknown'
+                    sender_email = getattr(request, 'sender_email', '') or 'unknown'
+                    idempotency_string = f"{subject}:{sender_email}:{timestamp}"
+                    message_id = hashlib.sha256(idempotency_string.encode()).hexdigest()
+                
+                correlation_id = locals().get('correlation_id', str(uuid.uuid4()))
+                
+                # Prepare request payload for audit
+                request_payload = {
+                    "sender_email": getattr(request, 'sender_email', None),
+                    "sender_name": getattr(request, 'sender_name', None),
+                    "subject": getattr(request, 'subject', None),
+                    "body": getattr(request, 'body', '')[:1000] if getattr(request, 'body', None) else None,
                 }
                 
-                # Store error record
-                error_id = await req.app.state.postgres_client.store_email_processing(error_processing_data)
-                logger.info(f"Stored error processing record with ID: {error_id}")
+                # Log audit entry for failure
+                async with req.app.state.postgres_client.pool.acquire() as conn:
+                    await conn.execute(
+                        """
+                        INSERT INTO intake_audit (
+                            correlation_id, message_id, operation_type,
+                            request_payload, outcome, error_message, created_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+                        """,
+                        uuid.UUID(correlation_id),
+                        message_id,
+                        "intake_email",
+                        json.dumps(request_payload),
+                        "failure",
+                        str(e)[:1000],
+                        datetime.utcnow()
+                    )
+                
+                logger.info(f"Logged failure to intake_audit with correlation_id: {correlation_id}")
                 
             except Exception as storage_error:
-                logger.warning(f"Failed to store error processing history: {storage_error}")
+                logger.warning(f"Failed to store error audit log: {storage_error}")
         
-        raise HTTPException(status_code=500, detail=str(e))
+        # Return error with correlation_id if available
+        correlation_id = locals().get('correlation_id')
+        if correlation_id:
+            raise HTTPException(
+                status_code=500, 
+                detail=f"Transaction failed: {str(e)}. Correlation ID: {correlation_id}"
+            )
+        else:
+            raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/intake/email/status/{extraction_id}", dependencies=[Depends(verify_api_key)])
 async def get_extraction_status(extraction_id: str, req: Request):
@@ -2121,6 +2314,9 @@ async def process_dead_letter_queue(max_messages: int = 10):
 
 # Include Vault Agent router
 app.include_router(vault_agent_router)
+
+# Include Admin policies router
+app.include_router(policies_router)
 
 @app.get("/cache/status", dependencies=[Depends(verify_api_key)])
 async def get_cache_status():
@@ -3828,56 +4024,104 @@ async def get_icon(size: int):
 
 # ========================= TalentWell Service Routes =========================
 
-@app.post("/api/talentwell/admin/deals/import", dependencies=[Depends(verify_api_key)])
-async def import_deals(
-    file: UploadFile = File(None),
-    csv_type: str = Query(..., description="Type of CSV: deals, stage_history, meetings, or notes"),
-    req: Request = None
+@app.post("/api/talentwell/admin/import-exports", dependencies=[Depends(verify_api_key)])
+async def import_exports(
+    request: Request,
+    deals: UploadFile = File(None),
+    stages: UploadFile = File(None),
+    meetings: UploadFile = File(None),
+    notes: UploadFile = File(None)
 ):
-    """Import CSV deal data for processing and policy generation"""
+    """Import CSV export data supporting three input methods:
+    1. No body/files - use default paths
+    2. JSON body with file paths
+    3. Multipart file uploads
+    """
+    import os
+    import uuid
+    from pathlib import Path
+    
     try:
-        from app.admin.import_deals import DealImporter
+        from app.admin.import_exports_v2 import ImportExportsV2
         
-        if not file:
-            raise HTTPException(status_code=400, detail="CSV file required")
+        # Handle different input methods
+        file_paths = {}
+        temp_files = []
         
-        # Read CSV content
-        content = await file.read()
-        csv_text = content.decode('utf-8')
+        # Check if multipart files were uploaded
+        has_uploads = any([deals, stages, meetings, notes])
+        
+        if has_uploads:
+            # Method 3: Multipart file uploads
+            upload_dir = Path("/tmp/uploads")
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Process each uploaded file
+            for file_obj, file_type in [(deals, "deals"), (stages, "stages"), 
+                                         (meetings, "meetings"), (notes, "notes")]:
+                if file_obj:
+                    # Validate file size (50MB max)
+                    if file_obj.size > 50 * 1024 * 1024:
+                        raise HTTPException(status_code=413, 
+                                            detail=f"{file_type} file exceeds 50MB limit")
+                    
+                    # Save with unique name
+                    filename = f"{file_type}_{uuid.uuid4().hex[:8]}.csv"
+                    filepath = upload_dir / filename
+                    
+                    content = await file_obj.read()
+                    filepath.write_bytes(content)
+                    
+                    file_paths[file_type] = str(filepath)
+                    temp_files.append(filepath)
+        else:
+            # Method 1 or 2: Check for JSON body with paths
+            try:
+                body = await request.json()
+                if body:
+                    # Method 2: JSON with file paths
+                    file_paths = {
+                        "deals": body.get("deals_path"),
+                        "stages": body.get("stages_path"),
+                        "meetings": body.get("meetings_path"),
+                        "notes": body.get("notes_path")
+                    }
+                    # Remove None values
+                    file_paths = {k: v for k, v in file_paths.items() if v}
+            except:
+                # Method 1: No body, use defaults
+                pass
         
         # Initialize importer
-        importer = DealImporter()
+        importer = ImportExportsV2()
         
-        # Process based on CSV type
-        if csv_type == "deals":
-            deals = importer.load_deals_csv(csv_text)
-            filtered = importer.filter_by_owner(deals, "Steve Perry")
-            
-            # Generate policies
-            policies = importer.generate_policy_seeds(filtered)
-            
-            # Save to Redis if available
-            if hasattr(req.app.state, 'redis_cache_manager'):
-                from app.policy.loader import PolicyLoader
-                loader = PolicyLoader(req.app.state.redis_cache_manager.redis_client)
-                await loader.load_all_policies()
-            
-            return {
-                "status": "success",
-                "total_deals": len(deals),
-                "filtered_deals": len(filtered),
-                "policies_generated": {
-                    "employers": len(policies.get("employers", {})),
-                    "cities": len(policies.get("city_context", {})),
-                    "subjects": len(policies.get("subjects", [])),
-                    "selectors": len(policies.get("selector_priors", {}))
-                }
-            }
-        else:
-            raise HTTPException(status_code=400, detail=f"Unsupported CSV type: {csv_type}")
-            
+        # Import data
+        result = await importer.import_all(
+            deals_path=file_paths.get("deals"),
+            stages_path=file_paths.get("stages"),
+            meetings_path=file_paths.get("meetings"),
+            notes_path=file_paths.get("notes")
+        )
+        
+        # Clean up temporary files
+        for temp_file in temp_files:
+            try:
+                temp_file.unlink()
+            except:
+                pass
+        
+        # Log to App Insights (no PII)
+        logger.info(f"Import completed: {result.get('deals', 0)} deals, "
+                   f"{result.get('stages', 0)} stages, "
+                   f"{result.get('meetings', 0)} meetings, "
+                   f"{result.get('notes', 0)} notes")
+        
+        return result
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Deal import failed: {e}")
+        logger.error(f"Error importing exports: {str(e)}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -4010,43 +4254,61 @@ async def import_talentwell_exports(request: Request):
         raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
 
 
-@app.post("/api/talentwell/seed-policies", dependencies=[Depends(verify_api_key)])
+@app.post("/api/talentwell/admin/seed-policies", dependencies=[Depends(verify_api_key)])
 async def seed_talentwell_policies(req: Request, regenerate: bool = Query(False, description="Regenerate policies from scratch")):
-    """Generate and seed TalentWell policy data into database and Redis"""
+    """Generate policy data from imported records and seed to Redis"""
     try:
-        from app.admin.seed_policies import seeder
-        from app.policy.loader import get_policy_loader
+        from app.admin.seed_policies_v2 import PolicySeederV2
         
-        # Generate fresh policy seeds
-        policies = await seeder.generate_all_policies()
+        # Initialize seeder
+        seeder = PolicySeederV2()
         
-        if regenerate:
-            # Clear existing policies first
-            logger.info("Regenerating policies from scratch")
+        # Generate policies from imported data
+        result = await seeder.generate_from_imports()
         
-        # Seed into database
-        db_results = await seeder.seed_database(policies)
-        
-        # Load into Redis cache
-        policy_loader = get_policy_loader()
-        cache_results = await policy_loader.load_all_policies()
+        # Push to Redis with no TTL
+        redis_result = await seeder.push_to_redis(result)
         
         return {
             "status": "success",
-            "policies_generated": {
-                "employers": len(policies["employers"]),
-                "city_context": len(policies["city_context"]), 
-                "subject_priors": len(policies["subject_priors"]),
-                "selector_priors": len(policies["selector_priors"])
-            },
-            "database_seeded": db_results,
-            "redis_loaded": cache_results,
+            "employers": result.get("employers", 0),
+            "cities": result.get("cities", 0),
+            "subjects": result.get("subjects", 0),
+            "selectors": result.get("selectors", 0),
+            "redis_keys_set": redis_result.get("keys_set", 0),
             "timestamp": datetime.utcnow().isoformat()
         }
         
     except Exception as e:
         logger.error(f"Policy seeding failed: {e}")
         raise HTTPException(status_code=500, detail=f"Policy seeding failed: {str(e)}")
+
+
+@app.post("/api/talentwell/admin/policy/reload", dependencies=[Depends(verify_api_key)])
+async def reload_policies_to_redis(req: Request):
+    """Reload all policies from database to Redis"""
+    try:
+        from app.admin.seed_policies_v2 import PolicySeederV2
+        
+        # Initialize seeder
+        seeder = PolicySeederV2()
+        
+        # Reload from DB to Redis
+        result = await seeder.reload_from_db_to_redis()
+        
+        return {
+            "status": "reloaded",
+            "policies_loaded": result.get("total_loaded", 0),
+            "employers": result.get("employers", 0),
+            "cities": result.get("cities", 0),
+            "subjects": result.get("subjects", 0),
+            "selectors": result.get("selectors", 0),
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Policy reload failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Policy reload failed: {str(e)}")
 
 
 @app.post("/api/talentwell/validate", dependencies=[Depends(verify_api_key)])

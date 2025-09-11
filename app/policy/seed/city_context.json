@@ -89,5 +89,10 @@
   "phoenix_az": "Phoenix Metro",
   "scottsdale_az": "Phoenix Metro",
   "tempe_az": "Phoenix Metro",
-  "mesa_az": "Phoenix Metro"
+  "mesa_az": "Phoenix Metro",
+  
+  "gulf_breeze_fl": "Gulf Breeze (Pensacola area)",
+  "pensacola_fl": "Pensacola Metro",
+  "navarre_fl": "Pensacola Metro",
+  "milton_fl": "Pensacola Metro"
 }

@@ -1,0 +1,6 @@
+Record Id,Deal Name,Account Name,Owner,Amount USD,Stage,Created Date,Closing Date,Source,Source Detail,Description
+D001,Software Development Contract,Tech Corp Inc.,John Smith,50000.0,Qualification,2024-01-15,2024-03-15,Website Inbound,Contact Form,Custom software development project
+D002,Consulting Services,Business Solutions LLC,Jane Doe,25000.0,Proposal,2024-01-20,2024-02-20,Referral,Bob Johnson,Strategic consulting engagement
+D003,Mobile App Development,StartupXYZ,Mike Johnson,35000.0,Discovery,2024-01-25,2024-04-25,Cold Outreach,Email Campaign,iOS and Android app development
+D004,Data Analytics Platform,Enterprise Corp,Sarah Wilson,75000.0,Negotiation,2024-02-01,2024-05-01,Trade Show,Industry Conference,Big data analytics solution
+D005,Cloud Migration Services,Regional Bank,Tom Brown,60000.0,Closed Won,2024-02-05,2024-02-28,Partner Referral,Technology Partner,AWS cloud migration project

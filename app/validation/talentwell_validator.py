@@ -284,6 +284,75 @@ class TalentWellValidator:
         
         return len(errors) == 0, errors
     
+    def validate_candidate_card(self, card_html: str) -> Tuple[bool, List[str]]:
+        """Validate a single candidate card follows Brandon's format."""
+        errors = []
+        warnings = []
+        
+        try:
+            soup = BeautifulSoup(card_html, 'html.parser')
+        except Exception as e:
+            return False, [f"HTML parsing error: {e}"]
+        
+        # Check for required structure
+        card_div = soup.find('div', class_='candidate-card')
+        if not card_div:
+            errors.append("Missing candidate-card div wrapper")
+            return False, errors
+        
+        # Check for bold candidate name
+        name_tag = card_div.find('h3')
+        if not name_tag:
+            errors.append("Missing candidate name (h3)")
+        else:
+            strong_tag = name_tag.find('strong')
+            if not strong_tag:
+                warnings.append("Candidate name should be bold (wrapped in <strong>)")
+        
+        # Check for location with bold label
+        location_div = card_div.find('div', class_='candidate-location')
+        if not location_div:
+            errors.append("Missing candidate-location div")
+        else:
+            location_strong = location_div.find('strong')
+            if not location_strong or 'Location:' not in location_strong.text:
+                warnings.append("Location label should be bold and say 'Location:'")
+            
+            # Check for mobility line (parentheses)
+            location_text = location_div.get_text()
+            if '(' not in location_text or ')' not in location_text:
+                warnings.append("Location should include mobility line in parentheses")
+        
+        # Check for bullets (2-5 required)
+        bullets = card_div.find_all('li')
+        if len(bullets) < 2:
+            errors.append(f"Too few bullets ({len(bullets)}), minimum 2 required")
+        elif len(bullets) > 5:
+            warnings.append(f"Too many bullets ({len(bullets)}), maximum 5 recommended")
+        
+        # Check bullets are hard skills (not soft skills)
+        soft_skill_keywords = ['passionate', 'dedicated', 'motivated', 'team player', 
+                              'hard working', 'enthusiastic', 'driven', 'dynamic']
+        for bullet in bullets:
+            bullet_text = bullet.get_text().lower()
+            for keyword in soft_skill_keywords:
+                if keyword in bullet_text:
+                    warnings.append(f"Bullet contains soft skill '{keyword}': {bullet.get_text()[:50]}")
+        
+        # Check for ref code
+        ref_code_div = card_div.find('div', class_='ref-code')
+        if not ref_code_div:
+            errors.append("Missing ref-code div")
+        else:
+            ref_text = ref_code_div.get_text()
+            if 'TWAV' not in ref_text:
+                warnings.append("Ref code should start with TWAV")
+        
+        # Return validation result
+        if errors:
+            return False, errors + warnings
+        return True, warnings if warnings else []
+    
     def full_validation(self, digest_data: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
         """Perform complete validation and return result summary."""
         result = {

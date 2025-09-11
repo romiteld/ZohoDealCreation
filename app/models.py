@@ -52,6 +52,10 @@ class ProcessingResult(BaseModel):
     deal_name: Optional[str] = Field(None, description="The formatted deal name that was created")
     primary_email: Optional[str] = Field(None, description="The email address used (Reply-To or From)")
     extracted: Optional[ExtractedData] = Field(None, description="Extracted data preview for dry_run flows")
+    saved_to_db: Optional[bool] = Field(None, description="Whether the deal was saved to database")
+    saved_to_zoho: Optional[bool] = Field(None, description="Whether the deal was saved to Zoho CRM")
+    correlation_id: Optional[str] = Field(None, description="Unique correlation ID for tracking this request")
+    missing_fields: Optional[list] = Field(None, description="List of missing fields if user input is required")
 
 class HealthStatus(BaseModel):
     status: str

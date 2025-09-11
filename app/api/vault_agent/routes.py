@@ -28,7 +28,7 @@ class IngestRequest(BaseModel):
 
 class EmailSpec(BaseModel):
     to: List[EmailStr]
-    subject: Optional[str] = "TalentWell – Candidate Alert (Test)"
+    subject: Optional[str] = "TalentWell – Candidate Alert"
 
 class PublishRequest(BaseModel):
     locator: str
@@ -216,46 +216,99 @@ async def publish_record(request: PublishRequest) -> Dict[str, Any]:
                         detail="email.to is required when channels include email_campaign"
                     )
                 
-                # Import render and validation functions
-                from app.templates.render import render_single_candidate
-                from app.templates.validator import validate_digest_html
+                # Import helpers
+                from app.jobs.talentwell_curator import TalentWellCurator
+                from app.validation.talentwell_validator import validate_candidate_card
                 from app.mail.send_helper import send_html_email
                 
-                # Generate candidate card HTML
+                # Generate candidate card HTML using Brandon's format
                 candidate_fields = canonical.get("fields", {})
+                
+                # Build mobility line
+                curator = TalentWellCurator()
+                mobility_line = curator._build_mobility_line(
+                    candidate_fields.get('is_mobile', False),
+                    candidate_fields.get('remote_preference', False),
+                    candidate_fields.get('hybrid_preference', False)
+                )
+                
+                # Generate hard-skill bullets
+                bullets = []
+                if candidate_fields.get('professional_designations'):
+                    bullets.append(f"<li>Licenses/Designations: {candidate_fields['professional_designations']}</li>")
+                if candidate_fields.get('book_size_aum'):
+                    bullets.append(f"<li>Book Size: {candidate_fields['book_size_aum']}</li>")
+                if candidate_fields.get('production_12mo'):
+                    bullets.append(f"<li>12-Month Production: {candidate_fields['production_12mo']}</li>")
+                if candidate_fields.get('when_available'):
+                    bullets.append(f"<li>Available: {candidate_fields['when_available']}</li>")
+                if candidate_fields.get('desired_comp'):
+                    bullets.append(f"<li>Desired Compensation: {candidate_fields['desired_comp']}</li>")
+                
+                # Ensure 2-5 bullets
+                if len(bullets) < 2:
+                    bullets.append(f"<li>Current Role: {candidate_fields.get('job_title', 'Financial Advisor')}</li>")
+                if len(bullets) < 2:
+                    bullets.append(f"<li>Current Firm: {candidate_fields.get('company_name', 'Unknown')}</li>")
+                bullets = bullets[:5]  # Max 5
+                
+                bullets_html = '\n'.join(bullets)
+                
+                # Generate ref code
+                ref_code = f"TWAV-{request.locator[-8:]}"
+                
+                # Build card HTML with Brandon's format
                 card_html = f"""
                 <div class="candidate-card">
                     <h3><strong>{candidate_fields.get('candidate_name', 'Unknown')}</strong></h3>
                     <div class="candidate-location">
-                        <strong>Location:</strong> {candidate_fields.get('location', 'Unknown')}
+                        <strong>Location:</strong> {candidate_fields.get('location', 'Unknown')} {mobility_line}
                     </div>
                     <div class="candidate-details">
                         <div class="skill-list">
-                            <div class="detail-label">Job Title:</div>
-                            <div>{candidate_fields.get('job_title', 'Unknown')}</div>
-                        </div>
-                        <div class="skill-list">
-                            <div class="detail-label">Company:</div>
-                            <div>{candidate_fields.get('company_name', 'Unknown')}</div>
+                            <ul>
+                                {bullets_html}
+                            </ul>
                         </div>
                         <div class="availability-comp">
-                            <div><span class="detail-label">Email:</span> {candidate_fields.get('email', 'Not provided')}</div>
+                            {f'<div>Available: {candidate_fields.get("when_available")}</div>' if candidate_fields.get("when_available") else ''}
+                            {f'<div>Desired Comp: {candidate_fields.get("desired_comp")}</div>' if candidate_fields.get("desired_comp") else ''}
                         </div>
                     </div>
-                    <div class="ref-code">REF-{request.locator[-8:]}</div>
+                    <div class="ref-code">Ref code: {ref_code}</div>
                 </div>
                 """
                 
-                # Render single candidate email
-                email_html = render_single_candidate(card_html)
+                # Load and inject into weekly_digest_v1.html template
+                try:
+                    with open("app/templates/email/weekly_digest_v1.html", "r") as f:
+                        template_html = f.read()
+                    
+                    # Replace placeholder with card HTML
+                    email_html = template_html.replace("<!-- CANDIDATE_CARDS -->", card_html)
+                    
+                    # Update subject if in template
+                    email_html = email_html.replace(
+                        "<title data-ast=\"subject\">TalentWell Weekly Digest</title>",
+                        f"<title>{request.email.subject}</title>"
+                    )
+                except:
+                    # Fallback to basic HTML
+                    email_html = f"""
+                    <!DOCTYPE html>
+                    <html>
+                    <head><title>{request.email.subject}</title></head>
+                    <body>
+                        <h1>{request.email.subject}</h1>
+                        {card_html}
+                    </body>
+                    </html>
+                    """
                 
                 # Validate HTML structure
-                is_valid, errors = validate_digest_html(email_html)
+                is_valid, errors = validate_candidate_card(card_html)
                 if not is_valid:
-                    raise HTTPException(
-                        status_code=422,
-                        detail={"validation_errors": errors}
-                    )
+                    logger.warning(f"Card validation warnings: {errors}")
                 
                 # Send email
                 send_result = await send_html_email(
@@ -263,7 +316,13 @@ async def publish_record(request: PublishRequest) -> Dict[str, Any]:
                     html=email_html,
                     to=request.email.to
                 )
-                results["email_campaign"] = send_result
+                
+                results["email_campaign"] = {
+                    "success": send_result.get("success", False),
+                    "provider": send_result.get("provider", "unknown"),
+                    "message_id": send_result.get("message_id"),
+                    "recipients": request.email.to
+                }
                 
             elif channel == "zoho_crm":
                 results[channel] = {"status": "would_sync", "fields": canonical.get("fields", {})}

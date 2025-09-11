@@ -1234,3 +1234,71 @@ class ZohoApiClient(ZohoClient):
         except Exception as e:
             logger.warning(f"Error checking Zoho account duplicate: {e}")
             return None
+    
+    async def query_candidates(self, limit: int = 100, page: int = 1) -> List[Dict[str, Any]]:
+        """
+        Query candidates from Zoho CRM for TalentWell digest.
+        Fetches records where Published_to_Vault = true and Candidate_Status NOT IN ('Placed', 'Hired').
+        Sorted ascending by Date_Published_to_Vault (oldest first).
+        """
+        try:
+            # Build search criteria
+            search_criteria = "(Published_to_Vault:equals:true)and((Candidate_Status:not_equals:Placed)and(Candidate_Status:not_equals:Hired))"
+            
+            # Build sort order
+            sort_by = "Date_Published_to_Vault"
+            sort_order = "asc"
+            
+            # Make API request
+            params = {
+                "criteria": search_criteria,
+                "sort_by": sort_by,
+                "sort_order": sort_order,
+                "page": page,
+                "per_page": limit
+            }
+            
+            response = self._make_request("GET", "Candidates/search", params=params)
+            
+            if response.get("data"):
+                candidates = response["data"]
+                logger.info(f"Found {len(candidates)} candidates matching criteria")
+                
+                # Extract relevant fields for each candidate
+                processed_candidates = []
+                for candidate in candidates:
+                    processed = {
+                        "id": candidate.get("id"),
+                        "candidate_locator": candidate.get("Candidate_Locator") or candidate.get("id"),
+                        "candidate_name": candidate.get("Full_Name") or candidate.get("Candidate_Name"),
+                        "job_title": candidate.get("Job_Title") or candidate.get("Current_Title"),
+                        "company_name": candidate.get("Current_Company") or candidate.get("Firm_Name"),
+                        "location": candidate.get("Location") or candidate.get("City"),
+                        "is_mobile": candidate.get("Is_Mobile", False),
+                        "remote_preference": candidate.get("Remote_Preference") or candidate.get("Open_to_Remote"),
+                        "hybrid_preference": candidate.get("Hybrid_Preference") or candidate.get("Open_to_Hybrid"),
+                        "professional_designations": candidate.get("Professional_Designations") or candidate.get("Licenses_Exams"),
+                        "book_size_aum": candidate.get("Book_Size_AUM") or candidate.get("AUM"),
+                        "production_12mo": candidate.get("Production_12mo") or candidate.get("Production"),
+                        "desired_comp": candidate.get("Desired_Comp") or candidate.get("Compensation_Desired"),
+                        "when_available": candidate.get("When_Available") or candidate.get("Availability"),
+                        "source": candidate.get("Source"),
+                        "source_detail": candidate.get("Source_Detail"),
+                        "date_published": candidate.get("Date_Published_to_Vault"),
+                        "meeting_date": candidate.get("Meeting_Date") or candidate.get("Interview_Date"),
+                        "meeting_id": candidate.get("Meeting_ID") or candidate.get("Zoom_Meeting_ID"),
+                        "transcript_url": candidate.get("Transcript_URL") or candidate.get("Recording_URL"),
+                        "email": candidate.get("Email"),
+                        "phone": candidate.get("Phone"),
+                        "referrer_name": candidate.get("Referrer_Name") or candidate.get("Referred_By")
+                    }
+                    processed_candidates.append(processed)
+                
+                return processed_candidates
+            else:
+                logger.info("No candidates found matching criteria")
+                return []
+                
+        except Exception as e:
+            logger.error(f"Error querying candidates from Zoho: {e}")
+            return []

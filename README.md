@@ -1109,6 +1109,516 @@ For issues or questions:
 - Review logs in Azure Portal
 - Contact the development team
 
+## 🗃️ TalentWell CSV Import & Policy Seeding System
+
+The TalentWell system provides a comprehensive data import pipeline that processes Zoho CRM exports, normalizes data, and seeds intelligent policies for email automation and prospect engagement. This system is designed for high-volume recruitment data processing with built-in deduplication, validation, and audit trails.
+
+### 🎯 Overview
+
+The TalentWell import system transforms raw CSV exports from Zoho CRM into structured, normalized data that powers:
+- **Deal Management**: Complete deal lifecycle tracking with stage history
+- **Policy Generation**: AI-driven policies for email subject optimization and audience targeting
+- **Data Normalization**: Company name standardization and location context mapping
+- **Audit Trails**: Full tracking of all import operations with correlation IDs
+
+#### Architecture Components
+- **CSV Import Engine**: Processes multiple file formats with flexible parsing
+- **PostgreSQL Storage**: Comprehensive schema with vector search capabilities
+- **Policy Seeder**: Generates Bayesian priors and A/B testing configurations
+- **Validation Layer**: Data integrity checks and business rule enforcement
+- **Redis Caching**: Policy and template caching for performance optimization
+
+### 📁 CSV File Formats
+
+The system supports four distinct CSV file types, each with specific column mappings and data requirements:
+
+#### **Deals CSV** (`deals.csv`)
+Primary deal records with complete opportunity information.
+
+**Required Columns:**
+- `Deal Id` (TEXT) - Unique identifier, cannot be empty
+- `Deal Name` (TEXT) - Candidate name or deal identifier
+- `Deal Owner` (TEXT) - Owner filter: "Steve Perry"
+- `Account Name` (TEXT) - Firm/company name
+- `Stage` (TEXT) - Current deal stage
+
+**Optional Columns:**
+- `Job Title` (TEXT) - Position being filled
+- `Location` (TEXT) - Geographic location
+- `Created Time` (DATETIME) - Deal creation timestamp
+- `Closing Date` (DATETIME) - Expected/actual close date
+- `Modified Time` (DATETIME) - Last modification timestamp
+- `Lead Source` (TEXT) - Original source of lead
+- `Source Detail` (TEXT) - Additional source information
+- `Referrer Name` (TEXT) - Name of referring person
+- `Description` (TEXT) - Deal notes and details
+- `Amount` (DECIMAL) - Deal value in USD
+
+**Date Format Support:**
+- `2025-01-15 10:30:00` (ISO with time)
+- `2025-01-15` (ISO date only)
+- `01/15/2025` (US format)
+- `01/15/2025 10:30 AM` (US with time)
+- `15-Jan-2025` (UK format)
+- `01-15-2025` (US dash format)
+
+#### **Stage History CSV** (`stage_history.csv`)
+Tracks all stage transitions for deal pipeline analysis.
+
+**Required Columns:**
+- `Deal Id` (TEXT) - Foreign key reference to deals
+- `Stage` (TEXT) - Stage name after transition
+- `Changed Time` (DATETIME) - When transition occurred
+
+**Optional Columns:**
+- `Duration` (INTEGER) - Days spent in previous stage
+- `Changed By` (TEXT) - User who made the change
+
+#### **Meetings CSV** (`meetings.csv`)
+Meeting records with engagement metrics for relationship tracking.
+
+**Required Columns:**
+- `Deal Id` or `Related To` (TEXT) - Deal association
+- `Title` (TEXT) - Meeting subject/title
+- `Start DateTime` (DATETIME) - Meeting start time
+
+**Optional Columns:**
+- `Participants` (TEXT) - Attendee list
+- `Email Opened` (YES/NO) - Email engagement metric
+- `Link Clicked` (YES/NO) - Link engagement metric
+- `Created Time` (DATETIME) - Record creation time
+
+#### **Notes CSV** (`notes.csv`)
+Deal notes and comments with automatic deduplication.
+
+**Required Columns:**
+- `Deal Id` or `Parent Id` (TEXT) - Deal association
+- `Note Content` (TEXT) - Note text content
+
+**Optional Columns:**
+- `Created Time` (DATETIME) - Note creation time
+- `Note Owner` or `Created By` (TEXT) - Note author
+- `Modified Time` (DATETIME) - Last modification
+
+### 📂 File Placement
+
+The system supports multiple file placement strategies for different deployment scenarios:
+
+#### **Local Development**
+Place CSV files in the local imports directory:
+```
+/path/to/project/app/admin/imports/
+├── deals.csv
+├── stage_history.csv  
+├── meetings.csv
+└── notes.csv
+```
+
+#### **Container Deployment**
+Mount CSV files to the container data directory:
+```
+/mnt/data/
+├── Deals_2025_09_10.csv
+├── Deals_Stage_History_2025_09_10.csv
+├── Meetings_2025_09_10.csv
+└── Notes_Deals_2025_09_10.csv
+```
+
+#### **File Naming Conventions**
+- Prefix with data type: `Deals_`, `Meetings_`, `Notes_`
+- Include date stamp: `YYYY_MM_DD` format
+- Use descriptive suffixes: `_Stage_History`, `_Deals`
+- Maintain `.csv` extension
+
+### 🚀 API Endpoints
+
+#### **Import Endpoints**
+
+##### 1. Default Folder Import
+Imports all CSV files from the default directory (`app/admin/imports/` or `/mnt/data/`).
+
+```bash
+curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json"
+```
+
+**Response:**
+```json
+{
+  "status": "success", 
+  "import_summary": {
+    "deals": 1250,
+    "stage_history": 3400,
+    "meetings": 890,
+    "notes": 2100,
+    "owner": "Steve Perry",
+    "date_range": "2025-01-01 to 2025-09-08"
+  },
+  "timestamp": "2025-09-11T15:30:00.000Z"
+}
+```
+
+##### 2. Explicit Paths Import
+Specify exact file paths for each CSV type.
+
+```bash
+curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "paths": {
+      "deals": "/mnt/data/Deals_2025_09_10.csv",
+      "stage_history": "/mnt/data/Deals_Stage_History_2025_09_10.csv",
+      "meetings": "/mnt/data/Meetings_2025_09_10.csv",
+      "notes": "/mnt/data/Notes_Deals_2025_09_10.csv"
+    }
+  }'
+```
+
+##### 3. JSON Content Import
+Send CSV content directly in JSON payload.
+
+```bash
+curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "deals": "Deal Id,Deal Name,Deal Owner\n123,John Doe,Steve Perry",
+    "stage_history": "Deal Id,Stage,Changed Time\n123,Qualified,2025-09-10 14:30:00"
+  }'
+```
+
+##### 4. Multipart File Upload (Future Enhancement)
+Upload CSV files directly via multipart form data.
+
+```bash
+curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+  -H "X-API-Key: $API_KEY" \
+  -F "deals=@Deals.csv" \
+  -F "stages=@Stage_History.csv" \
+  -F "meetings=@Meetings.csv" \
+  -F "notes=@Notes.csv"
+```
+
+#### **Policy Management Endpoints**
+
+##### 1. Seed Policies
+Generate and seed all policy data into database and Redis cache.
+
+```bash
+curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/seed-policies" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json"
+```
+
+**Query Parameters:**
+- `regenerate` (boolean) - Clear existing policies and regenerate from scratch
+
+**Response:**
+```json
+{
+  "status": "success",
+  "policies_generated": {
+    "employers": 145,
+    "city_context": 89, 
+    "subject_priors": 23,
+    "selector_priors": 12
+  },
+  "database_seeded": {"employers": 145, "cities": 89},
+  "redis_loaded": {"cache_keys": 8, "policies_loaded": 269},
+  "timestamp": "2025-09-11T15:30:00.000Z"
+}
+```
+
+##### 2. Reload Policies (via Policy Loader)
+Refresh Redis cache from database without regeneration.
+
+```bash
+# Access through internal policy loader service
+curl -X GET "https://well-zoho-oauth.azurewebsites.net/api/cache/warmup" \
+  -H "X-API-Key: $API_KEY"
+```
+
+#### **Outlook Integration Endpoints**
+
+##### 1. Email Intake
+Process emails from Outlook Add-in with TalentWell integration.
+
+```bash
+curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/intake/email" \
+  -H "X-API-Key: $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "subject": "Senior Developer Position - ABC Corp",
+    "body": "We have an excellent opportunity...",
+    "sender_email": "recruiter@abccorp.com",
+    "sender_name": "Jane Smith",
+    "attachments": [
+      {
+        "filename": "resume.pdf",
+        "content_base64": "base64_encoded_content",
+        "content_type": "application/pdf"
+      }
+    ]
+  }'
+```
+
+**Response:**
+```json
+{
+  "success": true,
+  "message": "Email processed successfully",
+  "data": {
+    "account_id": "123456789",
+    "contact_id": "987654321", 
+    "deal_id": "456789123",
+    "attachments_uploaded": 1,
+    "processing_time": 2.3
+  },
+  "talentwell_integration": {
+    "policies_applied": 3,
+    "normalization_used": true,
+    "audit_correlation_id": "uuid-here"
+  }
+}
+```
+
+### ⚙️ Configuration
+
+#### **Environment Variables**
+Add these to your `.env.local` file for TalentWell functionality:
+
+```bash
+# Database Configuration
+DATABASE_URL=postgresql://user:pass@host:5432/wellintake?sslmode=require
+
+# API Security
+API_KEY=your-secure-api-key-here
+
+# TalentWell Settings
+TALENTWELL_OWNER_FILTER=Steve Perry
+TALENTWELL_DATE_START=2025-01-01
+TALENTWELL_DATE_END=2025-09-08
+TALENTWELL_IMPORT_PATH=/app/admin/imports
+TALENTWELL_CONTAINER_PATH=/mnt/data
+
+# Redis Configuration (for policy caching)
+AZURE_REDIS_CONNECTION_STRING=rediss://:password@host:6380
+
+# Azure Storage (for audit logs)
+AZURE_STORAGE_CONNECTION_STRING=DefaultEndpointsProtocol=https;...
+AZURE_CONTAINER_NAME=talentwell-audit
+
+# Policy Generation
+POLICY_GENERATION_ENABLED=true
+SUBJECT_BANDIT_ENABLED=true
+BAYESIAN_PRIORS_ENABLED=true
+```
+
+#### **API Key Setup**
+1. Generate a secure API key (32+ characters)
+2. Add to environment variables on all services
+3. Ensure OAuth proxy forwards authentication
+4. Test with health check endpoints
+
+#### **Database Connection**
+The system requires PostgreSQL with extensions:
+- `uuid-ossp` for UUID generation
+- `pgcrypto` for hash functions  
+- `pg_trgm` for fuzzy text matching
+- `pgvector` for similarity search (optional)
+
+#### **Redis Configuration**
+Policy caching requires Azure Cache for Redis:
+- Basic C0 tier (256MB) minimum
+- SSL/TLS enabled (rediss://)
+- 24-hour TTL for policy data
+- Automatic cache warmup on policy updates
+
+### 🔧 Troubleshooting Guide
+
+#### **Common Import Errors**
+
+##### **400 Bad Request - Invalid CSV Format**
+```json
+{"detail": "Request body required"}
+```
+
+**Solutions:**
+1. Ensure Content-Type is `application/json` for JSON payloads
+2. Verify CSV data is properly formatted
+3. Check that at least one CSV type is provided
+4. Validate JSON structure matches expected format
+
+##### **415 Unsupported Media Type**
+```json  
+{"detail": "Invalid JSON in request body"}
+```
+
+**Solutions:**
+1. Use proper JSON encoding for CSV content
+2. Escape special characters in CSV data
+3. Ensure multipart form data has correct field names
+4. Check file upload size limits (25MB max)
+
+##### **Database Constraint Violations**
+```json
+{"detail": "Foreign key constraint failed: deal_id not found"}
+```
+
+**Solutions:**
+1. Import deals.csv before other CSV types
+2. Verify Deal IDs exist in referenced tables
+3. Check date range filtering isn't excluding deals
+4. Ensure owner filter matches data ("Steve Perry")
+
+##### **Zoho API Integration Failures**
+```json
+{"detail": "Zoho API authentication failed"}
+```
+
+**Solutions:**
+1. Check OAuth service is running
+2. Verify refresh token is valid
+3. Ensure API rate limits aren't exceeded
+4. Test Zoho connectivity with health endpoint
+
+#### **Performance Issues**
+
+##### **Slow Import Processing**
+**Symptoms:** Import takes >30 seconds for <1000 records
+
+**Solutions:**
+1. Check database connection pool settings
+2. Verify indexes exist on foreign key columns
+3. Use batch processing for large datasets
+4. Enable PostgreSQL query optimization
+
+##### **Memory Issues**
+**Symptoms:** Out of memory errors during large imports
+
+**Solutions:**
+1. Process files in smaller batches
+2. Increase container memory allocation
+3. Use streaming CSV parsing for large files
+4. Clear Redis cache if memory constrained
+
+#### **Audit Trail Debugging**
+
+##### **Correlation ID Tracking**
+Every import operation generates a correlation ID for tracking:
+
+```sql
+-- Find all operations for a correlation ID
+SELECT operation_type, outcome, processing_time_ms, error_message
+FROM intake_audit 
+WHERE correlation_id = 'uuid-here'
+ORDER BY created_at;
+
+-- Check recent import failures
+SELECT correlation_id, operation_type, error_message, created_at
+FROM intake_audit 
+WHERE outcome = 'failure' 
+  AND created_at > NOW() - INTERVAL '24 hours'
+ORDER BY created_at DESC;
+```
+
+##### **Policy Application Issues**
+```sql
+-- Verify policy seeding completed successfully
+SELECT COUNT(*) as employer_count FROM employer_normalization;
+SELECT COUNT(*) as city_count FROM city_context;  
+SELECT COUNT(*) as subject_count FROM subject_bandit;
+
+-- Check policy usage in deal processing
+SELECT metadata->>'policies_applied' as policies, COUNT(*)
+FROM intake_audit 
+WHERE operation_type = 'email_processing'
+  AND created_at > NOW() - INTERVAL '7 days'
+GROUP BY policies;
+```
+
+### 📋 Best Practices
+
+#### **Import Frequency**
+- **Daily imports**: For active recruitment campaigns
+- **Weekly imports**: For historical analysis and reporting
+- **Monthly imports**: For policy regeneration and optimization
+
+#### **Data Validation**
+- Always import deals.csv first (foreign key dependencies)
+- Validate date ranges match expected data period
+- Check owner filter matches your data exactly
+- Verify CSV encoding is UTF-8
+
+#### **Performance Optimization**
+- Use explicit file paths for container deployments
+- Enable Redis caching for policy data
+- Monitor database query performance
+- Batch large imports into smaller chunks
+
+#### **Security Considerations**
+- Never log PII data in application logs
+- Use correlation IDs for debugging (no sensitive data)
+- Ensure API keys are properly secured
+- Validate file upload sizes and types
+
+### 🗃️ Database Migration
+
+#### **Running the Migration**
+Execute the TalentWell schema migration:
+
+```bash
+# Connect to PostgreSQL
+psql $DATABASE_URL
+
+# Run migration script
+\i migrations/003_talentwell_tables.sql
+
+# Verify tables created
+\dt+ deals deal_stage_history meetings deal_notes;
+\dt+ employer_normalization city_context subject_bandit;
+\dt+ selector_priors intake_audit;
+```
+
+#### **Rollback Procedure**
+If migration fails or needs rollback:
+
+```sql
+-- Backup existing data first
+CREATE TABLE deals_backup AS SELECT * FROM deals;
+CREATE TABLE audit_backup AS SELECT * FROM intake_audit;
+
+-- Drop TalentWell tables (cascade removes foreign keys)
+DROP TABLE IF EXISTS intake_audit CASCADE;
+DROP TABLE IF EXISTS deal_notes CASCADE;
+DROP TABLE IF EXISTS meetings CASCADE;
+DROP TABLE IF EXISTS deal_stage_history CASCADE;
+DROP TABLE IF EXISTS deals CASCADE;
+
+-- Drop normalization tables
+DROP TABLE IF EXISTS employer_normalization CASCADE;
+DROP TABLE IF EXISTS city_context CASCADE;
+DROP TABLE IF EXISTS subject_bandit CASCADE;
+DROP TABLE IF EXISTS selector_priors CASCADE;
+```
+
+#### **Data Backup**
+Before major imports, backup critical data:
+
+```bash
+# Backup TalentWell tables
+pg_dump $DATABASE_URL \
+  -t deals -t deal_stage_history -t meetings -t deal_notes \
+  -t employer_normalization -t city_context -t subject_bandit \
+  -t selector_priors -t intake_audit \
+  > talentwell_backup_$(date +%Y%m%d).sql
+
+# Restore if needed
+psql $DATABASE_URL < talentwell_backup_20250911.sql
+```
+
 ## 📜 License
 
 Proprietary - The Well Recruiting © 2025

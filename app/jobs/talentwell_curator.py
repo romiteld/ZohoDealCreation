@@ -152,7 +152,7 @@ class TalentWellCurator:
         to_date: datetime,
         owner: Optional[str]
     ) -> List[Dict[str, Any]]:
-        """Query deals from Zoho or CSV cache."""
+        """Query candidates from Zoho using Brandon's deterministic selection."""
         
         # Try to load from CSV cache first
         if self.redis_client:
@@ -162,30 +162,54 @@ class TalentWellCurator:
                 logger.info("Using cached deal data")
                 return json.loads(cached.decode())
         
-        # Otherwise, query from Zoho API
-        deals = []
-        headers = get_zoho_headers()
-        
-        # Note: Actual Zoho query implementation would go here
-        # For now, return empty list (will be populated via CSV import)
-        logger.warning("Zoho API query not implemented, using empty list")
-        return deals
+        # Query from Zoho API using new query_candidates method
+        try:
+            from app.integrations import ZohoIntegrator
+            zoho_client = ZohoIntegrator()
+            
+            # Fetch candidates with Brandon's criteria
+            candidates = await zoho_client.query_candidates(limit=100)
+            
+            logger.info(f"Retrieved {len(candidates)} candidates from Zoho")
+            return candidates
+            
+        except Exception as e:
+            logger.error(f"Error querying candidates from Zoho: {e}")
+            return []
     
     async def _filter_processed_deals(
         self,
         deals: List[Dict[str, Any]],
         processed_key: str
     ) -> List[Dict[str, Any]]:
-        """Filter out already processed deals."""
+        """Filter out already processed deals from last 4 weeks."""
         if not self.redis_client:
             return deals
-            
+        
+        # Check last 4 weeks of processed candidates
+        current_date = datetime.now()
         new_deals = []
+        
         for deal in deals:
-            is_member = await self.redis_client.sismember(processed_key, deal['id'])
-            if not is_member:
+            candidate_locator = deal.get('candidate_locator') or deal.get('id')
+            is_processed = False
+            
+            # Check last 4 weeks
+            for week_offset in range(4):
+                check_date = current_date - timedelta(weeks=week_offset)
+                year_week = f"{check_date.year}-{check_date.isocalendar()[1]:02d}"
+                week_key = f"talentwell:processed:{year_week}"
+                
+                is_member = await self.redis_client.sismember(week_key, candidate_locator)
+                if is_member:
+                    is_processed = True
+                    logger.info(f"Candidate {candidate_locator} already processed in week {year_week}")
+                    break
+            
+            if not is_processed:
                 new_deals.append(deal)
                 
+        logger.info(f"Filtered {len(deals) - len(new_deals)} already processed candidates")
         return new_deals
     
     async def _process_deal(
@@ -193,27 +217,58 @@ class TalentWellCurator:
         deal: Dict[str, Any],
         audience: str
     ) -> Optional[DigestCard]:
-        """Process single deal with C³/VoIT and evidence extraction."""
+        """Process single deal with C³/VoIT, Zoom transcript, and evidence extraction."""
         
         try:
-            # Extract base information
-            candidate_name = deal.get('Candidate_Name', 'Unknown')
-            job_title = deal.get('Job_Title', 'Unknown')
-            company = deal.get('Firm_Name', 'Unknown')
-            location = deal.get('Location', 'Unknown')
+            # Extract base information using Brandon's field mappings
+            candidate_name = deal.get('candidate_name', 'Unknown')
+            job_title = deal.get('job_title', 'Unknown')
+            company = deal.get('company_name', 'Unknown')
+            location = deal.get('location', 'Unknown')
             
-            # Check C³ cache
+            # Normalize location to metro area
+            location = await self._normalize_location(location)
+            
+            # Build mobility line from CRM fields
+            mobility_line = self._build_mobility_line(
+                deal.get('is_mobile', False),
+                deal.get('remote_preference', False),
+                deal.get('hybrid_preference', False)
+            )
+            
+            # Fetch Zoom transcript if available
+            transcript_text = None
+            if deal.get('meeting_id') or deal.get('transcript_url'):
+                from app.zoom_client import ZoomClient
+                zoom_client = ZoomClient()
+                meeting_ref = deal.get('meeting_id') or deal.get('transcript_url')
+                try:
+                    transcript_text = await zoom_client.fetch_zoom_transcript_for_meeting(meeting_ref)
+                    if transcript_text:
+                        logger.info(f"Successfully fetched Zoom transcript for candidate {candidate_name}")
+                except Exception as e:
+                    logger.warning(f"Could not fetch Zoom transcript: {e}")
+            
+            # Build canonical record with all fields
             canonical_record = {
                 'candidate_name': candidate_name,
                 'job_title': job_title,
                 'company': company,
                 'location': location,
-                'deal_id': deal['id']
+                'mobility_line': mobility_line,
+                'professional_designations': deal.get('professional_designations'),
+                'book_size_aum': deal.get('book_size_aum'),
+                'production_12mo': deal.get('production_12mo'),
+                'desired_comp': deal.get('desired_comp'),
+                'when_available': deal.get('when_available'),
+                'candidate_locator': deal.get('candidate_locator') or deal.get('id'),
+                'transcript': transcript_text,
+                'deal_id': deal.get('id')
             }
             
             cache_key = self._generate_cache_key(canonical_record, audience)
             
-            # Try C³ reuse
+            # Try C³ reuse with selector-aware caching
             if self.redis_client:
                 cached_entry = await self._get_c3_entry(cache_key)
                 if cached_entry:
@@ -225,7 +280,7 @@ class TalentWellCurator:
                     )
                     
                     if decision == "reuse":
-                        logger.info(f"C³ cache hit for deal {deal['id']}")
+                        logger.info(f"C³ cache hit for deal {deal.get('id')}")
                         return self._deserialize_card(artifact)
             
             # Process with VoIT if not cached
@@ -235,28 +290,32 @@ class TalentWellCurator:
                 target_quality=0.9
             )
             
-            # Extract evidence-linked bullets
-            bullets = await self.evidence_extractor.extract_bullets(
+            # Generate hard-skill bullets (2-5 required)
+            bullets = await self._generate_hard_skill_bullets(
                 deal,
-                voit_result.get('enhanced_data', {})
+                voit_result.get('enhanced_data', {}),
+                transcript_text
             )
             
-            # Get location context
-            metro_area = await self._get_metro_area(location)
-            firm_type = await self._get_firm_type(company)
+            # Validate we have 2-5 bullets
+            if len(bullets) < 2:
+                logger.warning(f"Only {len(bullets)} bullets for candidate {candidate_name}, generating more")
+                bullets = await self._ensure_minimum_bullets(deal, bullets)
+            elif len(bullets) > 5:
+                bullets = bullets[:5]  # Take top 5
             
-            # Create card
+            # Create card with Brandon's format
             card = DigestCard(
-                deal_id=deal['id'],
+                deal_id=deal.get('id'),
                 candidate_name=candidate_name,
                 job_title=job_title,
                 company=company,
-                location=location,
-                bullets=bullets[:3],  # Top 3 bullets
-                metro_area=metro_area,
-                firm_type=firm_type,
-                source=deal.get('Source'),
-                source_detail=deal.get('Source_Detail'),
+                location=f"{location} {mobility_line}",
+                bullets=bullets,
+                metro_area=location,  # Already normalized
+                firm_type=await self._get_firm_type(company),
+                source=deal.get('source'),
+                source_detail=deal.get('source_detail'),
                 meeting_date=deal.get('meeting_date'),
                 transcript_url=deal.get('transcript_url'),
                 evidence_score=self._calculate_evidence_score(bullets)
@@ -398,26 +457,185 @@ class TalentWellCurator:
         return intros.get(audience, intros['default'])
     
     def _format_card_html(self, card: DigestCard) -> str:
-        """Format card as HTML."""
+        """Format card as HTML following Brandon's template."""
         bullets_html = '\n'.join([
             f'<li>{bullet.text}</li>'
             for bullet in card.bullets
         ])
         
-        location_info = card.metro_area or card.location
-        company_info = f"{card.firm_type} - {card.company}" if card.firm_type else card.company
+        # Extract availability and comp info
+        availability = ""
+        comp = ""
+        for bullet in card.bullets:
+            if "available" in bullet.text.lower():
+                availability = bullet.text
+            elif "comp" in bullet.text.lower() or "$" in bullet.text:
+                comp = bullet.text
+        
+        # Generate ref code
+        ref_code = f"TWAV-{card.deal_id[-8:]}" if card.deal_id else "TWAV-00000000"
         
         return f"""
         <div class="candidate-card">
-            <h3>{card.candidate_name}</h3>
-            <p class="role">{card.job_title} @ {company_info}</p>
-            <p class="location">📍 {location_info}</p>
-            <ul class="highlights">
-                {bullets_html}
-            </ul>
-            {'<p class="meeting-note">✓ Interview completed ' + card.meeting_date.strftime('%b %d') + '</p>' if card.meeting_date else ''}
+            <h3><strong>{card.candidate_name}</strong></h3>
+            <div class="candidate-location">
+                <strong>Location:</strong> {card.location}
+            </div>
+            <div class="candidate-details">
+                <div class="skill-list">
+                    <ul>
+                        {bullets_html}
+                    </ul>
+                </div>
+                <div class="availability-comp">
+                    {f'<div>{availability}</div>' if availability else ''}
+                    {f'<div>{comp}</div>' if comp else ''}
+                </div>
+            </div>
+            <div class="ref-code">Ref code: {ref_code}</div>
         </div>
         """
+    
+    async def _normalize_location(self, location: str) -> str:
+        """Normalize location to metro area using city_context.json."""
+        if not location or location == "Unknown":
+            return location
+            
+        # Load city context
+        try:
+            with open("app/policy/seed/city_context.json", "r") as f:
+                city_context = json.load(f)
+        except:
+            logger.warning("Could not load city_context.json")
+            return location
+        
+        # Normalize location for lookup
+        location_key = location.lower().replace(" ", "_").replace(",", "")
+        
+        # Check for metro area mapping
+        if location_key in city_context:
+            metro = city_context[location_key]
+            # Special handling for small cities like Gulf Breeze
+            if "gulf_breeze" in location_key:
+                return f"Gulf Breeze (Pensacola area)"
+            return metro
+        
+        # Return original if no mapping found
+        return location
+    
+    def _build_mobility_line(self, is_mobile: bool, remote_pref: bool, hybrid_pref: bool) -> str:
+        """Build mobility line from CRM fields per Brandon's format."""
+        parts = []
+        
+        # Mobility status
+        if is_mobile:
+            parts.append("Is mobile")
+        else:
+            parts.append("Is not mobile")
+        
+        # Remote/Hybrid preferences
+        prefs = []
+        if remote_pref:
+            prefs.append("Remote")
+        if hybrid_pref:
+            prefs.append("Hybrid")
+        
+        if prefs:
+            parts.append(f"Open to {' or '.join(prefs)}")
+        
+        return f"({'; '.join(parts)})"
+    
+    async def _generate_hard_skill_bullets(
+        self,
+        deal: Dict[str, Any],
+        enhanced_data: Dict[str, Any],
+        transcript: Optional[str]
+    ) -> List[BulletPoint]:
+        """Generate 2-5 hard skill bullets, no soft skills."""
+        bullets = []
+        
+        # Professional designations / licenses
+        if deal.get('professional_designations'):
+            bullets.append(BulletPoint(
+                text=f"Licenses/Designations: {deal['professional_designations']}",
+                confidence=0.95,
+                source="CRM"
+            ))
+        
+        # AUM/Book Size
+        if deal.get('book_size_aum'):
+            bullets.append(BulletPoint(
+                text=f"Book Size: {deal['book_size_aum']}",
+                confidence=0.95,
+                source="CRM"
+            ))
+        
+        # Production
+        if deal.get('production_12mo'):
+            bullets.append(BulletPoint(
+                text=f"12-Month Production: {deal['production_12mo']}",
+                confidence=0.95,
+                source="CRM"
+            ))
+        
+        # Extract from transcript if available
+        if transcript and len(bullets) < 5:
+            transcript_bullets = await self.evidence_extractor.extract_bullets(
+                {"transcript": transcript},
+                enhanced_data
+            )
+            # Filter for hard skills only
+            for bullet in transcript_bullets:
+                if any(keyword in bullet.text.lower() for keyword in 
+                       ['$', 'million', 'billion', 'aum', 'clients', 'years', '%', 'portfolio']):
+                    bullets.append(bullet)
+                    if len(bullets) >= 5:
+                        break
+        
+        # When Available
+        if deal.get('when_available') and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Available: {deal['when_available']}",
+                confidence=0.9,
+                source="CRM"
+            ))
+        
+        # Desired Comp
+        if deal.get('desired_comp') and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Desired Compensation: {deal['desired_comp']}",
+                confidence=0.9,
+                source="CRM"
+            ))
+        
+        return bullets
+    
+    async def _ensure_minimum_bullets(
+        self,
+        deal: Dict[str, Any],
+        existing_bullets: List[BulletPoint]
+    ) -> List[BulletPoint]:
+        """Ensure we have at least 2 bullets."""
+        bullets = list(existing_bullets)
+        
+        # Add generic hard skills if needed
+        if len(bullets) < 2:
+            if deal.get('job_title'):
+                bullets.append(BulletPoint(
+                    text=f"Current Role: {deal['job_title']}",
+                    confidence=0.8,
+                    source="CRM"
+                ))
+        
+        if len(bullets) < 2:
+            if deal.get('company_name'):
+                bullets.append(BulletPoint(
+                    text=f"Current Firm: {deal['company_name']}",
+                    confidence=0.8,
+                    source="CRM"
+                ))
+        
+        return bullets
 
 
 # Export curator instance
