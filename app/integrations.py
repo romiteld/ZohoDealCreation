@@ -186,6 +186,92 @@ class PostgreSQLClient:
             metadata JSONB DEFAULT '{}'::jsonb
         );
         
+        -- TalentWell tables for digest system
+        CREATE TABLE IF NOT EXISTS deals (
+            id TEXT PRIMARY KEY,
+            candidate_name TEXT,
+            job_title TEXT,
+            firm_name TEXT,
+            location TEXT,
+            owner TEXT,
+            stage TEXT,
+            created_date TIMESTAMP WITH TIME ZONE,
+            closing_date TIMESTAMP WITH TIME ZONE,
+            source TEXT,
+            source_detail TEXT,
+            referrer_name TEXT,
+            description TEXT,
+            amount NUMERIC,
+            raw_data JSONB,
+            imported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE TABLE IF NOT EXISTS deal_stage_history (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            deal_id TEXT REFERENCES deals(id),
+            stage TEXT,
+            changed_time TIMESTAMP WITH TIME ZONE,
+            duration_days INTEGER,
+            changed_by TEXT,
+            imported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE TABLE IF NOT EXISTS meetings (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            deal_id TEXT REFERENCES deals(id),
+            title TEXT,
+            start_datetime TIMESTAMP WITH TIME ZONE,
+            participants TEXT,
+            email_opened BOOLEAN DEFAULT FALSE,
+            link_clicked BOOLEAN DEFAULT FALSE,
+            raw_data JSONB,
+            imported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE TABLE IF NOT EXISTS deal_notes (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            deal_id TEXT REFERENCES deals(id),
+            note_content TEXT,
+            created_at TIMESTAMP WITH TIME ZONE,
+            created_by TEXT,
+            imported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        -- Policy storage tables
+        CREATE TABLE IF NOT EXISTS policy_employers (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            company_name TEXT UNIQUE NOT NULL,
+            firm_type TEXT NOT NULL, -- 'National firm' or 'Independent firm'
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE TABLE IF NOT EXISTS policy_city_context (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            city TEXT UNIQUE NOT NULL,
+            metro_area TEXT NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
+        CREATE TABLE IF NOT EXISTS policy_subject_priors (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            audience TEXT NOT NULL,
+            variant_id TEXT NOT NULL,
+            text_template TEXT NOT NULL,
+            alpha INTEGER DEFAULT 1,
+            beta INTEGER DEFAULT 1,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
+            UNIQUE(audience, variant_id)
+        );
+        
+        CREATE TABLE IF NOT EXISTS policy_selector_priors (
+            id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+            selector TEXT UNIQUE NOT NULL,
+            tau_delta NUMERIC NOT NULL,
+            bdat_alpha INTEGER NOT NULL,
+            bdat_beta INTEGER NOT NULL,
+            created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+        );
+        
         -- Create indexes
         CREATE INDEX IF NOT EXISTS idx_email_history_message_id ON email_processing_history(internet_message_id);
         CREATE INDEX IF NOT EXISTS idx_email_history_primary_email ON email_processing_history(primary_email);
@@ -194,6 +280,19 @@ class PostgreSQLClient:
         CREATE INDEX IF NOT EXISTS idx_zoho_mapping_lookup ON zoho_record_mapping(record_type, lookup_key, lookup_value);
         CREATE INDEX IF NOT EXISTS idx_batch_status_batch_id ON batch_processing_status(batch_id);
         CREATE INDEX IF NOT EXISTS idx_batch_status_created_at ON batch_processing_status(created_at);
+        
+        -- TalentWell indexes
+        CREATE INDEX IF NOT EXISTS idx_deals_owner ON deals(owner);
+        CREATE INDEX IF NOT EXISTS idx_deals_created_date ON deals(created_date);
+        CREATE INDEX IF NOT EXISTS idx_deals_stage ON deals(stage);
+        CREATE INDEX IF NOT EXISTS idx_deal_stage_history_deal_id ON deal_stage_history(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_meetings_deal_id ON meetings(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_meetings_start_datetime ON meetings(start_datetime);
+        CREATE INDEX IF NOT EXISTS idx_deal_notes_deal_id ON deal_notes(deal_id);
+        CREATE INDEX IF NOT EXISTS idx_policy_employers_company ON policy_employers(company_name);
+        CREATE INDEX IF NOT EXISTS idx_policy_city_context_city ON policy_city_context(city);
+        CREATE INDEX IF NOT EXISTS idx_policy_subject_priors_audience ON policy_subject_priors(audience);
+        CREATE INDEX IF NOT EXISTS idx_policy_selector_priors_selector ON policy_selector_priors(selector);
         
         -- Vector similarity index
         CREATE INDEX IF NOT EXISTS idx_email_vectors_embedding ON email_vectors 

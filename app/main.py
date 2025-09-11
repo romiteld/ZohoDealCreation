@@ -3967,6 +3967,225 @@ async def get_digest_manifest(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ========================= TalentWell Admin Endpoints =========================
+
+@app.post("/api/talentwell/import-exports", dependencies=[Depends(verify_api_key)])
+async def import_talentwell_exports(request: Request):
+    """Import Steve Perry's deals from Zoho CSV exports (Jan 1 - Sep 8, 2025)"""
+    try:
+        from app.admin.import_exports import importer
+        
+        # Get request body
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Request body required")
+        
+        try:
+            csv_data = await request.json()
+        except:
+            raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+        
+        # Validate required CSV types
+        if not isinstance(csv_data, dict):
+            raise HTTPException(status_code=400, detail="Request must be a dictionary of CSV data")
+        
+        if not csv_data:
+            raise HTTPException(status_code=400, detail="At least one CSV type required (deals, stage_history, meetings, notes)")
+        
+        # Import the data
+        result = await importer.import_csv_data(csv_data)
+        
+        return {
+            "status": result["status"],
+            "import_summary": result["summary"],
+            "timestamp": datetime.utcnow().isoformat(),
+            "owner_filter": "Steve Perry",
+            "date_range": "2025-01-01 to 2025-09-08"
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Import failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Import failed: {str(e)}")
+
+
+@app.post("/api/talentwell/seed-policies", dependencies=[Depends(verify_api_key)])
+async def seed_talentwell_policies(req: Request, regenerate: bool = Query(False, description="Regenerate policies from scratch")):
+    """Generate and seed TalentWell policy data into database and Redis"""
+    try:
+        from app.admin.seed_policies import seeder
+        from app.policy.loader import get_policy_loader
+        
+        # Generate fresh policy seeds
+        policies = await seeder.generate_all_policies()
+        
+        if regenerate:
+            # Clear existing policies first
+            logger.info("Regenerating policies from scratch")
+        
+        # Seed into database
+        db_results = await seeder.seed_database(policies)
+        
+        # Load into Redis cache
+        policy_loader = get_policy_loader()
+        cache_results = await policy_loader.load_all_policies()
+        
+        return {
+            "status": "success",
+            "policies_generated": {
+                "employers": len(policies["employers"]),
+                "city_context": len(policies["city_context"]), 
+                "subject_priors": len(policies["subject_priors"]),
+                "selector_priors": len(policies["selector_priors"])
+            },
+            "database_seeded": db_results,
+            "redis_loaded": cache_results,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Policy seeding failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Policy seeding failed: {str(e)}")
+
+
+@app.post("/api/talentwell/validate", dependencies=[Depends(verify_api_key)])
+async def validate_digest_data(request: Request):
+    """Validate TalentWell digest data and render HTML"""
+    try:
+        from app.validation.talentwell_validator import validator
+        
+        # Get request body
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Request body required")
+        
+        try:
+            digest_data = await request.json()
+        except:
+            raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+        
+        # Perform full validation
+        valid, result = validator.full_validation(digest_data)
+        
+        if not valid:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "valid": False,
+                    "errors": result["errors"],
+                    "warnings": result.get("warnings", []),
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+        
+        return {
+            "valid": True,
+            "validation_summary": {
+                "candidate_count": result["candidate_count"],
+                "html_size": result["html_size"],
+                "estimated_tokens": result["estimated_tokens"]
+            },
+            "digest_data": result["digest_data"],
+            "rendered_html": result["rendered_html"],
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Validation failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Validation failed: {str(e)}")
+
+
+@app.post("/api/talentwell/test-send", dependencies=[Depends(verify_api_key)])
+async def test_send_digest(request: Request):
+    """Test send TalentWell digest to specific recipient"""
+    try:
+        from app.validation.talentwell_validator import validator
+        from app.mail.send import mailer
+        
+        # Get request body
+        body = await request.body()
+        if not body:
+            raise HTTPException(status_code=400, detail="Request body required")
+        
+        try:
+            request_data = await request.json()
+        except:
+            raise HTTPException(status_code=400, detail="Invalid JSON in request body")
+        
+        # Validate required fields
+        if "digest_data" not in request_data:
+            raise HTTPException(status_code=400, detail="digest_data is required")
+        
+        if "test_recipient" not in request_data:
+            raise HTTPException(status_code=400, detail="test_recipient email is required")
+        
+        digest_data = request_data["digest_data"]
+        test_recipient = request_data["test_recipient"]
+        
+        # Validate email format
+        import re
+        email_pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
+        if not re.match(email_pattern, test_recipient):
+            raise HTTPException(status_code=400, detail="Invalid test_recipient email format")
+        
+        # Validate digest data
+        valid, validation_result = validator.full_validation(digest_data)
+        if not valid:
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "validation_failed": True,
+                    "errors": validation_result["errors"],
+                    "timestamp": datetime.utcnow().isoformat()
+                }
+            )
+        
+        # Send test email
+        subject = validation_result["digest_data"]["subject"]
+        html_content = validation_result["rendered_html"]
+        
+        delivery_result = await mailer.send_test_digest(subject, html_content, test_recipient)
+        
+        return {
+            "test_send_successful": delivery_result["success"],
+            "delivery_details": delivery_result,
+            "validation_summary": {
+                "candidate_count": validation_result["candidate_count"],
+                "html_size": validation_result["html_size"]
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test send failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Test send failed: {str(e)}")
+
+
+@app.get("/api/talentwell/email-status", dependencies=[Depends(verify_api_key)])
+async def get_email_system_status(req: Request):
+    """Get TalentWell email system status and configuration"""
+    try:
+        from app.mail.send import mailer
+        
+        status = mailer.get_email_status()
+        
+        return {
+            "email_system": status,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        
+    except Exception as e:
+        logger.error(f"Email status check failed: {e}")
+        raise HTTPException(status_code=500, detail=f"Email status check failed: {str(e)}")
+
+
+# ========================= End TalentWell Admin Endpoints =========================
+
 # Keep existing vault-agent routes as aliases for backward compatibility
 @app.post("/api/vault-agent/ingest", dependencies=[Depends(verify_api_key)])
 async def vault_agent_ingest_alias(request: dict, req: Request):
