@@ -39,10 +39,15 @@ class EmailMessage:
     subject: str
     html_body: str
     text_body: Optional[str] = None
-    from_address: str = "talentwell@emailthewell.com"
+    from_address: str = None  # Will be set from environment
     from_name: str = "TalentWell"
     reply_to: Optional[str] = None
     bcc_addresses: Optional[List[str]] = None
+    
+    def __post_init__(self):
+        """Set defaults from environment variables after initialization."""
+        if self.from_address is None:
+            self.from_address = os.getenv('TALENTWELL_FROM_ADDRESS', 'DoNotReply@389fbf3b-307d-4882-af6a-d86d98329028.azurecomm.net')
 
 
 @dataclass
@@ -377,9 +382,9 @@ class TalentWellMailer:
             to_addresses=primary_recipients,
             subject=subject,
             html_body=html_content,
-            from_address="talentwell@emailthewell.com",
-            from_name="TalentWell",
-            reply_to="steve.perry@emailthewell.com",
+            from_address=os.getenv('TALENTWELL_FROM_ADDRESS', 'DoNotReply@389fbf3b-307d-4882-af6a-d86d98329028.azurecomm.net'),
+            from_name=os.getenv('TALENTWELL_FROM_NAME', 'TalentWell'),
+            reply_to=os.getenv('TALENTWELL_REPLY_TO', 'steve@emailthewell.com'),
             bcc_addresses=bcc_recipients
         )
         

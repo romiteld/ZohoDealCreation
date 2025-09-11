@@ -3,13 +3,18 @@ Policy loader for loading seed data into Redis at startup.
 Enhanced to support database fallbacks and reload functionality.
 """
 
+import os
 import json
 import logging
 import asyncio
 from pathlib import Path
 from typing import Dict, Any, Optional, List
+from dotenv import load_dotenv
 from app.redis_cache_manager import get_cache_manager
 from app.integrations import PostgreSQLClient
+
+# Load environment variables
+load_dotenv('.env.local')
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +25,10 @@ class PolicyLoader:
     def __init__(self, seed_dir: str = "app/policy/seed"):
         self.seed_dir = Path(seed_dir)
         self.cache_mgr = None
-        self.postgres_client = PostgreSQLClient()
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL environment variable is required for policy loader")
+        self.postgres_client = PostgreSQLClient(database_url)
         
     async def initialize(self):
         """Initialize async components."""

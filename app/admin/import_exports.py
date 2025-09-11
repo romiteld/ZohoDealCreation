@@ -3,6 +3,7 @@ TalentWell CSV import system for Zoho exports.
 Imports and processes Steve Perry's deals from Jan 1 - Sep 8, 2025.
 """
 
+import os
 import csv
 import json
 import logging
@@ -13,8 +14,12 @@ from typing import Dict, List, Any, Optional, Tuple
 from collections import defaultdict
 import re
 import io
+from dotenv import load_dotenv
 
 from app.integrations import PostgreSQLClient
+
+# Load environment variables
+load_dotenv('.env.local')
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +31,10 @@ class TalentWellImporter:
         self.owner_filter = "Steve Perry"
         self.start_date = datetime(2025, 1, 1)
         self.end_date = datetime(2025, 9, 8)
-        self.postgres_client = PostgreSQLClient()
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL environment variable is required for TalentWell import")
+        self.postgres_client = PostgreSQLClient(database_url)
         
     def parse_date(self, date_str: str) -> Optional[datetime]:
         """Parse various date formats from CSV exports."""

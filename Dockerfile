@@ -31,6 +31,7 @@ ENV PYTHONUNBUFFERED=1 \
 # Install runtime dependencies only
 RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
+    libpq-dev \
     curl \
     && rm -rf /var/lib/apt/lists/*
 

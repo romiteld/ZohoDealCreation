@@ -3,6 +3,7 @@ TalentWell policy seed generation system.
 Generates global policy seeds from imported Steve Perry data.
 """
 
+import os
 import json
 import logging
 import asyncio
@@ -10,9 +11,13 @@ from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Any, Optional
 from collections import defaultdict
+from dotenv import load_dotenv
 
 from app.integrations import PostgreSQLClient
 from app.redis_cache_manager import get_cache_manager
+
+# Load environment variables
+load_dotenv('.env.local')
 
 logger = logging.getLogger(__name__)
 
@@ -21,7 +26,10 @@ class TalentWellPolicySeeder:
     """Generate and load policy seeds for TalentWell digest system."""
     
     def __init__(self):
-        self.postgres_client = PostgreSQLClient()
+        database_url = os.getenv("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL environment variable is required for TalentWell policy seeding")
+        self.postgres_client = PostgreSQLClient(database_url)
         self.cache_manager = None
         self.seed_dir = Path("app/policy/seed")
         
@@ -531,3 +539,6 @@ class TalentWellPolicySeeder:
 
 # Create singleton instance
 policy_seeder = TalentWellPolicySeeder()
+
+# Alias for backward compatibility
+seeder = policy_seeder

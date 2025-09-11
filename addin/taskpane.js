@@ -22,7 +22,7 @@ Office.initialize = function (reason) {
     // Office.onReady will handle the actual initialization
 };
 
-// Test API connectivity function
+// Test API connectivity function (health check only, no dummy data)
 async function testAPIConnection() {
     console.log('Testing API connection...');
     try {
@@ -33,26 +33,9 @@ async function testAPIConnection() {
         if (healthResponse.ok) {
             const healthData = await healthResponse.json();
             console.log('Health data:', healthData);
+            return true;
         }
-        
-        // Test actual POST with minimal data
-        const testResponse = await fetch(`${API_BASE_URL}/intake/email`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
-            },
-            body: JSON.stringify({
-                sender_email: 'test@example.com',
-                sender_name: 'Test User',
-                subject: 'Test Subject',
-                body: 'Test body',
-                dry_run: true
-            })
-        });
-        console.log('POST test response:', testResponse.status);
-        
-        return true;
+        return false;
     } catch (error) {
         console.error('API connection test failed:', error);
         return false;
@@ -62,13 +45,26 @@ async function testAPIConnection() {
 Office.onReady((info) => {
     console.log('Office.onReady called with info:', info);
     if (info.host === Office.HostType.Outlook) {
-        console.log('Host is Outlook, initializing taskpane...');
-        // Test API connection on startup
-        testAPIConnection().then(result => {
-            console.log('API connection test result:', result);
-        });
+        console.log('Host is Outlook, waiting for DOM...');
         
-        initializeTaskpane();
+        // Ensure DOM is fully loaded before initializing
+        if (document.readyState === 'loading') {
+            console.log('DOM still loading, adding DOMContentLoaded listener');
+            document.addEventListener('DOMContentLoaded', () => {
+                console.log('DOMContentLoaded fired, initializing...');
+                testAPIConnection().then(result => {
+                    console.log('API connection test result:', result);
+                });
+                initializeTaskpane();
+            });
+        } else {
+            console.log('DOM already loaded, initializing immediately');
+            // DOM is already loaded
+            testAPIConnection().then(result => {
+                console.log('API connection test result:', result);
+            });
+            initializeTaskpane();
+        }
     } else {
         console.log('Host is not Outlook:', info.host);
     }
@@ -81,6 +77,26 @@ async function initializeTaskpane() {
     console.log('initializeTaskpane called');
     
     try {
+        // Verify critical DOM elements exist
+        const criticalElements = ['previewForm', 'loadingState', 'footer', 'candidateName', 'jobTitle'];
+        const missingElements = [];
+        for (const id of criticalElements) {
+            if (!document.getElementById(id)) {
+                missingElements.push(id);
+            }
+        }
+        
+        if (missingElements.length > 0) {
+            console.error('CRITICAL: Missing DOM elements:', missingElements);
+            console.error('Document body innerHTML length:', document.body.innerHTML.length);
+            console.error('First 500 chars of body:', document.body.innerHTML.substring(0, 500));
+            // Try to wait a bit more for DOM
+            setTimeout(() => initializeTaskpane(), 500);
+            return;
+        }
+        
+        console.log('All critical DOM elements found');
+        
         // Verify Office.context is available
         if (!Office || !Office.context || !Office.context.mailbox) {
             console.error('Office.context.mailbox is not available');
@@ -252,35 +268,63 @@ async function extractAndPreview() {
             
             if (extractionResponse.ok) {
                 let response;
+                let responseText = '';
                 try {
-                    const responseText = await extractionResponse.text();
-                    console.log('Raw response text:', responseText);
-                    response = JSON.parse(responseText);
-                    console.log('Parsed API Response:', response);
+                    responseText = await extractionResponse.text();
+                    console.log('Raw response length:', responseText.length);
+                    console.log('First 500 chars:', responseText.substring(0, 500));
+                    
+                    // Try to parse the response
+                    if (responseText) {
+                        response = JSON.parse(responseText);
+                    } else {
+                        console.error('Empty response from API');
+                        throw new Error('Empty response');
+                    }
                 } catch (parseError) {
-                    console.error('Failed to parse API response:', parseError);
-                    console.error('Response headers:', extractionResponse.headers);
-                    throw new Error('Invalid JSON response from API');
+                    console.error('Parse error:', parseError);
+                    console.error('Response was:', responseText);
+                    // Use fallback extraction
+                    extractedData = performLocalExtraction(currentEmailData);
+                    // Still populate the form even if API fails
+                    populateForm(extractedData);
+                    showPreviewForm();
+                    return; // Exit early
                 }
                 
-                // Access extracted data from the correct location in response
-                const extracted = response.extracted || response;
-                console.log('Extracted data:', extracted);
+                // Handle the response - check for different response structures
+                console.log('Response structure:', Object.keys(response));
                 
-                // Map the response to our expected format
+                // The API might return data in different formats
+                let extracted = null;
+                if (response.extracted) {
+                    extracted = response.extracted;
+                } else if (response.data) {
+                    extracted = response.data;
+                } else if (response.candidate_name || response.job_title) {
+                    // Direct response
+                    extracted = response;
+                } else {
+                    console.error('Unexpected response structure:', response);
+                    extracted = {};
+                }
+                
+                console.log('Using extracted data:', extracted);
+                
+                // Map the response to our expected format - be more defensive
                 extractedData = {
-                    candidateName: extracted.candidate_name || '',
-                    candidateEmail: extracted.candidate_email || extracted.email || '',
-                    candidatePhone: extracted.phone || '',
-                    linkedinUrl: extracted.linkedin_url || '',
-                    jobTitle: extracted.job_title || '',
-                    location: extracted.location || '',
-                    firmName: extracted.company_name || '',
-                    referrerName: extracted.referrer_name || currentEmailData.from?.displayName || '',
-                    referrerEmail: currentEmailData.from?.emailAddress || '',
+                    candidateName: extracted.candidate_name || extracted.candidateName || '',
+                    candidateEmail: extracted.candidate_email || extracted.candidateEmail || extracted.email || '',
+                    candidatePhone: extracted.candidate_phone || extracted.candidatePhone || extracted.phone || '',
+                    linkedinUrl: extracted.linkedin_url || extracted.linkedinUrl || '',
+                    jobTitle: extracted.job_title || extracted.jobTitle || '',
+                    location: extracted.location || extracted.candidateLocation || '',
+                    firmName: extracted.company_name || extracted.firmName || extracted.firm_name || '',
+                    referrerName: extracted.referrer_name || extracted.referrerName || currentEmailData.from?.displayName || '',
+                    referrerEmail: extracted.referrer_email || extracted.referrerEmail || currentEmailData.from?.emailAddress || '',
                     notes: extracted.notes || '',
-                    calendlyUrl: extracted.calendly_url || '',
-                    source: extracted.source || 'Email Inbound'
+                    calendlyUrl: extracted.calendly_url || extracted.calendlyUrl || '',
+                    source: extracted.source || extracted.Source || 'Email Inbound'
                 };
             } else {
                 // Log the error response
@@ -316,13 +360,56 @@ async function extractAndPreview() {
         originalExtractedData = { ...extractedData };
         console.log('Final extractedData to populate:', extractedData);
         
+        // CRITICAL: Ensure we actually have data before populating
+        if (!extractedData || Object.keys(extractedData).length === 0) {
+            console.error('No extracted data available!');
+            extractedData = performLocalExtraction(currentEmailData);
+            console.log('Using fallback extraction:', extractedData);
+        }
+        
         // Populate form with extracted data
-        console.log('Calling populateForm...');
+        console.log('Calling populateForm with:', extractedData);
         populateForm(extractedData);
         
-        // Show preview form
-        console.log('Calling showPreviewForm...');
-        showPreviewForm();
+        // Show preview form - force it to be visible
+        console.log('Showing preview form...');
+        const previewForm = document.getElementById('previewForm');
+        const loadingState = document.getElementById('loadingState');
+        const footer = document.getElementById('footer');
+        
+        if (loadingState) loadingState.style.display = 'none';
+        if (previewForm) {
+            previewForm.style.display = 'block';
+            previewForm.style.visibility = 'visible';
+            previewForm.style.opacity = '1';
+        }
+        if (footer) {
+            footer.style.display = 'flex';
+            footer.style.visibility = 'visible';
+        }
+        
+        console.log('Form display complete');
+        
+        // Force visibility as a fallback
+        setTimeout(() => {
+            const form = document.getElementById('previewForm');
+            const footer = document.getElementById('footer');
+            const loading = document.getElementById('loadingState');
+            
+            if (form && form.style.display !== 'block') {
+                console.log('Force showing form (fallback)');
+                form.style.display = 'block';
+            }
+            if (footer && footer.style.display !== 'flex') {
+                console.log('Force showing footer (fallback)');
+                footer.style.display = 'flex';
+            }
+            if (loading && loading.style.display !== 'none') {
+                console.log('Force hiding loading (fallback)');
+                loading.style.display = 'none';
+            }
+        }, 100);
+        
         console.log('Form should now be visible');
         
     } catch (error) {
@@ -541,29 +628,49 @@ async function getAttachments(item) {
  */
 function populateForm(data) {
     console.log('populateForm called with data:', data);
+    
+    // Defensive: ensure data exists
+    if (!data) {
+        console.error('No data provided to populateForm!');
+        data = {};
+    }
+    
     // Store the current extracted data for learning
     currentExtractedData = data;
     
-    // Candidate Information
-    setValue('candidateName', data.candidateName || data.candidate_name);
-    setValue('candidateEmail', data.candidateEmail || data.candidate_email || data.email);
-    setValue('candidatePhone', data.candidatePhone || data.candidate_phone || data.phone);
-    setValue('linkedinUrl', data.linkedinUrl || data.linkedin_url);
+    // First, check if the form elements exist
+    const candidateNameField = document.getElementById('candidateName');
+    if (!candidateNameField) {
+        console.error('CRITICAL: candidateName field not found! Form may not be loaded.');
+        // Try to wait and retry
+        setTimeout(() => {
+            console.log('Retrying populateForm after delay...');
+            populateForm(data);
+        }, 500);
+        return;
+    }
+    
+    // Candidate Information - try multiple field name formats
+    setValue('candidateName', data.candidateName || data.candidate_name || '');
+    setValue('candidateEmail', data.candidateEmail || data.candidate_email || data.email || '');
+    setValue('candidatePhone', data.candidatePhone || data.candidate_phone || data.phone || '');
+    setValue('linkedinUrl', data.linkedinUrl || data.linkedin_url || '');
     
     // Job Details
-    setValue('jobTitle', data.jobTitle || data.job_title);
-    setValue('location', data.location);
-    setValue('firmName', data.firmName || data.firm_name || data.company_name);
-    setValue('source', data.source || 'Email Inbound');
-    console.log('Form fields populated');
+    setValue('jobTitle', data.jobTitle || data.job_title || '');
+    setValue('location', data.location || data.candidateLocation || '');
+    setValue('firmName', data.firmName || data.firm_name || data.company_name || '');
+    setValue('source', data.source || data.Source || 'Email Inbound');
     
     // Referrer Information
-    setValue('referrerName', data.referrerName || data.referrer_name || currentEmailData?.from?.displayName);
-    setValue('referrerEmail', data.referrerEmail || data.referrer_email || currentEmailData?.from?.emailAddress);
+    setValue('referrerName', data.referrerName || data.referrer_name || currentEmailData?.from?.displayName || '');
+    setValue('referrerEmail', data.referrerEmail || data.referrer_email || currentEmailData?.from?.emailAddress || '');
     
     // Additional Information
     setValue('notes', data.notes || '');
-    setValue('calendlyUrl', data.calendlyUrl || data.calendly_url);
+    setValue('calendlyUrl', data.calendlyUrl || data.calendly_url || '');
+    
+    console.log('Form population complete');
     
     // Show attachments if any
     if (currentEmailData?.attachments?.length > 0) {
@@ -587,6 +694,12 @@ function setValue(fieldId, value) {
     const field = document.getElementById(fieldId);
     if (field) {
         field.value = value || '';
+        console.log(`Set ${fieldId} to: ${value || '(empty)'}`);
+    } else {
+        console.error(`ERROR: Element with ID '${fieldId}' not found in DOM!`);
+        // List all available input elements for debugging
+        const inputs = document.querySelectorAll('input, select, textarea');
+        console.log('Available form elements:', Array.from(inputs).map(el => el.id).filter(id => id));
     }
 }
 
@@ -644,9 +757,15 @@ function updateLoadingMessage(message) {
  * Show preview form
  */
 function showPreviewForm() {
-    showLoadingState(false);
+    console.log('showPreviewForm called - hiding loading, showing form');
+    // Hide loading state
+    document.getElementById('loadingState').style.display = 'none';
+    // Show the form
     document.getElementById('previewForm').style.display = 'block';
+    // Show the footer
     document.getElementById('footer').style.display = 'flex';
+    console.log('Form visibility set to:', document.getElementById('previewForm').style.display);
+    console.log('Footer visibility set to:', document.getElementById('footer').style.display);
 }
 
 /**
