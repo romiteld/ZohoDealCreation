@@ -90,6 +90,8 @@ static/
 *.pfx
 client_secret.json
 service_account.json
+# Scripts with hardcoded SAS tokens (use env vars instead)
+download_files_with_token.sh
 
 # OS Files
 Thumbs.db

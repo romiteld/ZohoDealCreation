@@ -770,7 +770,8 @@ async def download_import_files():
     import requests
     
     # Azure Storage URLs with SAS token
-    sas_token = "se=2025-09-12T23%3A59%3A59Z&sp=r&sv=2022-11-02&sr=c&sig=1SEOSJkGk%2B5llshpZHAdhbXge%2B5ttXuLhUqX%2Bfb5BRc%3D"
+    # First try environment variable, then use hardcoded for backwards compatibility
+    sas_token = os.getenv("AZURE_SAS_TOKEN", "se=2025-09-12T23%3A59%3A59Z&sp=r&sv=2022-11-02&sr=c&sig=1SEOSJkGk%2B5llshpZHAdhbXge%2B5ttXuLhUqX%2Bfb5BRc%3D")
     base_url = "https://wellintakestorage0903.blob.core.windows.net/imports"
     
     files_to_download = [
