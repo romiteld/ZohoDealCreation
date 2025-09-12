@@ -1243,30 +1243,38 @@ class ZohoApiClient(ZohoClient):
                               owner: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Query candidates from Zoho CRM for TalentWell digest.
-        Fetches records where Publish_to_Vault = true and Lead_Status NOT IN ('Placed', 'Hired').
-        Uses Leads module (which Zoho calls Candidates).
+        Fetches all Leads (displayed as Candidates in Zoho) that are not Placed or Hired.
+        The "Vault Candidates" view shows all available candidates.
         Applies optional date range and owner filters.
-        Sorted ascending by Date_Published_to_Vault (oldest first).
         """
         try:
-            # Build search criteria
+            # Get field names from environment variables
+            status_field = os.getenv("ZCAND_STATUS_FIELD", "Candidate_Status")
+            published_field = os.getenv("ZCAND_FIELD_PUBLISHED", "Publish_to_Vault")
+            
+            # Build search criteria - get all candidates not placed/hired and published to vault
             criteria_parts = [
-                "(Publish_to_Vault:equals:true)",
-                "((Lead_Status:not_equals:Placed)and(Lead_Status:not_equals:Hired))"
+                f"(({status_field}:not_equals:Placed)and({status_field}:not_equals:Hired))"
             ]
+            
+            # Add published to vault filter
+            criteria_parts.append(f"({published_field}:equals:true)")
+            
+            # Use Date_Published_to_Vault field from environment variable
+            published_date_field = os.getenv("ZCAND_FIELD_PUBLISHED_DATE", "Date_Published_to_Vault")
             
             # Add date range filter if provided
             if from_date and to_date:
                 # Format dates for Zoho API (YYYY-MM-DD)
                 from_str = from_date.strftime("%Y-%m-%d")
                 to_str = to_date.strftime("%Y-%m-%d")
-                criteria_parts.append(f"(Date_Published_to_Vault:between:[{from_str},{to_str}])")
+                criteria_parts.append(f"({published_date_field}:between:[{from_str},{to_str}])")
             elif from_date:
                 from_str = from_date.strftime("%Y-%m-%d")
-                criteria_parts.append(f"(Date_Published_to_Vault:greater_equal:{from_str})")
+                criteria_parts.append(f"({published_date_field}:greater_equal:{from_str})")
             elif to_date:
                 to_str = to_date.strftime("%Y-%m-%d")
-                criteria_parts.append(f"(Date_Published_to_Vault:less_equal:{to_str})")
+                criteria_parts.append(f"({published_date_field}:less_equal:{to_str})")
             
             # Add owner filter if provided
             if owner:
@@ -1275,9 +1283,9 @@ class ZohoApiClient(ZohoClient):
             # Combine all criteria with AND
             search_criteria = "and".join(criteria_parts)
             
-            # Build sort order
-            sort_by = "Date_Published_to_Vault"
-            sort_order = "asc"
+            # Build sort order (using published date field)
+            sort_by = published_date_field
+            sort_order = "desc"
             
             # Make API request
             params = {
@@ -1288,7 +1296,9 @@ class ZohoApiClient(ZohoClient):
                 "per_page": limit
             }
             
-            response = self._make_request("GET", "Leads/search", params=params)
+            # Use Candidates module instead of Leads
+            module_name = os.getenv("ZCAND_MODULE", "Candidates")
+            response = self._make_request("GET", f"{module_name}/search", params=params)
             
             if response.get("data"):
                 candidates = response["data"]

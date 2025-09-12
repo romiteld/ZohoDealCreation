@@ -84,16 +84,16 @@ class EmailProcessingState(TypedDict):
 
 class ExtractionOutput(BaseModel):
     """Structured output for extraction step"""
-    candidate_name: Optional[str] = Field(default=None, description="Full name of the job candidate")
-    job_title: Optional[str] = Field(default=None, description="Specific role or position")
-    location: Optional[str] = Field(default=None, description="Geographical location for the role")
-    company_guess: Optional[str] = Field(default=None, description="Company name mentioned in email")
-    referrer_name: Optional[str] = Field(default=None, description="Name of the person sending the email or forwarder")
-    referrer_email: Optional[str] = Field(default=None, description="Email address of the referrer")
-    phone: Optional[str] = Field(default=None, description="Phone number if present")
-    email: Optional[str] = Field(default=None, description="Email address of the candidate if different from sender")
-    linkedin_url: Optional[str] = Field(default=None, description="LinkedIn profile URL if present")
-    notes: Optional[str] = Field(default=None, description="Additional context or notes from the email")
+    candidate_name: Optional[str] = Field(default=None, description="Full name of the job candidate ONLY - not the entire email content")
+    job_title: Optional[str] = Field(default=None, description="Specific job title or role ONLY - not description or full text")
+    location: Optional[str] = Field(default=None, description="City and/or state location ONLY - not full address")
+    company_guess: Optional[str] = Field(default=None, description="Company name ONLY - just the organization name")
+    referrer_name: Optional[str] = Field(default=None, description="Name of referrer ONLY - just first and last name")
+    referrer_email: Optional[str] = Field(default=None, description="Email address ONLY - in format user@domain.com")
+    phone: Optional[str] = Field(default=None, description="Phone number ONLY - just the digits and formatting")
+    email: Optional[str] = Field(default=None, description="Candidate email address ONLY - in format user@domain.com")
+    linkedin_url: Optional[str] = Field(default=None, description="LinkedIn URL ONLY - just the URL string")
+    notes: Optional[str] = Field(default=None, description="Brief summary or key points - max 200 characters")
 
 
 class CompanyResearch(BaseModel):
@@ -979,12 +979,25 @@ class EmailProcessingWorkflow:
             system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis.
             Extract key recruitment details from the email with high accuracy.
             
-            EXTRACTION GUIDELINES:
-            1. Extract information that is clearly stated or strongly implied in the email
-            2. Use reasonable inference for obvious cases (e.g., email domain often indicates company)
-            3. For names, accept variations (First Last, Last First, nicknames)
-            4. For locations, accept cities, states, regions, or "Remote"
-            5. Return "Unknown" (not null) when information is unclear but attempted
+            CRITICAL: EXTRACT ONLY THE SPECIFIC VALUE FOR EACH FIELD:
+            - candidate_name: ONLY the person's name (e.g., "John Smith") - NOT the entire email
+            - job_title: ONLY the job title (e.g., "Senior Developer") - NOT job descriptions
+            - location: ONLY the location (e.g., "New York, NY") - NOT full addresses
+            - company_guess: ONLY the company name (e.g., "Microsoft") - NOT descriptions
+            - phone: ONLY the phone number (e.g., "555-123-4567") - NOT other text
+            - email: ONLY the email address (e.g., "john@example.com") - NOT other text
+            - notes: Brief summary, max 200 characters
+            
+            CALENDLY EMAIL SPECIAL RULES:
+            - For Calendly scheduling emails, look for:
+              * "Invitee:" followed by the person's name - this is the CANDIDATE
+              * "Invitee Email:" followed by email - this is the candidate's EMAIL  
+              * Job title may be in the meeting title (e.g., "Recruiting Consultant Interview")
+              * Phone may be in "Questions:" section
+              * The person/company organizing the meeting is usually the REFERRER
+            - Example: "Invitee: Roy Janse" → candidate_name = "Roy Janse"
+            - Example: "Invitee Email: roy.janse@mariner.com" → email = "roy.janse@mariner.com"
+            - Example: Meeting title "Recruiting Consultant Interview" → job_title = "Recruiting Consultant"
             
             CRITICAL RULES FOR FORWARDED EMAILS:
             - Check if this is a forwarded email (look for "-----Original Message-----", "From:", "Date:", "Subject:", "Begin forwarded message:", etc.)
@@ -1000,29 +1013,24 @@ class EmailProcessingWorkflow:
             - Do NOT confuse the person sending the referral with the candidate being referred
             
             DATA EXTRACTION RULES:
-            - Extract information that is clearly stated or reasonably inferred from context
+            - Extract ONLY the specific value for each field
+            - NEVER extract the entire email content into a field
             - If information is unclear, return "Unknown" rather than null
-            - candidate_name: The person being discussed as a potential hire (NOT the referrer)
-            - referrer_name: The person who forwarded the email or made the introduction
-            - email: The CANDIDATE's email address (check signatures, From fields, Calendly links)
-            - phone: Extract from email body, signatures, or Calendly link parameters
-            - company_name: The CANDIDATE's current company (can infer from email domain if clear)
-            - location: City, state, region, or "Remote" (can infer from context like area codes)
-            
-            CALENDLY EXTRACTION:
-            - Look for Calendly URLs (calendly.com)
-            - Extract phone numbers from URL parameters (e.g., ?phone=123-456-7890)
-            - Extract email from URL parameters (e.g., ?email=john@example.com)
-            - Extract name from URL parameters (e.g., ?name=John+Doe)
+            - candidate_name: ONLY the name (e.g., "Roy Janse" not "Roy Janse Invitee Email: roy.janse@...")
+            - job_title: ONLY the title (e.g., "Recruiting Consultant" not "Recruiting Consult Invitee: Roy...")
+            - referrer_name: ONLY the name (e.g., "Daniel" not the whole email)
+            - email: ONLY email address in format user@domain.com
+            - phone: ONLY the phone number with standard formatting
+            - location: ONLY city/state (e.g., "Greenville, SC" not full address)
             
             EXAMPLES OF CORRECT EXTRACTION:
-            - If Kathy sends an email about Jerry Fetta: candidate=Jerry Fetta, referrer=Kathy
-            - If Steve forwards an email about a consultant: referrer=Steve, candidate=[person discussed in email]
-            - If phone/email not in email body but in Calendly link: extract from URL parameters
+            - Calendly: "Invitee: Roy Janse" → candidate_name = "Roy Janse" 
+            - Calendly: "Recruiting Consultant Interview" → job_title = "Recruiting Consultant"
+            - Regular: "Jerry Fetta from Austin" → candidate_name = "Jerry Fetta", location = "Austin"
             
             {learning_hints}
             
-            Be accurate but pragmatic. Use reasonable inference where appropriate.
+            Be accurate but extract ONLY the specific values, not entire paragraphs.
             Return "Unknown" for unclear fields rather than null."""
         
         user_prompt = f"""Analyze this recruitment email and extract the key details:
@@ -1063,7 +1071,99 @@ class EmailProcessingWorkflow:
             )
             
             result = json.loads(response.choices[0].message.content)
-            logger.info(f"Extraction completed (NEW): {result}")
+            
+            # Post-process to ensure we only have clean, short values
+            def clean_field(value, field_name=None, max_length=100):
+                """Clean and truncate field values to prevent entire email content"""
+                if not value or value == "Unknown" or value == "null" or value == "None":
+                    return None
+                    
+                # Convert to string and strip
+                value = str(value).strip()
+                
+                # Special handling for specific fields
+                if field_name == 'job_title':
+                    # Common patterns in job titles from Calendly
+                    if 'Recruiting Consult' in value:
+                        return 'Recruiting Consultant'
+                    # Remove everything after first newline
+                    if '\n' in value:
+                        value = value.split('\n')[0].strip()
+                    # Remove "Invitee:" prefix if present
+                    if 'Invitee:' in value:
+                        value = value.split('Invitee:')[0].strip()
+                        
+                elif field_name == 'candidate_name':
+                    # Extract just the name, not "Roy Janse Invitee Email: ..."
+                    if 'Invitee Email:' in value:
+                        value = value.split('Invitee Email:')[0].strip()
+                    # Remove everything after first newline
+                    if '\n' in value:
+                        value = value.split('\n')[0].strip()
+                    # Clean up "Invitee:" prefix
+                    if value.startswith('Invitee:'):
+                        value = value.replace('Invitee:', '').strip()
+                        
+                elif field_name in ['email', 'referrer_email']:
+                    # Extract just the email address
+                    import re
+                    email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', value)
+                    if email_match:
+                        return email_match.group(0)
+                        
+                elif field_name == 'phone':
+                    # Extract just the phone number
+                    import re
+                    phone_match = re.search(r'[\d\s\-\(\)\+\.]+', value)
+                    if phone_match:
+                        phone = phone_match.group(0).strip()
+                        # Ensure it's at least 10 digits
+                        digits = re.sub(r'\D', '', phone)
+                        if len(digits) >= 10:
+                            return phone[:30]
+                
+                # General cleanup for all fields
+                # If it contains multiple newlines or is too long, it's probably the whole email
+                if value.count('\n') > 2 or len(value) > max_length:
+                    # Try to extract just the first relevant part
+                    lines = value.split('\n')
+                    first_line = lines[0].strip()
+                    
+                    # Common patterns to extract from
+                    if ':' in first_line and len(first_line.split(':')[0]) < 20:
+                        # It's likely a label:value format
+                        return first_line.split(':', 1)[-1].strip()[:max_length]
+                    else:
+                        # Just take the first part up to max_length
+                        return first_line[:max_length]
+                
+                # Final length check
+                if len(value) > max_length:
+                    value = value[:max_length]
+                    
+                return value
+            
+            # Clean each field with appropriate max lengths
+            cleaned_result = {}
+            field_limits = {
+                'candidate_name': 50,
+                'job_title': 50,
+                'location': 50,
+                'company_guess': 50,
+                'referrer_name': 50,
+                'referrer_email': 100,
+                'phone': 30,
+                'email': 100,
+                'linkedin_url': 200,
+                'notes': 200  # Notes can be longer
+            }
+            
+            for field, limit in field_limits.items():
+                if field in result:
+                    cleaned_result[field] = clean_field(result.get(field), field, limit)
+            
+            result = cleaned_result
+            logger.info(f"Extraction completed (CLEANED): {result}")
             
             # Track extraction metrics if learning analytics is available
             if learning_analytics:
