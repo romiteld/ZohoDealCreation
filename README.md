@@ -35,7 +35,7 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 
 ## 🏗️ Comprehensive Architecture Overview
 
-> **Latest Updates (December 2025)**: 
+> **Latest Updates (September 2025)**: 
 > - **CRITICAL FIX**: Resolved async context manager issues causing "generator didn't stop after athrow()" errors
 > - Migrated from CrewAI to **LangGraph** for improved reliability and performance
 > - Added **OAuth Reverse Proxy Service** for centralized authentication and security
@@ -753,7 +753,7 @@ az containerapp ingress traffic set \
 
 ## 📝 Changelog
 
-### v3.2.0 (December 13, 2025)
+### v3.2.0 (September 13, 2025)
 - 🔥 **CRITICAL FIX** - Resolved "generator didn't stop after athrow()" async context manager issues
 - 🔧 **Database Connection Manager** - Removed @asynccontextmanager decorators causing nested generator problems
 - 🛠️ **Health Check Fix** - Fixed _perform_health_check to use manual acquire/release pattern
