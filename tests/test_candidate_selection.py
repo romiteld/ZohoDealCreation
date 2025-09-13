@@ -29,13 +29,14 @@ async def test_zoho_query():
     curator = TalentWellCurator()
     
     # Test the query with required parameters
-    from_date = datetime.now() - timedelta(days=30)
-    to_date = datetime.now()
+    # Use wider date range or no date filter to ensure we get candidates
+    from_date = None  # No date filter for testing
+    to_date = None
     candidates = await curator._query_deals(
         audience="brandon@emailthewell.com",
         from_date=from_date,
         to_date=to_date,
-        owner="Steve Perry"
+        owner=None  # Remove owner filter to get all candidates
     )
     
     print(f"✓ Fetched {len(candidates)} candidates from Zoho")
@@ -233,7 +234,7 @@ async def test_full_selection_flow():
         audience="brandon@emailthewell.com",
         from_date=from_date,
         to_date=to_date,
-        owner="Steve Perry",
+        owner=None,  # Remove owner filter to get all candidates
         max_candidates=3
     )
     

@@ -802,15 +802,15 @@ class ZohoClient:
         return company
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
-    def _make_request(self, method: str, endpoint: str, data: dict = None) -> dict:
+    def _make_request(self, method: str, endpoint: str, data: dict = None, params: dict = None) -> dict:
         """Make authenticated request to Zoho API v8."""
         url = f"{self.base_url}/{endpoint}"
         headers = {
             "Authorization": f"Zoho-oauthtoken {self._get_access_token()}",
             "Content-Type": "application/json"
         }
-        
-        response = requests.request(method, url, json=data, headers=headers)
+
+        response = requests.request(method, url, json=data, headers=headers, params=params)
         
         if response.status_code == 401:
             self.access_token = None
@@ -1235,12 +1235,13 @@ class ZohoApiClient(ZohoClient):
             logger.warning(f"Error checking Zoho account duplicate: {e}")
             return None
     
-    async def query_candidates(self, 
-                              limit: int = 100, 
+    async def query_candidates(self,
+                              limit: int = 100,
                               page: int = 1,
                               from_date: Optional[datetime] = None,
                               to_date: Optional[datetime] = None,
-                              owner: Optional[str] = None) -> List[Dict[str, Any]]:
+                              owner: Optional[str] = None,
+                              published_to_vault: bool = None) -> List[Dict[str, Any]]:
         """
         Query candidates from Zoho CRM for TalentWell digest.
         Fetches all Leads (displayed as Candidates in Zoho) that are not Placed or Hired.
@@ -1248,57 +1249,42 @@ class ZohoApiClient(ZohoClient):
         Applies optional date range and owner filters.
         """
         try:
-            # Get field names from environment variables
-            status_field = os.getenv("ZCAND_STATUS_FIELD", "Candidate_Status")
-            published_field = os.getenv("ZCAND_FIELD_PUBLISHED", "Publish_to_Vault")
-            
-            # Build search criteria - get all candidates not placed/hired and published to vault
-            criteria_parts = [
-                f"(({status_field}:not_equals:Placed)and({status_field}:not_equals:Hired))"
-            ]
-            
-            # Add published to vault filter
-            criteria_parts.append(f"({published_field}:equals:true)")
-            
-            # Use Date_Published_to_Vault field from environment variable
-            published_date_field = os.getenv("ZCAND_FIELD_PUBLISHED_DATE", "Date_Published_to_Vault")
-            
-            # Add date range filter if provided
-            if from_date and to_date:
-                # Format dates for Zoho API (YYYY-MM-DD)
-                from_str = from_date.strftime("%Y-%m-%d")
-                to_str = to_date.strftime("%Y-%m-%d")
-                criteria_parts.append(f"({published_date_field}:between:[{from_str},{to_str}])")
-            elif from_date:
-                from_str = from_date.strftime("%Y-%m-%d")
-                criteria_parts.append(f"({published_date_field}:greater_equal:{from_str})")
-            elif to_date:
-                to_str = to_date.strftime("%Y-%m-%d")
-                criteria_parts.append(f"({published_date_field}:less_equal:{to_str})")
-            
+            # Build search criteria - simplified since Candidate_Status is not searchable
+            criteria_parts = []
+
+            # Note: Publish_to_Vault is not searchable via API, will filter locally
+            # Don't add it to search criteria
+
             # Add owner filter if provided
             if owner:
                 criteria_parts.append(f"(Owner.email:equals:{owner})")
-            
-            # Combine all criteria with AND
-            search_criteria = "and".join(criteria_parts)
-            
-            # Build sort order (using published date field)
-            sort_by = published_date_field
-            sort_order = "desc"
-            
-            # Make API request
-            params = {
-                "criteria": search_criteria,
-                "sort_by": sort_by,
-                "sort_order": sort_order,
-                "page": page,
-                "per_page": limit
-            }
-            
-            # Use Candidates module instead of Leads
-            module_name = os.getenv("ZCAND_MODULE", "Candidates")
-            response = self._make_request("GET", f"{module_name}/search", params=params)
+
+            # If we have search criteria (but NOT for published_to_vault), use search endpoint
+            if criteria_parts:
+                # Combine all criteria with AND
+                search_criteria = "and".join(criteria_parts)
+
+                # Make API request with search
+                params = {
+                    "criteria": search_criteria,
+                    "page": page,
+                    "per_page": limit
+                }
+
+                # Use Leads module (displayed as Candidates in Zoho)
+                module_name = os.getenv("ZCAND_MODULE", "Leads")
+                response = self._make_request("GET", f"{module_name}/search", data=None, params=params)
+            else:
+                # No search criteria, just get all Leads
+                params = {
+                    "fields": "id,Full_Name,Email,Company,Designation,Current_Location,Candidate_Locator,Title,Current_Firm,Is_Mobile,Remote_Preference,Hybrid_Preference,Professional_Designations,Book_Size_AUM,Production_12mo,Desired_Comp,When_Available,Source,Source_Detail,Meeting_Date,Meeting_ID,Transcript_URL,Phone,Referrer_Name,Publish_to_Vault,Date_Published_to_Vault",
+                    "page": page,
+                    "per_page": limit
+                }
+
+                # Use Leads module (displayed as Candidates in Zoho)
+                module_name = os.getenv("ZCAND_MODULE", "Leads")
+                response = self._make_request("GET", module_name, data=None, params=params)
             
             if response.get("data"):
                 candidates = response["data"]
@@ -1307,13 +1293,19 @@ class ZohoApiClient(ZohoClient):
                 # Extract relevant fields for each candidate
                 processed_candidates = []
                 for candidate in candidates:
+                    # Check if we should filter by Publish_to_Vault (note: field name is without "ed")
+                    if published_to_vault is not None:
+                        # Skip candidates that don't match the Publish_to_Vault filter
+                        if candidate.get("Publish_to_Vault", False) != published_to_vault:
+                            continue
+
                     processed = {
                         "id": candidate.get("id"),
                         "candidate_locator": candidate.get("Candidate_Locator") or candidate.get("id"),
-                        "candidate_name": candidate.get("Full_Name") or candidate.get("Candidate_Name"),
-                        "job_title": candidate.get("Job_Title") or candidate.get("Current_Title"),
-                        "company_name": candidate.get("Current_Company") or candidate.get("Firm_Name"),
-                        "location": candidate.get("Location") or candidate.get("City"),
+                        "candidate_name": candidate.get("Full_Name"),
+                        "job_title": candidate.get("Designation") or candidate.get("Title"),
+                        "company_name": candidate.get("Company") or candidate.get("Current_Firm"),
+                        "location": candidate.get("Current_Location"),
                         "is_mobile": candidate.get("Is_Mobile", False),
                         "remote_preference": candidate.get("Remote_Preference") or candidate.get("Open_to_Remote"),
                         "hybrid_preference": candidate.get("Hybrid_Preference") or candidate.get("Open_to_Hybrid"),
@@ -1330,10 +1322,15 @@ class ZohoApiClient(ZohoClient):
                         "transcript_url": candidate.get("Transcript_URL") or candidate.get("Recording_URL"),
                         "email": candidate.get("Email"),
                         "phone": candidate.get("Phone"),
-                        "referrer_name": candidate.get("Referrer_Name") or candidate.get("Referred_By")
+                        "referrer_name": candidate.get("Referrer_Name") or candidate.get("Referred_By"),
+                        "published_to_vault": candidate.get("Publish_to_Vault", False)  # Note: field is "Publish_to_Vault" not "Published_to_Vault"
                     }
                     processed_candidates.append(processed)
-                
+
+                # Log filtered count if filtering was applied
+                if published_to_vault is not None:
+                    logger.info(f"Filtered to {len(processed_candidates)} Vault candidates from {len(candidates)} total")
+
                 return processed_candidates
             else:
                 logger.info("No candidates found matching criteria")

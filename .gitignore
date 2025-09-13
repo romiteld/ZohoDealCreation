@@ -212,3 +212,11 @@ lerna-debug.log*
 voice-ui/node_modules/
 voice-ui/temp/
 voice-ui/*.log
+# Brandon candidate reports
+brandon_*.html
+brandon_*.pdf
+
+# Debug files
+debug_*.py
+test_candidates_*.py
+html_to_pdf_converter.py
