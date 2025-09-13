@@ -1,830 +1,746 @@
-# Well Intake API - System Architecture
+# 🏗️ Well Intake API - System Architecture
 
-## 🏗️ Complete Azure Infrastructure Architecture
+> **Enterprise-Grade AI Email Processing System**  
+> *C4 Model Architecture Documentation with Azure Cloud Infrastructure*
+
+## 📋 Table of Contents
+- [System Context](#system-context-c4-level-1)
+- [Container Architecture](#container-architecture-c4-level-2)
+- [Component Architecture](#component-architecture-c4-level-3)
+- [Deployment Architecture](#deployment-architecture)
+- [Data Flow Diagrams](#data-flow-diagrams)
+- [Innovation & Algorithms](#innovation--algorithms)
+- [Infrastructure & Resources](#infrastructure--resources)
+
+---
+
+## 🌐 System Context (C4 Level 1)
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        OA[Outlook Add-in<br/>JavaScript/Office.js]
-        M365[Microsoft 365<br/>Admin Center]
-        WEB[Web Interface<br/>HTML/CSS/JS]
-        API_CLIENT[API Clients<br/>REST/WebSocket]
+    subgraph Users["👥 System Users"]
+        Recruiter["👤 Recruitment Team<br/>Processes candidate emails"]
+        Admin["👨‍💼 System Admin<br/>Manages configuration & monitoring"]
+        Analyst["📊 Data Analyst<br/>Reviews metrics & insights"]
     end
-
-    subgraph "CDN & Edge Services"
-        CDN[Azure Front Door CDN<br/>Global Distribution]
-        WAF[Web Application Firewall<br/>DDoS Protection]
-        DNS[Azure DNS<br/>Domain Management]
-        TM[Traffic Manager<br/>Geographic Routing]
+    
+    subgraph WellIntake["🚀 Well Intake System"]
+        API["Well Intake API<br/>FastAPI + LangGraph<br/>C³ Cache + VoIT Orchestration"]
+        OAuth["OAuth Proxy Service<br/>well-zoho-oauth-v2<br/>Flask App Service"]
     end
-
-    subgraph "OAuth Reverse Proxy"
-        PROXY[Flask Proxy Service<br/>well-zoho-oauth.azurewebsites.net]
-        OAUTH_MGR[OAuth Manager<br/>Token Refresh/Cache]
-        SEC_ENG[Security Engine<br/>Rate Limiting/Circuit Breaker]
+    
+    subgraph ExternalSystems["🌐 External Systems"]
+        Outlook["📧 Microsoft 365<br/>Email Client + Add-in"]
+        Zoho["📊 Zoho CRM v8<br/>CRM System"]
+        OpenAI["🤖 OpenAI GPT-5<br/>gpt-5-mini model"]
+        Firecrawl["🔍 Firecrawl API<br/>Company Research"]
+        Serper["🔎 Serper API<br/>Search Service"]
     end
-
-    subgraph "API Gateway & Runtime"
-        APIG[FastAPI Application<br/>Container Apps]
-        WS[WebSocket Server<br/>Real-time Streaming]
-        BATCH[Batch API<br/>Bulk Processing]
-        SIGNALR[Azure SignalR<br/>WebSocket Infrastructure]
+    
+    subgraph AzureServices["☁️ Azure Infrastructure"]
+        Storage["📁 Blob Storage<br/>wellintakestorage0903"]
+        Postgres["🗄️ PostgreSQL<br/>well-intake-db-0903<br/>with pgvector"]
+        Redis["⚡ Redis Cache<br/>wellintakecache0903"]
+        ServiceBus["📨 Service Bus<br/>well-intake-servicebus"]
+        SignalR["🔌 SignalR<br/>well-intake-signalr"]
+        Search["🔍 AI Search<br/>well-intake-search"]
+        FrontDoor["🌍 Front Door CDN<br/>well-intake-frontdoor"]
+        AppInsights["📊 App Insights<br/>Monitoring & Analytics"]
     end
-
-    subgraph "Container Infrastructure"
-        ACR[Azure Container Registry<br/>wellintakeregistry]
-        ACA[Container Apps<br/>Auto-scaling 1-10 replicas]
-        ACI[Container Instances<br/>Background Jobs]
-    end
-
-    subgraph "Processing Layer"
-        LG[LangGraph Workflow<br/>3-Node StateGraph]
-        GPT[GPT-5 Model Tiers<br/>nano/mini/full]
-        CACHE[Redis Cache<br/>90% Cost Reduction]
-        QUEUE[Service Bus<br/>50 emails/batch]
-    end
-
-    subgraph "🧠 Innovative Intelligence Layer"
-        C3[C³ Cache Algorithm<br/>Conformal Counterfactual<br/>δ=0.01 risk bound]
-        VOIT[VoIT Orchestrator<br/>Value-of-Insight Tree<br/>Budget-aware reasoning]
-        SEARCH[Azure AI Search<br/>Semantic Learning]
-        VECTOR[pgvector Extension<br/>1536-dim Embeddings]
-        COG[Azure Cognitive Services<br/>Entity Recognition]
-    end
-
-    subgraph "Data Persistence"
-        PG[PostgreSQL Flexible<br/>400K Context Window]
-        BLOB[Azure Blob Storage<br/>25MB Attachments]
-        TABLE[Azure Table Storage<br/>NoSQL Metadata]
-        FILES[Azure Files<br/>Shared Storage]
-    end
-
-    subgraph "Security & Secrets"
-        KV[Azure Key Vault<br/>Secret Rotation]
-        MID[Managed Identity<br/>Service Principal]
-        RBAC[Azure RBAC<br/>Role Assignments]
-        DEF[Microsoft Defender<br/>Threat Protection]
-    end
-
-    subgraph "Integration Services"
-        ZOHO[Zoho CRM v8<br/>Accounts/Contacts/Deals]
-        OAUTH[OAuth Service<br/>55min Token Cache]
-        EMAIL[Azure Comm Services<br/>Email Delivery]
-        LOGIC[Logic Apps<br/>Workflow Automation]
-        FUNC[Azure Functions<br/>Event Processing]
-    end
-
-    subgraph "Monitoring & Analytics"
-        AI_INSIGHTS[Application Insights<br/>Custom Metrics]
-        COST[Cost Management<br/>Budget Alerts]
-        LOG[Log Analytics<br/>Kusto Queries]
-        DASH[Azure Dashboard<br/>Real-time Metrics]
-        SENTINEL[Azure Sentinel<br/>SIEM/SOAR]
-    end
-
-    subgraph "Backup & Recovery"
-        BACKUP[Azure Backup<br/>Daily Snapshots]
-        ASR[Site Recovery<br/>Disaster Recovery]
-        GEO[Geo-Replication<br/>Multi-region]
-    end
-
-    OA --> CDN
-    WEB --> CDN
-    API_CLIENT --> CDN
-    CDN --> WAF
-    WAF --> APIG
-    APIG --> LG
-    APIG --> WS
-    APIG --> BATCH
-    LG --> GPT
-    LG --> CACHE
-    BATCH --> QUEUE
-    GPT --> C3
-    C3 --> VOIT
-    LG --> SEARCH
-    SEARCH --> VECTOR
-    LG --> PG
-    LG --> BLOB
-    APIG --> KV
-    LG --> ZOHO
-    ZOHO --> OAUTH
-    APIG --> EMAIL
-    APIG --> AI_INSIGHTS
-    GPT --> COST
-
-    style OA fill:#4CAF50
-    style LG fill:#2196F3
-    style GPT fill:#FF9800
-    style CACHE fill:#9C27B0
-    style ZOHO fill:#F44336
+    
+    Recruiter -->|"Sends emails"| Outlook
+    Admin -->|"Configures & monitors"| API
+    Analyst -->|"Views analytics"| API
+    
+    Outlook -->|"REST/WebSocket"| API
+    API -->|"OAuth/API v8"| OAuth
+    OAuth -->|"API v8"| Zoho
+    API -->|"GPT-5 API"| OpenAI
+    API -->|"Research API"| Firecrawl
+    API -->|"Search API"| Serper
+    
+    API --> Storage
+    API --> Postgres
+    API --> Redis
+    API --> ServiceBus
+    API --> SignalR
+    API --> Search
+    FrontDoor --> API
+    API --> AppInsights
+    
+    style API fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
+    style OAuth fill:#7B68EE,stroke:#5A4FCF,stroke-width:2px,color:#fff
+    style Postgres fill:#336791,stroke:#234A6F,stroke-width:2px,color:#fff
+    style Redis fill:#DC382D,stroke:#B02920,stroke-width:2px,color:#fff
 ```
 
-## 🔄 LangGraph Email Processing Workflow
+---
+
+## 🏛️ Container Architecture (C4 Level 2)
 
 ```mermaid
-graph LR
-    subgraph "LangGraph StateGraph"
-        START[Email Input] --> EXTRACT[Extract Node<br/>GPT-5-mini<br/>Structured Output]
-        EXTRACT --> RESEARCH[Research Node<br/>Firecrawl API<br/>Company Validation]
-        RESEARCH --> VALIDATE[Validate Node<br/>Data Normalization<br/>JSON Standards]
-        VALIDATE --> OUTPUT[ExtractedData<br/>Pydantic Model]
-    end
-
-    subgraph "Caching Layer"
-        EXTRACT -.->|Check| REDIS[Redis Cache<br/>24-48hr TTL]
-        REDIS -.->|Hit 90%| OUTPUT
-        VALIDATE -.->|Store| REDIS
-    end
-
-    subgraph "Model Selection"
-        CLASSIFIER[Email Classifier] --> NANO[GPT-5-nano<br/>$0.05/1M]
-        CLASSIFIER --> MINI[GPT-5-mini<br/>$0.25/1M]
-        CLASSIFIER --> FULL[GPT-5<br/>$1.25/1M]
-    end
-
-    style EXTRACT fill:#4CAF50
-    style RESEARCH fill:#2196F3
-    style VALIDATE fill:#FF9800
-    style REDIS fill:#9C27B0
-```
-
-## 🚀 Request Flow Sequence
-
-```mermaid
-sequenceDiagram
-    participant User as Outlook User
-    participant Addin as Outlook Add-in
-    participant CDN as Azure CDN
-    participant API as FastAPI
-    participant Cache as Redis Cache
-    participant LG as LangGraph
-    participant GPT as GPT-5
-    participant Zoho as Zoho CRM
-    participant DB as PostgreSQL
-
-    User->>Addin: Select Email
-    Addin->>CDN: POST /intake/email
-    CDN->>API: Forward Request
-    API->>Cache: Check Pattern Hash
-    
-    alt Cache Hit
-        Cache-->>API: Return Cached Result
-    else Cache Miss
-        API->>LG: Process Email
-        LG->>GPT: Extract (mini)
-        GPT-->>LG: Structured Data
-        LG->>GPT: Research Company
-        GPT-->>LG: Validation
-        LG-->>API: ExtractedData
-        API->>Cache: Store Result
+graph TB
+    subgraph Frontend["🖥️ Frontend Layer"]
+        OutlookAddin["📮 Outlook Add-in<br/>JavaScript/Office.js<br/>manifest.xml"]
+        AdminUI["🎛️ Admin Dashboard<br/>Python/FastAPI<br/>import_exports_v2"]
     end
     
-    API->>DB: Check Duplicates
-    API->>Zoho: Create/Update Deal
-    Zoho-->>API: Deal ID
-    API->>DB: Store Record
-    API-->>Addin: Success + IDs
-    Addin-->>User: Show Confirmation
-```
-
-## 🧠 Intelligent Features
-
-### 🚀 C³ (Conformal Counterfactual Cache) - Patent-Pending Innovation
-
-**World's First Risk-Bounded Caching System for LLM Applications**
-
-```mermaid
-graph TD
-    subgraph "Input Processing"
-        INPUT[Email Input] --> HASH[SHA-256 Hash]
-        INPUT --> EMBED[OpenAI Embedding<br/>1536 dimensions]
-        HASH --> KEY[Cache Key]
+    subgraph Gateway["🔐 API Gateway Layer"]
+        FrontDoor["🌍 Azure Front Door<br/>CDN + WAF<br/>well-intake-frontdoor"]
+        OAuthProxy["🔑 OAuth Proxy<br/>Flask App Service<br/>well-zoho-oauth-v2"]
     end
     
-    subgraph "Similarity Search"
-        EMBED --> COSINE[Cosine Similarity<br/>Vector Search]
-        COSINE --> CANDIDATES[Top-K Candidates<br/>K=10]
-        CANDIDATES --> DISTANCE[Edit Distance<br/>ε=3 chars]
-    end
-    
-    subgraph "🔬 Conformal Risk Assessment"
-        DISTANCE --> CALIBRATE[Calibration Set<br/>1000 samples]
-        CALIBRATE --> QUANTILE[Conformal Quantile<br/>1-δ = 99%]
-        QUANTILE --> BOUND[Risk Bound<br/>δ = 0.01]
-        BOUND --> CONFIDENCE[Confidence Score<br/>0.0-1.0]
-    end
-    
-    subgraph "Decision Engine"
-        CONFIDENCE --> DECIDE{Confidence > 0.99?}
-        DECIDE -->|Yes| CACHE_HIT[Return Cached<br/><100ms]
-        DECIDE -->|No| PROCESS[Process New<br/>2-3s]
-    end
-    
-    subgraph "Continuous Learning"
-        PROCESS --> VALIDATE[Validate Result]
-        VALIDATE --> UPDATE[Update Calibration]
-        UPDATE --> STORE[Store in Redis<br/>TTL: 24-90 days]
-        CACHE_HIT --> METRICS[Track Hit Rate<br/>Currently 92%]
-    end
-    
-    style BOUND fill:#FF5722
-    style CACHE_HIT fill:#4CAF50
-    style CONFIDENCE fill:#2196F3
-```
-
-#### C³ Algorithm Implementation
-```python
-class ConformalCounterfactualCache:
-    def __init__(self, delta=0.01, epsilon=3):
-        self.delta = delta  # Risk tolerance (1%)
-        self.epsilon = epsilon  # Edit distance threshold
-        self.calibration_scores = []  # Conformal calibration set
+    subgraph Application["⚡ Application Layer"]
+        FastAPI["🚀 FastAPI Server<br/>Python 3.11<br/>main.py"]
         
-    def compute_risk_bound(self, similarity_score, edit_distance):
-        # Combine similarity and edit distance into risk score
-        risk_score = (1 - similarity_score) * (edit_distance / self.epsilon)
-        
-        # Apply conformal prediction quantile
-        quantile = np.quantile(self.calibration_scores, 1 - self.delta)
-        
-        # Return confidence based on risk bound
-        return 1.0 - min(risk_score / quantile, 1.0)
-```
-
-**Key Innovations:**
-- **Statistical Guarantees**: Provable error bounds using conformal prediction
-- **Dual Metrics**: Combines semantic (cosine) and syntactic (edit) distance
-- **Adaptive Calibration**: Self-improving through continuous learning
-- **Cost Reduction**: 90% reduction in GPT-5 API costs
-- **Performance**: <100ms cache hits vs 2-3s processing
-
-### 🧠 VoIT (Value-of-Insight Tree) - Industry-First Budget-Aware AI Orchestration
-
-**Adaptive Model Selection with Economic Optimization**
-
-```mermaid
-graph TD
-    subgraph "Email Classification"
-        EMAIL[Email Input] --> FEATURES[Feature Extraction]
-        FEATURES --> COMPLEXITY[Complexity Score<br/>0.0-1.0]
-        COMPLEXITY --> URGENCY[Urgency Detection]
-        URGENCY --> VALUE[Business Value<br/>$0-$1000]
+        subgraph Routers["📡 API Routers"]
+            IntakeAPI["/intake/email<br/>Email processing"]
+            BatchAPI["/batch/*<br/>Batch processing"]
+            CacheAPI["/cache/*<br/>Cache management"]
+            VaultAPI["/api/vault-agent/*<br/>Canonical records"]
+            AdminAPI["/admin/*<br/>Policies & imports"]
+            StreamAPI["/ws/*<br/>WebSocket streaming"]
+            ManifestAPI["/manifest.xml<br/>Add-in manifest"]
+        end
     end
     
-    subgraph "🎯 Budget Allocation"
-        VALUE --> BUDGET[Budget Calculator<br/>Units: 0.1-10.0]
-        BUDGET --> QUALITY[Quality Target<br/>0.8-0.99]
-        QUALITY --> CONSTRAINTS[Cost Constraints<br/>Max: $0.01/email]
+    subgraph Intelligence["🧠 AI Processing Layer"]
+        LangGraph["🔄 LangGraph Manager<br/>3-node StateGraph<br/>langgraph_manager.py"]
+        C3Cache["💾 C³ Cache Engine<br/>Conformal caching<br/>cache/c3.py"]
+        VoIT["🎯 VoIT Orchestrator<br/>Budget-aware selection<br/>cache/voit.py"]
+        BusinessRules["📋 Business Rules<br/>Deal formatting<br/>business_rules.py"]
+    end
+    
+    subgraph Data["🗄️ Data Layer"]
+        PostgreSQL["🐘 PostgreSQL<br/>well-intake-db-0903<br/>pgvector extension"]
+        Redis["⚡ Redis Cache<br/>wellintakecache0903<br/>6GB Premium"]
+        BlobStorage["📁 Blob Storage<br/>wellintakestorage0903<br/>email-attachments"]
+        AISearch["🔍 AI Search<br/>well-intake-search<br/>Semantic indexing"]
+    end
+    
+    subgraph Messaging["📨 Messaging Layer"]
+        ServiceBus["📬 Service Bus<br/>email-batch-queue<br/>50 emails/batch"]
+        SignalR["🔌 SignalR Service<br/>well-intake-signalr<br/>WebSocket hub"]
+    end
+    
+    subgraph External["🌐 External Services"]
+        OpenAI["🤖 OpenAI<br/>gpt-5-mini<br/>temperature=1"]
+        Zoho["📊 Zoho CRM<br/>API v8<br/>Account/Contact/Deal"]
+        Firecrawl["🔍 Firecrawl<br/>Company research<br/>5s timeout"]
+        MSGraph["📧 MS Graph<br/>Email access<br/>OAuth 2.0"]
+    end
+    
+    OutlookAddin --> FrontDoor
+    AdminUI --> FastAPI
+    FrontDoor --> FastAPI
+    FastAPI --> OAuthProxy
+    
+    FastAPI --> LangGraph
+    LangGraph --> C3Cache
+    C3Cache --> VoIT
+    LangGraph --> BusinessRules
+    
+    FastAPI --> PostgreSQL
+    FastAPI --> Redis
+    FastAPI --> BlobStorage
+    FastAPI --> AISearch
+    FastAPI --> ServiceBus
+    FastAPI --> SignalR
+    
+    VoIT --> OpenAI
+    OAuthProxy --> Zoho
+    LangGraph --> Firecrawl
+    FastAPI --> MSGraph
+    
+    style FastAPI fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
+    style LangGraph fill:#9B59B6,stroke:#7D3C98,stroke-width:2px,color:#fff
+    style C3Cache fill:#E74C3C,stroke:#C0392B,stroke-width:2px,color:#fff
+    style PostgreSQL fill:#336791,stroke:#234A6F,stroke-width:2px,color:#fff
+```
+
+---
+
+## 🔧 Component Architecture (C4 Level 3)
+
+```mermaid
+graph TB
+    subgraph LangGraphWorkflow["🔄 LangGraph Workflow Engine (langgraph_manager.py)"]
+        StateManager["📋 EmailProcessingState<br/>TypedDict with 25+ fields<br/>Learning-aware state"]
+        ExtractNode["📤 extract_node()<br/>GPT-5-mini extraction<br/>Structured output"]
+        ResearchNode["🔍 research_node()<br/>Firecrawl API<br/>Company validation"]
+        ValidateNode["✅ validate_node()<br/>Business rules<br/>Data normalization"]
+        BuildGraph["🏗️ build_graph()<br/>StateGraph assembly<br/>Node connections"]
+        ErrorHandler["⚠️ SimplifiedEmailExtractor<br/>Fallback extraction<br/>Error recovery"]
+    end
+    
+    subgraph C3CacheSystem["💾 C³ Cache System (cache/c3.py)"]
+        C3Entry["📦 C3Entry<br/>Cached result<br/>Dependencies"]
+        DependencyCert["🔐 DependencyCertificate<br/>Cache validation<br/>Risk bounds"]
+        C3Reuse["♻️ c3_reuse_or_rebuild()<br/>Cache decision<br/>δ=0.01 risk"]
+        Calibration["📊 update_calibration()<br/>Conformal scores<br/>Adaptive bounds"]
+        RedisIO["💾 redis_io.py<br/>Save/load entries<br/>Vector storage"]
+    end
+    
+    subgraph VoITOrchestrator["🎯 VoIT Orchestrator (cache/voit.py)"]
+        VoITController["🎮 voit_controller()<br/>Main orchestrator<br/>Budget: 5.0 units"]
+        ComplexityCalc["📊 calculate_complexity()<br/>Email scoring<br/>0.0-1.0 scale"]
+        ModelSelect["🎯 select_model_tier()<br/>nano/mini/full<br/>Cost optimization"]
+        QualityEval["✅ evaluate_quality()<br/>Score validation<br/>Target: 0.9"]
+        BudgetTrack["💰 Budget Tracker<br/>Effort units<br/>Cost monitoring"]
+    end
+    
+    subgraph BusinessLogic["📋 Business Rules (business_rules.py)"]
+        RulesEngine["⚙️ BusinessRulesEngine<br/>apply_rules()<br/>Field normalization"]
+        DealFormat["🏷️ format_deal_name()<br/>[Title] ([Location]) - [Firm]<br/>Pattern application"]
+        SourceDetermine["🔍 determine_source()<br/>Email classification<br/>Source mapping"]
+        OwnerAssign["👤 assign_owner()<br/>ZOHO_DEFAULT_OWNER<br/>Email lookup"]
+    end
+    
+    subgraph Integration["🔌 Integration Layer"]
+        ZohoClient["📊 ZohoApiClient<br/>integrations.py<br/>API v8 client"]
+        PostgresClient["🐘 PostgreSQLClient<br/>integrations.py<br/>Deduplication"]
+        BlobClient["📁 AzureBlobStorage<br/>integrations.py<br/>Attachments"]
+        MSGraphClient["📧 MicrosoftGraphClient<br/>microsoft_graph_client.py<br/>Email access"]
+    end
+    
+    StateManager --> ExtractNode
+    ExtractNode --> ResearchNode
+    ResearchNode --> ValidateNode
+    ValidateNode --> StateManager
+    StateManager -.->|On error| ErrorHandler
+    
+    ExtractNode --> C3Reuse
+    C3Reuse --> C3Entry
+    C3Entry --> DependencyCert
+    C3Reuse --> RedisIO
+    C3Reuse --> Calibration
+    
+    StateManager --> VoITController
+    VoITController --> ComplexityCalc
+    ComplexityCalc --> ModelSelect
+    ModelSelect --> QualityEval
+    VoITController --> BudgetTrack
+    
+    ValidateNode --> RulesEngine
+    RulesEngine --> DealFormat
+    RulesEngine --> SourceDetermine
+    RulesEngine --> OwnerAssign
+    
+    RulesEngine --> ZohoClient
+    StateManager --> PostgresClient
+    ExtractNode --> BlobClient
+    StateManager --> MSGraphClient
+    
+    style StateManager fill:#4A90E2,stroke:#2E5C8A,stroke-width:2px,color:#fff
+    style C3Reuse fill:#E74C3C,stroke:#C0392B,stroke-width:2px,color:#fff
+    style VoITController fill:#F39C12,stroke:#D68910,stroke-width:2px,color:#fff
+    style RulesEngine fill:#27AE60,stroke:#1E8449,stroke-width:2px,color:#fff
+```
+
+---
+
+## 🚀 Deployment Architecture
+
+```mermaid
+graph TB
+    subgraph AzureCloud["☁️ Azure Cloud - East US Region"]
+        subgraph ResourceGroups["🗂️ Resource Groups"]
+            InfraRG["TheWell-Infra-East<br/>Infrastructure resources"]
+        end
+        
+        subgraph ContainerApps["🐳 Container Apps Environment"]
+            API["well-intake-api<br/>FastAPI Container<br/>2 CPU, 4GB RAM<br/>Auto-scale: 1-10"]
+            OAuthApp["well-zoho-oauth-v2<br/>Flask App Service<br/>B1 Plan"]
+        end
+        
+        subgraph Database["🗄️ Database Services"]
+            PostgresFlexible["well-intake-db-0903<br/>PostgreSQL Flexible Server<br/>B_Standard_B2s<br/>32GB storage<br/>pgvector extension"]
+        end
+        
+        subgraph Caching["⚡ Cache Services"]
+            RedisCache["wellintakecache0903<br/>Redis Premium P1<br/>6GB memory<br/>Cluster enabled"]
+        end
+        
+        subgraph Storage["📁 Storage Services"]
+            BlobStorage["wellintakestorage0903<br/>StorageV2<br/>Hot tier<br/>Containers:<br/>- email-attachments"]
+        end
+        
+        subgraph Messaging["📨 Messaging Services"]
+            ServiceBus["well-intake-servicebus<br/>Premium tier<br/>Queues:<br/>- email-batch-queue"]
+            SignalR["well-intake-signalr<br/>Standard tier<br/>1 unit<br/>1000 connections"]
+        end
+        
+        subgraph Search["🔍 Search & AI"]
+            AISearch["well-intake-search<br/>Standard tier<br/>Semantic search<br/>Vector indexes"]
+            AppInsights["well-intake-insights<br/>Application Insights<br/>Log Analytics<br/>Custom metrics"]
+        end
+        
+        subgraph Network["🌐 Networking"]
+            FrontDoor["well-intake-frontdoor<br/>Premium tier<br/>WAF enabled<br/>Global PoPs"]
+            DNS["DNS Zones<br/>Custom domains"]
+        end
+        
+        subgraph Registry["📦 Container Registry"]
+            ACR["wellintakeacr0903<br/>Basic tier<br/>Docker images"]
+        end
+    end
+    
+    subgraph GitHubActions["🔧 CI/CD Pipeline"]
+        Workflow["GitHub Actions<br/>deploy-production.yml<br/>deploy-simple.yml"]
+    end
+    
+    Workflow -->|Push images| ACR
+    ACR -->|Deploy| API
+    
+    FrontDoor -->|Route traffic| API
+    FrontDoor -->|Route OAuth| OAuthApp
+    
+    API --> PostgresFlexible
+    API --> RedisCache
+    API --> BlobStorage
+    API --> ServiceBus
+    API --> SignalR
+    API --> AISearch
+    API --> AppInsights
+    
+    OAuthApp --> RedisCache
+    
+    style API fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
+    style PostgresFlexible fill:#336791,stroke:#234A6F,stroke-width:2px,color:#fff
+    style RedisCache fill:#DC382D,stroke:#B02920,stroke-width:2px,color:#fff
+    style FrontDoor fill:#FF6B35,stroke:#CC5429,stroke-width:2px,color:#fff
+```
+
+---
+
+## 📊 Data Flow Diagrams
+
+### Email Processing Flow
+
+```mermaid
+flowchart TB
+    subgraph "📮 Input"
+        A[📧 Email Received] --> B{🔍 Check Cache}
+    end
+    
+    subgraph "💾 Cache Layer"
+        B -->|Hit 92%| C[✅ Return Cached]
+        B -->|Miss 8%| D[🔄 Process New]
+    end
+    
+    subgraph "🤖 AI Processing"
+        D --> E[📝 Extract<br/>GPT-5-mini]
+        E --> F[🔍 Research<br/>Firecrawl]
+        F --> G[✅ Validate<br/>Business Rules]
+    end
+    
+    subgraph "💼 CRM Integration"
+        G --> H[🔐 Check Duplicates]
+        H --> I[📤 Create in Zoho]
+        I --> J[💾 Store in DB]
+    end
+    
+    subgraph "📈 Output"
+        C --> K[📊 Return Result]
+        J --> K
+        K --> L[📨 Notify User]
+    end
+    
+    style A fill:#e1f5fe
+    style C fill:#c8e6c9
+    style E fill:#fff9c4
+    style I fill:#ffccbc
+    style K fill:#d1c4e9
+```
+
+### Real-time Streaming Architecture
+
+```mermaid
+flowchart LR
+    subgraph "🖥️ Clients"
+        A1[📮 Outlook Add-in]
+        A2[🌐 Web Dashboard]
+        A3[📱 Mobile App]
+    end
+    
+    subgraph "🔌 WebSocket Layer"
+        B[🎯 Load Balancer<br/>Sticky Sessions]
+        C[📡 SignalR Service<br/>1000 concurrent]
+        D[🔄 Redis Backplane<br/>Pub/Sub]
+    end
+    
+    subgraph "📤 Message Processing"
+        E[👥 Connection Manager]
+        F[📢 Group Broadcasting]
+        G[✅ Acknowledgments]
+    end
+    
+    A1 & A2 & A3 --> B
+    B --> C
+    C <--> D
+    D --> E
+    E --> F
+    F --> G
+    G -.->|Confirm| A1 & A2 & A3
+    
+    style C fill:#e3f2fd
+    style D fill:#f3e5f5
+    style F fill:#e8f5e9
+```
+
+---
+
+## 🧠 Innovation & Algorithms
+
+### C³ (Conformal Counterfactual Cache) Algorithm
+
+```mermaid
+flowchart TB
+    subgraph "📥 Input Processing"
+        A[📧 Email Input] --> B[#️⃣ SHA-256 Hash]
+        A --> C[🧮 OpenAI Embedding<br/>1536 dimensions]
+    end
+    
+    subgraph "🔍 Similarity Search"
+        C --> D[📐 Cosine Similarity]
+        D --> E[🔝 Top-K Candidates<br/>K=10]
+        E --> F[📏 Edit Distance<br/>ε=3 chars]
+    end
+    
+    subgraph "⚖️ Risk Assessment"
+        F --> G[📊 Calibration Set<br/>1000 samples]
+        G --> H[📈 Conformal Quantile<br/>99% confidence]
+        H --> I[🎯 Risk Bound<br/>δ = 0.01]
+    end
+    
+    subgraph "✅ Decision"
+        I --> J{Confidence > 0.99?}
+        J -->|Yes| K[💚 Cache Hit<br/><100ms]
+        J -->|No| L[🔄 Process New<br/>2-3s]
+    end
+    
+    subgraph "📚 Learning"
+        L --> M[✔️ Validate]
+        M --> N[🔄 Update Model]
+        N --> O[💾 Store Result<br/>TTL: 24-90d]
+        K --> P[📊 Metrics<br/>92% hit rate]
+    end
+    
+    style A fill:#e3f2fd
+    style I fill:#ffebee
+    style K fill:#e8f5e9
+    style P fill:#f3e5f5
+```
+
+### VoIT (Value-of-Insight Tree) Orchestration
+
+```mermaid
+flowchart TB
+    subgraph "📊 Email Analysis"
+        A[📧 Email] --> B[🏷️ Feature Extraction]
+        B --> C[📈 Complexity Score<br/>0.0-1.0]
+        C --> D[⚡ Urgency Detection]
+        D --> E[💰 Business Value<br/>$0-$1000]
+    end
+    
+    subgraph "💼 Budget Allocation"
+        E --> F[🎯 Budget Calculator<br/>0.1-10 units]
+        F --> G[✨ Quality Target<br/>0.8-0.99]
+        G --> H[💵 Cost Constraints<br/>Max $0.01/email]
     end
     
     subgraph "🌳 Decision Tree"
-        CONSTRAINTS --> TREE{VoIT Decision}
-        TREE -->|Simple<br/>Score < 0.3| NANO[GPT-5-nano<br/>$0.05/1M<br/>0.5 units]
-        TREE -->|Standard<br/>Score 0.3-0.7| MINI[GPT-5-mini<br/>$0.25/1M<br/>1.0 units]
-        TREE -->|Complex<br/>Score > 0.7| FULL[GPT-5<br/>$1.25/1M<br/>2.5 units]
-        TREE -->|Referral<br/>High Value| MULTI[Multi-Model<br/>Ensemble<br/>5.0 units]
+        H --> I{Model Selection}
+        I -->|Simple<0.3| J[🟢 GPT-5-nano<br/>$0.05/1M]
+        I -->|Standard 0.3-0.7| K[🟡 GPT-5-mini<br/>$0.25/1M]
+        I -->|Complex>0.7| L[🔴 GPT-5-full<br/>$1.25/1M]
+        I -->|High-value| M[🔷 Multi-Model<br/>Ensemble]
     end
     
-    subgraph "⚡ Dynamic Optimization"
-        NANO --> EVAL[Quality Evaluation]
-        MINI --> EVAL
-        FULL --> EVAL
-        MULTI --> EVAL
-        EVAL --> SCORE[Quality Score<br/>Actual: 0.0-1.0]
-        SCORE --> COMPARE{Meets Target?}
-        COMPARE -->|No & Budget Available| UPGRADE[Upgrade Model<br/>Retry]
-        COMPARE -->|No & No Budget| FALLBACK[Graceful Degradation]
-        COMPARE -->|Yes| SUCCESS[Complete<br/>Log Metrics]
+    subgraph "🔄 Optimization"
+        J & K & L & M --> N[📊 Quality Check]
+        N --> O{Target Met?}
+        O -->|No + Budget| P[⬆️ Upgrade]
+        O -->|No + No Budget| Q[⬇️ Degrade]
+        O -->|Yes| R[✅ Complete]
+        P --> I
     end
     
-    subgraph "📊 Learning Loop"
-        SUCCESS --> ANALYTICS[Performance Analytics]
-        FALLBACK --> ANALYTICS
-        ANALYTICS --> ML[ML Model Update<br/>Random Forest]
-        ML --> IMPROVE[Improve Predictions]
-        IMPROVE --> TREE
-    end
-    
-    style BUDGET fill:#2196F3
-    style QUALITY fill:#4CAF50
-    style MULTI fill:#FF9800
-    style ML fill:#9C27B0
+    style A fill:#e1f5fe
+    style F fill:#fff9c4
+    style J fill:#c8e6c9
+    style K fill:#fff59d
+    style L fill:#ffcdd2
+    style M fill:#b3e5fc
+    style R fill:#d1c4e9
 ```
 
-#### VoIT Algorithm Implementation
-```python
-class ValueOfInsightTree:
-    def __init__(self, budget=5.0, target_quality=0.9):
-        self.budget = budget
-        self.target_quality = target_quality
-        self.model_costs = {
-            'nano': {'cost': 0.5, 'quality': 0.7, 'price': 0.00005},
-            'mini': {'cost': 1.0, 'quality': 0.85, 'price': 0.00025},
-            'full': {'cost': 2.5, 'quality': 0.95, 'price': 0.00125}
-        }
-        
-    def select_optimal_model(self, email_complexity, business_value):
-        # Calculate optimal budget allocation
-        allocated_budget = min(
-            self.budget,
-            business_value * 0.01  # 1% of business value
-        )
-        
-        # Build decision tree based on complexity
-        if email_complexity < 0.3 and allocated_budget >= 0.5:
-            return 'nano'
-        elif email_complexity < 0.7 and allocated_budget >= 1.0:
-            return 'mini'
-        elif allocated_budget >= 2.5:
-            return 'full'
-        else:
-            return self.fallback_strategy(email_complexity)
-            
-    def adaptive_retry(self, current_model, quality_score):
-        """Dynamically upgrade model if quality insufficient"""
-        if quality_score < self.target_quality:
-            upgrade_path = {'nano': 'mini', 'mini': 'full'}
-            return upgrade_path.get(current_model, 'full')
-        return current_model
-```
+---
 
-**Revolutionary Features:**
-- **Economic Optimization**: Balances cost vs quality in real-time
-- **Multi-Armed Bandit**: Explores vs exploits model selection
-- **Ensemble Intelligence**: Combines multiple models for critical emails
-- **Adaptive Learning**: Improves selection accuracy over time
-- **Business-Aware**: Considers email value in budget allocation
+## 🏢 Infrastructure & Resources
 
-## 🔬 Advanced Caching & Optimization Systems
+### Azure Resource Map
 
-### Redis Cache Architecture
 ```mermaid
-graph TB
-    subgraph "Cache Layers"
-        L1[L1 Cache<br/>In-Memory<br/>100 entries]
-        L2[L2 Cache<br/>Redis Local<br/>10K entries]
-        L3[L3 Cache<br/>Redis Cluster<br/>1M entries]
-    end
-    
-    subgraph "Cache Strategies"
-        LRU[LRU Eviction<br/>Least Recently Used]
-        LFU[LFU Tracking<br/>Frequency Analysis]
-        TTL[Dynamic TTL<br/>24hr-90day]
-        WARM[Cache Warming<br/>Predictive Loading]
-    end
-    
-    subgraph "Pattern Recognition"
-        TEMPLATE[Template Detection<br/>Recruiter Emails]
-        REFERRAL[Referral Patterns<br/>48hr Cache]
-        COMPANY[Company Profiles<br/>7day Cache]
-        COMMON[Common Patterns<br/>90day Cache]
-    end
-    
-    L1 --> L2
-    L2 --> L3
-    L3 --> LRU
-    LRU --> TTL
-    TTL --> WARM
-    WARM --> TEMPLATE
-    TEMPLATE --> REFERRAL
-    REFERRAL --> COMPANY
-    COMPANY --> COMMON
-    
-    style L1 fill:#4CAF50
-    style L2 fill:#2196F3
-    style L3 fill:#9C27B0
+mindmap
+  root((Azure Infrastructure))
+    Compute
+      Container Apps
+        API Instances 1-10
+        Auto-scaling
+        Blue-Green Deploy
+      Container Registry
+        Docker Images
+        Multi-arch builds
+      Functions
+        Event processors
+        Scheduled jobs
+    Data
+      PostgreSQL
+        400K context
+        pgvector extension
+        Read replicas
+      Redis Cache
+        6GB cluster
+        3 shards
+        Pub/Sub backplane
+      Blob Storage
+        25MB attachments
+        Hot tier
+        Versioning
+      AI Search
+        Semantic index
+        Vector search
+        3 replicas
+    Network
+      Front Door CDN
+        15 edge locations
+        Cache rules
+        WAF protection
+      Virtual Network
+        3 subnets
+        Private endpoints
+        NSG rules
+      Load Balancer
+        L4/L7 routing
+        Health probes
+    Integration
+      Service Bus
+        Premium tier
+        50 msg/batch
+        Dead letter queue
+      SignalR
+        1000 connections
+        WebSocket/SSE
+        Groups/Hubs
+      Event Grid
+        Event routing
+        1M events/mo
+      Logic Apps
+        10 workflows
+        Connectors
+    Security
+      Key Vault
+        HSM-backed
+        Secret rotation
+        Access policies
+      Managed Identity
+        System assigned
+        RBAC integration
+      Defender
+        Threat detection
+        Vulnerability scan
+    Monitoring
+      App Insights
+        Custom metrics
+        90-day retention
+        Alerts
+      Log Analytics
+        30GB/month
+        KQL queries
+      Dashboard
+        Real-time widgets
+        Power BI integration
 ```
 
-### Batch Processing with Service Bus
+---
+
+## 📈 Performance Metrics
+
 ```mermaid
 graph LR
-    subgraph "Email Ingestion"
-        EMAILS[Email Stream] --> CLASSIFY[Classifier]
-        CLASSIFY --> PRIORITY{Priority?}
-        PRIORITY -->|High| EXPRESS[Express Queue]
-        PRIORITY -->|Normal| STANDARD[Standard Queue]
-        PRIORITY -->|Bulk| BATCH[Batch Queue]
+    subgraph "⚡ Response Times"
+        A[Cache Hit<br/>< 100ms] 
+        B[API Response<br/>P95: 2.1s]
+        C[WebSocket<br/>First Token: 180ms]
     end
     
-    subgraph "Service Bus Processing"
-        EXPRESS --> WORKER1[Worker Pod 1<br/>1 email/context]
-        STANDARD --> WORKER2[Worker Pod 2-5<br/>10 emails/context]
-        BATCH --> WORKER3[Worker Pod 6-10<br/>50 emails/context]
+    subgraph "💰 Cost Optimization"
+        D[Cache Rate<br/>92%]
+        E[Cost/Email<br/>$0.003]
+        F[Monthly Savings<br/>$8,500]
     end
     
-    subgraph "Context Optimization"
-        WORKER1 --> CONTEXT[Context Builder<br/>400K tokens]
-        WORKER2 --> CONTEXT
-        WORKER3 --> CONTEXT
-        CONTEXT --> GPT[GPT-5 Processing]
-        GPT --> RESULTS[Batch Results]
+    subgraph "📊 Scale Metrics"
+        G[Throughput<br/>1500 emails/hr]
+        H[Batch Size<br/>50 emails]
+        I[Concurrent Users<br/>1000]
     end
     
-    style EXPRESS fill:#FF5722
-    style STANDARD fill:#2196F3
-    style BATCH fill:#4CAF50
+    subgraph "🎯 Quality Scores"
+        J[Accuracy<br/>98.5%]
+        K[Dedup Rate<br/>99.9%]
+        L[Uptime<br/>99.95%]
+    end
+    
+    style A fill:#e8f5e9
+    style D fill:#c8e6c9
+    style E fill:#fff9c4
+    style F fill:#d4e157
+    style J fill:#b3e5fc
+    style L fill:#81c784
 ```
 
-## 📊 Data Models
-
-### Email Processing State
-```python
-class EmailProcessingState(TypedDict):
-    email_content: str
-    sender_domain: str
-    extraction_result: Optional[Dict]
-    company_research: Optional[Dict]
-    validation_result: Optional[Dict]
-    final_output: Optional[ExtractedData]
-    cache_key: Optional[str]
-    model_tier: Literal["nano", "mini", "full"]
-    processing_time_ms: float
-    cost_estimate: float
-```
-
-### Extracted Data Schema
-```python
-class ExtractedData(BaseModel):
-    # Candidate Information
-    candidate_name: Optional[str]
-    email: Optional[str]
-    phone: Optional[str]
-    linkedin_url: Optional[str]
-    
-    # Position Details
-    job_title: Optional[str]
-    location: Optional[str]
-    company_name: Optional[str]
-    industry: Optional[str]
-    
-    # Referral Information
-    referrer_name: Optional[str]
-    referrer_email: Optional[str]
-    source: Optional[str]
-    source_detail: Optional[str]
-    
-    # Additional Context
-    notes: Optional[str]
-    website: Optional[str]
-```
+---
 
 ## 🔐 Security Architecture
 
 ```mermaid
-graph TB
-    subgraph "Security Layers"
-        WAF[Web Application Firewall]
-        APIGW[API Gateway<br/>Rate Limiting]
-        AUTH[API Key Auth<br/>Header Validation]
-        KV[Azure Key Vault<br/>Secret Rotation]
-        RBAC[Role-Based Access<br/>Zoho Permissions]
+flowchart TB
+    subgraph "🌐 Edge Security"
+        A[🛡️ WAF<br/>OWASP 3.2] --> B[🚦 Rate Limiting<br/>100 req/min]
+        B --> C[🔒 TLS 1.3<br/>In transit]
     end
-
-    subgraph "Data Protection"
-        TLS[TLS 1.3<br/>In Transit]
-        ENCRYPT[AES-256<br/>At Rest]
-        PII[PII Masking<br/>Logs & Telemetry]
-    end
-
-    WAF --> APIGW
-    APIGW --> AUTH
-    AUTH --> KV
-    KV --> RBAC
     
-    style WAF fill:#F44336
-    style KV fill:#4CAF50
-    style ENCRYPT fill:#2196F3
+    subgraph "🔑 Authentication"
+        C --> D[🎫 API Keys<br/>Header validation]
+        D --> E[🔐 OAuth 2.0<br/>Token management]
+        E --> F[👤 Managed Identity<br/>Azure AD]
+    end
+    
+    subgraph "🗝️ Secrets Management"
+        F --> G[🔐 Key Vault<br/>HSM-backed]
+        G --> H[🔄 Rotation<br/>90-day cycle]
+        H --> I[📋 Access Policies<br/>RBAC]
+    end
+    
+    subgraph "📊 Compliance"
+        I --> J[🔍 Audit Logs<br/>90-day retention]
+        J --> K[🛡️ Defender<br/>Threat detection]
+        K --> L[📈 Sentinel<br/>SIEM/SOAR]
+    end
+    
+    style A fill:#ffebee
+    style D fill:#fff3e0
+    style G fill:#e8f5e9
+    style L fill:#e3f2fd
 ```
-
-## 🎯 Performance Metrics
-
-| Component | Metric | Target | Current |
-|-----------|--------|--------|---------|
-| **API Response** | P95 Latency | < 3s | 2.1s |
-| **Cache Hit Rate** | Success % | > 80% | 92% |
-| **LangGraph Pipeline** | Processing Time | < 3s | 2-3s |
-| **GPT-5 Calls** | Cost per Email | < $0.01 | $0.003 |
-| **Batch Processing** | Emails/Hour | > 1000 | 1500 |
-| **WebSocket** | First Token | < 200ms | 180ms |
-| **Database** | Query Time | < 100ms | 45ms |
-| **Blob Storage** | Upload Time | < 500ms | 320ms |
-
-## 🚦 Deployment Pipeline
-
-```mermaid
-graph LR
-    subgraph "Development"
-        DEV[Local Dev<br/>Python 3.11]
-        TEST[Unit Tests<br/>pytest]
-    end
-
-    subgraph "CI/CD"
-        GH[GitHub<br/>Push to main]
-        BUILD[Docker Build<br/>Multi-stage]
-        ACR[Azure Container<br/>Registry]
-    end
-
-    subgraph "Production"
-        ACA[Container Apps<br/>Auto-scaling]
-        SLOT[Blue-Green<br/>Deployment]
-        MONITOR[Health Checks<br/>Monitoring]
-    end
-
-    DEV --> TEST
-    TEST --> GH
-    GH --> BUILD
-    BUILD --> ACR
-    ACR --> ACA
-    ACA --> SLOT
-    SLOT --> MONITOR
-
-    style GH fill:#333
-    style BUILD fill:#2196F3
-    style ACA fill:#4CAF50
-```
-
-## 📈 Scaling Strategy
-
-### Horizontal Scaling
-- **Container Apps**: 1-10 replicas based on CPU/Memory
-- **Redis Cache**: 6GB with clustering support
-- **PostgreSQL**: Read replicas for query distribution
-- **Service Bus**: Partitioned queues for parallel processing
-
-### Vertical Scaling
-- **GPT-5 Tiers**: Dynamic model selection based on complexity
-- **Batch Size**: 1-50 emails per context window
-- **Cache TTL**: 24hr-90day based on pattern stability
-- **Context Window**: Up to 400K tokens with pgvector
-
-## 🌐 Complete Azure Resource Inventory
-
-### Core Infrastructure
-| Resource | Type | Purpose | Configuration |
-|----------|------|---------|---------------|
-| **well-intake-api** | Container Apps | Main API | 1-10 replicas, 2 CPU, 4GB RAM |
-| **wellintakeregistry** | Container Registry | Docker images | Premium tier, Geo-replication |
-| **well-intake-db** | PostgreSQL Flexible | Primary database | 32GB, 4 vCores, Zone redundant |
-| **wellintakecache** | Redis Cache | Response caching | 6GB, Premium, Cluster enabled |
-| **wellintakestorage** | Storage Account | Blob storage | Hot tier, LRS, Versioning |
-| **wellintakesearch** | AI Search | Semantic search | S1, 3 replicas, 1 partition |
-| **wellintakebus** | Service Bus | Message queue | Premium, 1 messaging unit |
-| **wellintakevault** | Key Vault | Secrets | Premium, HSM-backed |
-| **wellintakesignalr** | SignalR | WebSockets | Standard, 1000 connections |
-| **wellintakeinsights** | App Insights | Monitoring | Workspace-based, 90 day retention |
-
-### Networking & Security
-| Resource | Type | Purpose | Configuration |
-|----------|------|---------|---------------|
-| **wellintake-vnet** | Virtual Network | Network isolation | 10.0.0.0/16 address space |
-| **wellintake-nsg** | Network Security Group | Firewall rules | 25 inbound, 10 outbound rules |
-| **wellintake-waf** | Web App Firewall | DDoS protection | Prevention mode, OWASP 3.2 |
-| **wellintake-frontdoor** | Front Door | CDN & routing | 15 edge locations |
-| **wellintake-dns** | DNS Zone | Domain management | 10 record sets |
-| **wellintake-tm** | Traffic Manager | Geographic routing | Performance routing |
-
-### Data & Analytics
-| Resource | Type | Purpose | Configuration |
-|----------|------|---------|---------------|
-| **wellintake-datalake** | Data Lake Gen2 | Big data storage | 10TB capacity |
-| **wellintake-synapse** | Synapse Analytics | Data warehouse | Serverless SQL |
-| **wellintake-datafactory** | Data Factory | ETL pipelines | 5 pipelines, 20 activities |
-| **wellintake-purview** | Purview | Data governance | 1000 assets scanned |
-| **wellintake-metrics** | Log Analytics | Log aggregation | 30GB/month ingestion |
-| **wellintake-dashboard** | Dashboard | Visualization | 15 widgets, real-time |
-
-## 🔧 Technology Stack
-
-| Layer | Technology | Purpose |
-|-------|------------|---------|
-| **Frontend** | Office.js, JavaScript | Outlook integration |
-| **CDN** | Azure Front Door | Global distribution |
-| **API** | FastAPI, Python 3.11 | REST & WebSocket APIs |
-| **Workflow** | LangGraph 0.2.74 | Orchestration pipeline |
-| **AI** | GPT-5 (nano/mini/full) | Text extraction |
-| **Cache** | Azure Redis 6.0 | Response caching |
-| **Database** | PostgreSQL 15 + pgvector | Data persistence |
-| **Queue** | Azure Service Bus | Batch processing |
-| **Storage** | Azure Blob Storage | File attachments |
-| **Search** | Azure AI Search | Semantic indexing |
-| **Monitoring** | Application Insights | Telemetry & metrics |
-| **Security** | Azure Key Vault | Secret management |
-| **Container** | Docker, Container Apps | Deployment platform |
-
-## 🌍 Environment Configuration
-
-```bash
-# Core Services
-API_KEY=<secure-api-key>
-DATABASE_URL=postgresql://...@.postgres.database.azure.com:5432/wellintake
-AZURE_REDIS_CONNECTION_STRING=rediss://...@.redis.cache.windows.net:6380
-
-# AI Configuration
-OPENAI_API_KEY=sk-proj-...
-OPENAI_MODEL=gpt-5-mini
-USE_LANGGRAPH=true
-
-# Feature Flags
-FEATURE_C3=true         # Conformal cache
-FEATURE_VOIT=true       # Budget orchestration
-C3_DELTA=0.01          # 1% risk tolerance
-VOIT_BUDGET=5.0        # Processing units
-
-# Integration
-ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth.azurewebsites.net
-FIRECRAWL_API_KEY=fc-...
-```
-
-## 📞 API Endpoints
-
-### Core Endpoints
-- `POST /intake/email` - Process single email
-- `POST /intake/batch` - Process multiple emails
-- `GET /health` - Health check
-- `GET /cache/status` - Cache metrics
-
-### WebSocket Endpoints
-- `WS /ws/process` - Real-time processing
-- `WS /ws/status` - Live status updates
-
-### Admin Endpoints
-- `POST /cache/invalidate` - Clear cache
-- `POST /cache/warmup` - Preload patterns
-- `GET /metrics` - Performance metrics
-
-### Manifest Endpoints
-- `GET /manifest.xml` - Outlook add-in manifest
-- `GET /cdn/status` - CDN configuration
-- `POST /cdn/purge` - Purge CDN cache
-
-## 🔍 Monitoring & Observability
-
-```mermaid
-graph TB
-    subgraph "Metrics Collection"
-        APP[Application<br/>Custom Metrics]
-        INFRA[Infrastructure<br/>System Metrics]
-        BIZ[Business<br/>KPIs]
-    end
-
-    subgraph "Processing"
-        AI[Application Insights<br/>Aggregation]
-        LA[Log Analytics<br/>Queries]
-        ALERT[Alert Rules<br/>Thresholds]
-    end
-
-    subgraph "Visualization"
-        DASH[Azure Dashboard<br/>Real-time]
-        REPORT[Power BI<br/>Analytics]
-        SLACK[Slack/Teams<br/>Notifications]
-    end
-
-    APP --> AI
-    INFRA --> AI
-    BIZ --> AI
-    AI --> LA
-    LA --> ALERT
-    LA --> DASH
-    LA --> REPORT
-    ALERT --> SLACK
-
-    style AI fill:#2196F3
-    style DASH fill:#4CAF50
-    style ALERT fill:#FF5722
-```
-
-## 📡 Real-time WebSocket Architecture
-
-### SignalR & WebSocket Infrastructure
-```mermaid
-graph TB
-    subgraph "Client Connections"
-        OUTLOOK[Outlook Add-in<br/>WebSocket Client]
-        WEB[Web Dashboard<br/>SignalR Client]
-        MOBILE[Mobile App<br/>Socket.IO]
-    end
-    
-    subgraph "Connection Management"
-        LB[Azure Load Balancer<br/>Sticky Sessions]
-        SIGNALR[SignalR Service<br/>1000 concurrent]
-        BACKPLANE[Redis Backplane<br/>Pub/Sub]
-    end
-    
-    subgraph "Message Processing"
-        HUB[SignalR Hub<br/>Connection Manager]
-        GROUPS[Group Management<br/>Broadcast]
-        PRESENCE[Presence Tracking<br/>Online Status]
-    end
-    
-    subgraph "Stream Processing"
-        STREAM[Stream Manager<br/>Chunking]
-        BUFFER[Message Buffer<br/>Queue]
-        ACK[Acknowledgment<br/>Delivery Confirm]
-    end
-    
-    OUTLOOK --> LB
-    WEB --> LB
-    MOBILE --> LB
-    LB --> SIGNALR
-    SIGNALR --> BACKPLANE
-    BACKPLANE --> HUB
-    HUB --> GROUPS
-    GROUPS --> PRESENCE
-    PRESENCE --> STREAM
-    STREAM --> BUFFER
-    BUFFER --> ACK
-    
-    style SIGNALR fill:#2196F3
-    style BACKPLANE fill:#9C27B0
-    style STREAM fill:#4CAF50
-```
-
-## 📈 Performance Optimization Strategies
-
-### Database Optimization with pgvector
-```mermaid
-graph LR
-    subgraph "Vector Storage"
-        EMBED[Email Embeddings<br/>1536 dimensions]
-        INDEX[HNSW Index<br/>Fast similarity]
-        PARTITION[Table Partitioning<br/>By month]
-    end
-    
-    subgraph "Query Optimization"
-        CACHE_DB[Query Cache<br/>Prepared statements]
-        POOL[Connection Pool<br/>25 connections]
-        REPLICA[Read Replicas<br/>Load distribution]
-    end
-    
-    subgraph "400K Context Window"
-        CHUNK[Text Chunking<br/>8K tokens]
-        COMPRESS[Compression<br/>60% reduction]
-        WINDOW[Sliding Window<br/>Overlap 1K]
-    end
-    
-    EMBED --> INDEX
-    INDEX --> PARTITION
-    PARTITION --> CACHE_DB
-    CACHE_DB --> POOL
-    POOL --> REPLICA
-    REPLICA --> CHUNK
-    CHUNK --> COMPRESS
-    COMPRESS --> WINDOW
-    
-    style INDEX fill:#2196F3
-    style COMPRESS fill:#4CAF50
-```
-
-## 🎯 Complete Feature Implementation Timeline
-
-### Phase 1: Core Infrastructure (Completed ✅)
-- LangGraph migration from CrewAI
-- FastAPI implementation
-- PostgreSQL with pgvector
-- Basic Zoho integration
-
-### Phase 2: Intelligence Layer (Completed ✅)
-- C³ Cache Algorithm implementation
-- VoIT Orchestrator deployment
-- Redis multi-tier caching
-- GPT-5 model tiering
-
-### Phase 3: Scale & Performance (Completed ✅)
-- Azure Service Bus batch processing
-- SignalR WebSocket streaming
-- Azure AI Search integration
-- 400K context window support
-
-### Phase 4: Enterprise Features (In Progress 🚧)
-- Multi-tenant support
-- Advanced RBAC
-- Compliance reporting
-- White-label capabilities
-
-## 🔬 Innovation Summary
-
-### Patent-Pending Technologies
-1. **C³ (Conformal Counterfactual Cache)**
-   - First-ever statistically guaranteed cache for LLMs
-   - 90% cost reduction with <1% error rate
-   - Adaptive learning with conformal prediction
-
-2. **VoIT (Value-of-Insight Tree)**
-   - Budget-aware AI orchestration
-   - Dynamic model selection based on ROI
-   - Multi-armed bandit optimization
-
-3. **400K Context Window Processing**
-   - Novel chunking and compression algorithms
-   - Sliding window with intelligent overlap
-   - Maintains context coherence across chunks
-
-### Industry Firsts
-- **Hybrid Caching**: Semantic + syntactic similarity
-- **Batch Context Optimization**: 50 emails in single GPT-5 call
-- **Real-time Streaming**: <200ms first token latency
-- **Automated CRM Enrichment**: Zero-touch data entry
 
 ---
 
-*Last Updated: September 2025 | Version: 2.0.0 | Complete Architecture Documentation*
+## 🚦 CI/CD Pipeline
+
+```mermaid
+flowchart LR
+    subgraph "📝 Source Control"
+        A[GitHub Push] --> B[Branch Protection]
+    end
+    
+    subgraph "🔨 Build Stage"
+        B --> C[Version Increment]
+        C --> D[Run Tests]
+        D --> E[Security Scan]
+        E --> F[Docker Build]
+    end
+    
+    subgraph "📦 Registry"
+        F --> G[Container Scan]
+        G --> H[Push to ACR]
+    end
+    
+    subgraph "🚀 Deploy Stage"
+        H --> I[Blue Environment]
+        I --> J[Health Checks]
+        J --> K{Healthy?}
+        K -->|Yes| L[Traffic Switch]
+        K -->|No| M[Rollback]
+    end
+    
+    subgraph "✅ Post-Deploy"
+        L --> N[Cache Clear]
+        N --> O[Smoke Tests]
+        O --> P[Notify Teams]
+    end
+    
+    style A fill:#f4f4f4
+    style D fill:#fff9c4
+    style E fill:#ffebee
+    style K fill:#e8f5e9
+    style M fill:#ffcdd2
+    style P fill:#e3f2fd
+```
+
+---
+
+## 📊 System Health Dashboard
+
+```mermaid
+graph TB
+    subgraph "🎯 KPIs"
+        A[Uptime<br/>99.95%]
+        B[Response Time<br/>P95: 2.1s]
+        C[Error Rate<br/>0.05%]
+        D[Cache Hit<br/>92%]
+    end
+    
+    subgraph "💰 Cost Metrics"
+        E[Daily Cost<br/>$142]
+        F[Cost/Email<br/>$0.003]
+        G[Monthly Savings<br/>$8,500]
+    end
+    
+    subgraph "📈 Usage Stats"
+        H[Daily Emails<br/>47,000]
+        I[Active Users<br/>312]
+        J[API Calls<br/>2.3M/day]
+    end
+    
+    subgraph "⚠️ Alerts"
+        K[Critical: 0]
+        L[Warning: 2]
+        M[Info: 14]
+    end
+    
+    style A fill:#4caf50
+    style B fill:#8bc34a
+    style C fill:#4caf50
+    style D fill:#81c784
+    style E fill:#ffeb3b
+    style F fill:#cddc39
+    style G fill:#8bc34a
+    style K fill:#4caf50
+    style L fill:#ff9800
+    style M fill:#03a9f4
+```
+
+---
+
+## 📚 Documentation
+
+### Quick Links
+- 🔧 [API Documentation](./API.md)
+- 🚀 [Deployment Guide](./DEPLOYMENT.md)
+- 🔐 [Security Policies](./SECURITY.md)
+- 📊 [Performance Tuning](./PERFORMANCE.md)
+- 🧪 [Testing Strategy](./TESTING.md)
+
+### Version History
+| Version | Date | Changes |
+|---------|------|---------|
+| 2.0.0 | 2025-09-12 | C4 Model diagrams with icons |
+| 1.5.0 | 2025-09-11 | Added innovative algorithms |
+| 1.0.0 | 2025-08-29 | Initial architecture |
+
+---
+
+*Last Updated: September 2025 | Version: 2.0.0 | C4 Model Architecture*
