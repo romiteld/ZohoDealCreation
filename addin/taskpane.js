@@ -29,13 +29,13 @@ window.testInitialization = function() {
     console.log('Office.context:', Office?.context);
     console.log('Office.context.mailbox:', Office?.context?.mailbox);
     console.log('Office.context.mailbox.item:', Office?.context?.mailbox?.item);
-    
+
     // Test getting email data
     if (Office?.context?.mailbox?.item) {
         const item = Office.context.mailbox.item;
         console.log('Email subject:', item.subject);
         console.log('From:', item.from);
-        
+
         // Try to get body
         item.body.getAsync(Office.CoercionType.Text, (result) => {
             console.log('Body result status:', result.status);
@@ -44,13 +44,13 @@ window.testInitialization = function() {
     } else {
         console.log('No email item available');
     }
-    
+
     // Check DOM elements
     console.log('DOM Elements:');
     console.log('- previewForm:', !!document.getElementById('previewForm'));
     console.log('- loadingState:', !!document.getElementById('loadingState'));
     console.log('- candidateName:', !!document.getElementById('candidateName'));
-    
+
     // Try to manually show the form with test data
     const testData = {
         candidateName: 'Test Candidate',
@@ -60,16 +60,78 @@ window.testInitialization = function() {
         referrerName: 'Test Referrer',
         source: 'Email Inbound'
     };
-    
+
     console.log('Populating form with test data...');
     populateForm(testData);
-    
+
     // Show the form
     document.getElementById('loadingState').style.display = 'none';
     document.getElementById('previewForm').style.display = 'block';
     document.getElementById('footer').style.display = 'flex';
-    
+
     console.log('Test complete - check if form is visible now');
+};
+
+// Test function to validate field population with various data types
+window.testFieldPopulation = function() {
+    console.log('=== TEST FIELD POPULATION ===');
+
+    // Test with various problematic inputs
+    const testCases = [
+        {
+            name: 'Normal string data',
+            data: {
+                candidateName: 'John Doe',
+                candidateEmail: 'john@example.com',
+                jobTitle: 'Senior Developer'
+            }
+        },
+        {
+            name: 'Object data (should be rejected)',
+            data: {
+                candidateName: { first: 'John', last: 'Doe' },
+                candidateEmail: 'john@example.com',
+                jobTitle: 'Senior Developer'
+            }
+        },
+        {
+            name: 'Array data (should be rejected)',
+            data: {
+                candidateName: ['John', 'Doe'],
+                candidateEmail: 'john@example.com',
+                jobTitle: 'Senior Developer'
+            }
+        },
+        {
+            name: 'Full API response object (malformed)',
+            data: {
+                candidateName: {
+                    status: 'success',
+                    candidate_name: 'John Doe',
+                    candidate_email: 'john@example.com'
+                }
+            }
+        }
+    ];
+
+    testCases.forEach((testCase, index) => {
+        console.log(`\n--- Test Case ${index + 1}: ${testCase.name} ---`);
+        try {
+            populateForm(testCase.data);
+
+            // Check what was actually set
+            const candidateField = document.getElementById('candidateName');
+            const emailField = document.getElementById('candidateEmail');
+
+            console.log('Candidate Name field value:', candidateField?.value);
+            console.log('Candidate Email field value:', emailField?.value);
+
+        } catch (error) {
+            console.error('Error in test case:', error);
+        }
+    });
+
+    console.log('\n=== TEST COMPLETE ===');
 };
 
 // Test API connectivity function (health check only, no dummy data)
@@ -358,7 +420,7 @@ async function extractAndPreview() {
                 console.log('Full API response:', response);
                 console.log('Response structure:', Object.keys(response));
                 console.log('Response type:', typeof response);
-                
+
                 // The API might return data in different formats
                 let extracted = null;
                 if (response.extracted) {
@@ -367,34 +429,54 @@ async function extractAndPreview() {
                 } else if (response.data) {
                     extracted = response.data;
                     console.log('Found data in response.data');
-                } else if (response.candidate_name || response.job_title) {
-                    // Direct response
+                } else if (response.candidate_name || response.job_title || response.candidateName || response.jobTitle) {
+                    // Direct response with candidate fields
                     extracted = response;
                     console.log('Using direct response');
                 } else {
                     console.error('Unexpected response structure:', response);
                     console.log('Available keys in response:', Object.keys(response));
-                    // Try to use whatever we got
-                    extracted = response || {};
+                    // Fall back to local extraction instead of using malformed response
+                    console.log('API response does not contain expected fields, using local extraction');
+                    extractedData = performLocalExtraction(currentEmailData);
+                    populateForm(extractedData);
+                    showPreviewForm();
+                    return;
                 }
                 
                 console.log('Using extracted data:', extracted);
-                
-                // Map the response to our expected format - handle nulls properly
+
+                // Validate extracted data is an object and not a primitive or array
+                if (!extracted || typeof extracted !== 'object' || Array.isArray(extracted)) {
+                    console.error('ERROR: Extracted data is not a valid object:', typeof extracted, extracted);
+                    extractedData = performLocalExtraction(currentEmailData);
+                    populateForm(extractedData);
+                    showPreviewForm();
+                    return;
+                }
+
+                // Map the response to our expected format - handle nulls properly and ensure values are strings
+                const getString = (value) => {
+                    if (typeof value === 'string' && value.trim() !== '') {
+                        return value.trim();
+                    }
+                    return '';
+                };
+
                 extractedData = {
-                    candidateName: extracted?.candidate_name || extracted?.candidateName || '',
-                    candidateEmail: extracted?.candidate_email || extracted?.candidateEmail || extracted?.email || '',
-                    candidatePhone: extracted?.candidate_phone || extracted?.candidatePhone || extracted?.phone || '',
-                    linkedinUrl: extracted?.linkedin_url || extracted?.linkedinUrl || '',
-                    jobTitle: extracted?.job_title || extracted?.jobTitle || '',
-                    location: extracted?.location || extracted?.candidateLocation || '',
-                    firmName: extracted?.company_name || extracted?.firmName || extracted?.firm_name || '',
-                    referrerName: extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName || '',
-                    referrerEmail: extracted?.referrer_email || extracted?.referrerEmail || currentEmailData?.from?.emailAddress || '',
-                    notes: extracted?.notes || '',
-                    calendlyUrl: extracted?.calendly_url || extracted?.calendlyUrl || '',
-                    source: extracted?.source || extracted?.Source || 'Email Inbound',
-                    sourceDetail: extracted?.source_detail || ''
+                    candidateName: getString(extracted?.candidate_name || extracted?.candidateName),
+                    candidateEmail: getString(extracted?.candidate_email || extracted?.candidateEmail || extracted?.email),
+                    candidatePhone: getString(extracted?.candidate_phone || extracted?.candidatePhone || extracted?.phone),
+                    linkedinUrl: getString(extracted?.linkedin_url || extracted?.linkedinUrl),
+                    jobTitle: getString(extracted?.job_title || extracted?.jobTitle),
+                    location: getString(extracted?.location || extracted?.candidateLocation),
+                    firmName: getString(extracted?.company_name || extracted?.firmName || extracted?.firm_name),
+                    referrerName: getString(extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName),
+                    referrerEmail: getString(extracted?.referrer_email || extracted?.referrerEmail || currentEmailData?.from?.emailAddress),
+                    notes: getString(extracted?.notes),
+                    calendlyUrl: getString(extracted?.calendly_url || extracted?.calendlyUrl),
+                    source: getString(extracted?.source || extracted?.Source) || 'Email Inbound',
+                    sourceDetail: getString(extracted?.source_detail)
                 };
                 
                 console.log('Mapped extractedData:', extractedData);
@@ -788,13 +870,28 @@ function populateForm(data) {
 }
 
 /**
- * Set form field value
+ * Set form field value with type checking
  */
 function setValue(fieldId, value) {
     const field = document.getElementById(fieldId);
     if (field) {
-        field.value = value || '';
-        console.log(`Set ${fieldId} to: ${value || '(empty)'}`);
+        // Ensure value is a string and not an object or array
+        let safeValue = '';
+        if (typeof value === 'string') {
+            safeValue = value.trim();
+        } else if (value !== null && value !== undefined) {
+            console.warn(`WARNING: Non-string value for ${fieldId}:`, typeof value, value);
+            // If it's an object, don't try to convert it - just use empty string
+            if (typeof value === 'object') {
+                console.error(`ERROR: Object passed to field ${fieldId}:`, value);
+                safeValue = '';
+            } else {
+                safeValue = String(value);
+            }
+        }
+
+        field.value = safeValue;
+        console.log(`Set ${fieldId} to: "${safeValue}" (type: ${typeof safeValue})`);
     } else {
         console.error(`ERROR: Element with ID '${fieldId}' not found in DOM!`);
         // List all available input elements for debugging
@@ -1135,43 +1232,43 @@ function showError(message) {
  * Handle Cancel button
  */
 function handleCancel() {
-    // Show confirmation message instead of using confirm dialog
-    showNotification('Closing task pane...', 'info');
-    
-    setTimeout(() => {
-        // Try to close the taskpane
-        if (window.parent && window.parent !== window) {
-            // If in an iframe, try to message parent
-            try {
-                Office.context.ui.messageParent(JSON.stringify({ action: 'cancel' }));
-            } catch (e) {
-                // If messageParent fails, try to close the window
-                window.close();
-            }
-        } else {
-            // Direct window close
-            window.close();
-        }
-    }, 500);
+    // Reset the form and go back to loading state
+    showNotification('Canceling...', 'info');
+
+    // Reset all form fields
+    document.getElementById('candidateName').value = '';
+    document.getElementById('candidateEmail').value = '';
+    document.getElementById('candidatePhone').value = '';
+    document.getElementById('linkedinUrl').value = '';
+    document.getElementById('jobTitle').value = '';
+    document.getElementById('location').value = '';
+    document.getElementById('firmName').value = '';
+    document.getElementById('referrerName').value = '';
+    document.getElementById('referrerEmail').value = '';
+    document.getElementById('notes').value = '';
+    document.getElementById('calendlyUrl').value = '';
+
+    // Hide the form and show loading state
+    document.getElementById('previewForm').style.display = 'none';
+    document.getElementById('footer').style.display = 'none';
+    document.getElementById('loadingState').style.display = 'block';
+
+    // Update loading message
+    updateLoadingMessage('Add-in ready. Select an email and try again.');
+
+    // Clear any extracted data
+    currentEmailData = null;
+    extractedData = null;
+    originalExtractedData = null;
+    currentExtractedData = null;
 }
 
 /**
  * Handle Close button
  */
 function handleClose() {
-    // Try to close the taskpane
-    if (window.parent && window.parent !== window) {
-        // If in an iframe, try to message parent
-        try {
-            Office.context.ui.messageParent(JSON.stringify({ action: 'close' }));
-        } catch (e) {
-            // If messageParent fails, try to close the window
-            window.close();
-        }
-    } else {
-        // Direct window close
-        window.close();
-    }
+    // Reset the taskpane to initial state
+    handleCancel();
 }
 
 /**

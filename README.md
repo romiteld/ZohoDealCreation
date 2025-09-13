@@ -753,6 +753,12 @@ az containerapp ingress traffic set \
 
 ## 📝 Changelog
 
+### v3.2.1 (September 13, 2025)
+- 🔧 **Telemetry Fix** - Updated Application Insights connection string to modern format
+- 📊 **Monitoring Restored** - Fixed 400 Bad Request errors in telemetry transmission
+- ✅ **Outlook Add-in Updated** - Fixed form field population and cancel button functionality
+- 🚀 **Cache Busting** - Updated manifest version to 2.0.0.3 for immediate availability
+
 ### v3.2.0 (September 13, 2025)
 - 🔥 **CRITICAL FIX** - Resolved "generator didn't stop after athrow()" async context manager issues
 - 🔧 **Database Connection Manager** - Removed @asynccontextmanager decorators causing nested generator problems
