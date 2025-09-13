@@ -1028,8 +1028,7 @@ async def health_check():
             "ai_search": "unknown"
         },
         "environment": os.getenv("ENVIRONMENT", "production"),
-        "no_sqlite": True,
-        "no_chroma": True
+        "no_sqlite": True
     }
     
     # Check Database Connection Manager (Agent #4)

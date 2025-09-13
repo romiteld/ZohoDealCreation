@@ -1,5 +1,5 @@
 """
-LangGraph-based email processing manager to replace CrewAI
+LangGraph-based email processing manager
 Using OpenAI agents with LangGraph orchestration
 """
 
@@ -1708,7 +1708,7 @@ class EmailProcessingWorkflow:
 
 # Backwards compatibility wrapper
 class EmailProcessingCrew:
-    """Compatibility wrapper to match CrewAI interface"""
+    """Email processing manager wrapper"""
     
     def __init__(self, serper_api_key: str = None):
         self.workflow = EmailProcessingWorkflow()
@@ -1728,7 +1728,7 @@ class EmailProcessingCrew:
             return asyncio.run(self.workflow.process_email(email_body, sender_domain))
     
     async def run_async(self, email_body: str, sender_domain: str) -> ExtractedData:
-        """Async method matching CrewAI interface"""
+        """Async processing method"""
         return await self.workflow.process_email(email_body, sender_domain)
 
     def _extract_calendly_url(self, text: str) -> str:

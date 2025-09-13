@@ -12,17 +12,10 @@ python-dotenv==1.0.0
 requests==2.31.0
 setuptools==70.0.0
 
-# SQLite3 fix for ChromaDB/CrewAI on Azure
-pysqlite3-binary==0.5.4
-
-# LangGraph for agent orchestration (replacing CrewAI)
+# LangGraph for agent orchestration
 langgraph==0.2.74
 langchain-core==0.3.29
 langchain-openai==0.2.14
-
-# CrewAI (deprecated - kept for fallback)
-# crewai==0.30.11
-# crewai-tools==0.2.6
 
 # OpenAI
 openai>=1.58.1
