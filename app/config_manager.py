@@ -10,6 +10,7 @@ This module provides centralized configuration management with:
 
 import os
 import logging
+import asyncio
 from dataclasses import dataclass, field
 from typing import Optional, Dict, Any, List, Union
 from datetime import datetime, timedelta
@@ -70,6 +71,31 @@ class DatabaseConfig:
     health_check_interval: int = 30
 
 @dataclass
+class ExtractionConfig:
+    """Email extraction and AI configuration"""
+    use_langgraph: bool = True
+    use_langextract: bool = False
+    langextract_model: str = "gpt-5-mini"
+    langextract_cache_enabled: bool = True
+    langextract_visualization: bool = False
+    langextract_source_grounding: bool = True
+    langextract_validation: bool = True
+    langextract_chunk_size: int = 2000
+    langextract_max_workers: int = 1
+    langextract_fallback_enabled: bool = True
+    openai_model: str = "gpt-5-mini"
+    openai_temperature: float = 1.0
+    firecrawl_timeout: int = 5
+    a_b_testing_enabled: bool = False
+    a_b_testing_langextract_percentage: int = 50
+    # Azure OpenAI Configuration
+    use_azure_openai: bool = True
+    azure_openai_endpoint: Optional[str] = None
+    azure_openai_api_key: Optional[str] = None
+    azure_openai_api_version: str = "2024-08-01-preview"
+    azure_openai_deployment: Optional[str] = None
+
+@dataclass
 class SecurityConfig:
     """Security and authentication configuration"""
     api_key: Optional[str] = None
@@ -101,10 +127,68 @@ class ConfigManager:
         self.services: Dict[str, ServiceConfig] = {}
         self.database: DatabaseConfig = DatabaseConfig()
         self.security: SecurityConfig = SecurityConfig()
+        self.extraction: ExtractionConfig = ExtractionConfig()
         self._initialized = False
+        self._security_module = None
+        
+        # Initialize security module for Key Vault access
+        self._init_security_module()
         
         # Load configuration from environment
         self._load_configuration()
+    
+    def _init_security_module(self):
+        """Initialize security module for Key Vault access"""
+        try:
+            from app.security_config import security
+            self._security_module = security
+            logger.info("Security module initialized for Key Vault access")
+        except ImportError as e:
+            logger.warning(f"Security module not available: {e}")
+            self._security_module = None
+    
+    async def _get_secret_async(self, secret_name: str, fallback_env_name: str = None) -> Optional[str]:
+        """
+        Get secret from Key Vault with fallback to environment variable
+        
+        Args:
+            secret_name: Name of secret in Key Vault (kebab-case)
+            fallback_env_name: Environment variable name for fallback
+            
+        Returns:
+            Secret value or None
+        """
+        if self._security_module:
+            try:
+                value = await self._security_module.get_secret(secret_name, use_cache=True)
+                if value:
+                    logger.debug(f"Retrieved secret {secret_name} from Key Vault")
+                    return value
+            except Exception as e:
+                logger.warning(f"Failed to retrieve secret {secret_name} from Key Vault: {e}")
+        
+        # Fallback to environment variable
+        env_name = fallback_env_name or secret_name.upper().replace('-', '_')
+        value = os.getenv(env_name)
+        if value:
+            logger.debug(f"Using environment variable {env_name} as fallback for {secret_name}")
+        return value
+    
+    def _get_secret(self, secret_name: str, fallback_env_name: str = None) -> Optional[str]:
+        """
+        Synchronous wrapper for secret retrieval - falls back to environment variable during initialization
+        
+        Args:
+            secret_name: Name of secret in Key Vault (kebab-case)
+            fallback_env_name: Environment variable name for fallback
+            
+        Returns:
+            Secret value or None
+        """
+        # During initialization, use environment variables directly
+        # Key Vault integration will be used at runtime via async methods
+        env_name = fallback_env_name or secret_name.upper().replace('-', '_')
+        return os.getenv(env_name)
     
     def _load_configuration(self):
         """Load configuration from environment variables"""
@@ -116,6 +200,9 @@ class ConfigManager:
         # Security configuration  
         self._configure_security()
         
+        # Extraction configuration
+        self._configure_extraction()
+        
         # Azure services configuration
         self._configure_azure_services()
         
@@ -124,7 +211,7 @@ class ConfigManager:
     
     def _configure_database(self):
         """Configure database with graceful fallbacks"""
-        database_url = os.getenv("DATABASE_URL")
+        database_url = self._get_secret("database-url", "DATABASE_URL")
         
         if database_url:
             self.database = DatabaseConfig(
@@ -147,7 +234,7 @@ class ConfigManager:
     def _configure_security(self):
         """Configure security settings"""
         self.security = SecurityConfig(
-            api_key=os.getenv("API_KEY"),
+            api_key=self._get_secret("api-key", "API_KEY"),
             api_key_rotation_days=int(os.getenv("API_KEY_ROTATION_DAYS", "30")),
             rate_limit_enabled=os.getenv("RATE_LIMIT_ENABLED", "true").lower() == "true",
             rate_limit_requests=int(os.getenv("RATE_LIMIT_REQUESTS", "100")),
@@ -164,6 +251,34 @@ class ConfigManager:
                 self.security.cors_origins = json.loads(cors_origins)
             except (json.JSONDecodeError, TypeError):
                 logger.warning("Invalid CORS_ORIGINS format, using defaults")
+    
+    def _configure_extraction(self):
+        """Configure extraction and AI settings"""
+        self.extraction = ExtractionConfig(
+            use_langgraph=os.getenv("USE_LANGGRAPH", "true").lower() == "true",
+            use_langextract=os.getenv("USE_LANGEXTRACT", "false").lower() == "true",
+            langextract_model=os.getenv("LANGEXTRACT_MODEL", "gpt-4o-mini"),
+            langextract_cache_enabled=os.getenv("LANGEXTRACT_CACHE_ENABLED", "true").lower() == "true",
+            langextract_visualization=os.getenv("LANGEXTRACT_VISUALIZATION", "false").lower() == "true",
+            langextract_source_grounding=os.getenv("LANGEXTRACT_SOURCE_GROUNDING", "true").lower() == "true",
+            langextract_validation=os.getenv("LANGEXTRACT_VALIDATION", "true").lower() == "true",
+            langextract_chunk_size=int(os.getenv("LANGEXTRACT_CHUNK_SIZE", "2000")),
+            langextract_max_workers=int(os.getenv("LANGEXTRACT_MAX_WORKERS", "1")),
+            langextract_fallback_enabled=os.getenv("LANGEXTRACT_FALLBACK_ENABLED", "true").lower() == "true",
+            openai_model=os.getenv("OPENAI_MODEL", "gpt-5-mini"),
+            openai_temperature=float(os.getenv("OPENAI_TEMPERATURE", "1.0")),
+            firecrawl_timeout=int(os.getenv("FIRECRAWL_TIMEOUT", "5")),
+            a_b_testing_enabled=os.getenv("AB_TESTING_ENABLED", "false").lower() == "true",
+            a_b_testing_langextract_percentage=int(os.getenv("AB_TESTING_LANGEXTRACT_PERCENTAGE", "50")),
+            # Azure OpenAI Configuration
+            use_azure_openai=os.getenv("USE_AZURE_OPENAI", "true").lower() == "true",
+            azure_openai_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
+            azure_openai_api_key=self._get_secret("azure-openai-key", "AZURE_OPENAI_KEY"),
+            azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+            azure_openai_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini")
+        )
+        
+        logger.info(f"Extraction configuration loaded - LangExtract: {self.extraction.use_langextract}, A/B Testing: {self.extraction.a_b_testing_enabled}")
     
     def _configure_azure_services(self):
         """Configure Azure services with optional dependencies"""
@@ -188,7 +303,7 @@ class ConfigManager:
         )
         
         # Azure Storage - Required for file attachments
-        storage_conn = os.getenv("AZURE_STORAGE_CONNECTION_STRING")
+        storage_conn = self._get_secret("azure-storage-connection-string", "AZURE_STORAGE_CONNECTION_STRING")
         self.services["storage"] = ServiceConfig(
             name="Azure Blob Storage",
             service_type=ServiceType.STORAGE,
@@ -338,6 +453,14 @@ class ConfigManager:
                 "url_configured": bool(self.database.url),
                 "pool_size": self.database.pool_size
             },
+            "extraction": {
+                "use_langgraph": self.extraction.use_langgraph,
+                "use_langextract": self.extraction.use_langextract,
+                "langextract_model": self.extraction.langextract_model,
+                "openai_model": self.extraction.openai_model,
+                "a_b_testing_enabled": self.extraction.a_b_testing_enabled,
+                "a_b_testing_percentage": self.extraction.a_b_testing_langextract_percentage
+            },
             "services": {},
             "summary": {
                 "total_services": len(self.services),
@@ -424,3 +547,8 @@ def get_security_config() -> SecurityConfig:
     """Get security configuration"""
     config_manager = get_config_manager()
     return config_manager.security
+
+def get_extraction_config() -> ExtractionConfig:
+    """Get extraction configuration"""
+    config_manager = get_config_manager()
+    return config_manager.extraction

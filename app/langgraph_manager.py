@@ -898,12 +898,63 @@ class EmailProcessingWorkflow:
         email_content = state['email_content']
         sender_domain = state['sender_domain']
         
+        # Check if LangExtract is enabled via configuration
+        from app.config_manager import get_extraction_config
+        extraction_config = get_extraction_config()
+        use_langextract = extraction_config.use_langextract
+        
         # Preprocess for forwarded emails
         processed_content, is_forwarded, forwarder_name = self.preprocess_forwarded_email(email_content)
         if is_forwarded:
             logger.info(f"Processing forwarded email. Forwarder: {forwarder_name}")
             # Use processed content for extraction
             email_content = processed_content
+        
+        # Try LangExtract first if enabled
+        if use_langextract:
+            try:
+                from app.langextract_email_extractor import get_langextract_extractor
+                
+                logger.info("Using LangExtract for structured data extraction")
+                langextract_extractor = get_langextract_extractor()
+                
+                extracted_data, metadata = await langextract_extractor.extract_from_email(
+                    email_content=email_content,
+                    sender_domain=sender_domain,
+                    use_cache=extraction_config.langextract_cache_enabled,
+                    enable_visualization=extraction_config.langextract_visualization
+                )
+                
+                # Convert ExtractedData to extraction result format
+                extraction_result = {
+                    "candidate_name": extracted_data.candidate_name,
+                    "job_title": extracted_data.job_title,
+                    "location": extracted_data.location,
+                    "company_name": extracted_data.company_name,
+                    "referrer_name": extracted_data.referrer_name,
+                    "referrer_email": extracted_data.referrer_email,
+                    "email": extracted_data.email,
+                    "phone": extracted_data.phone,
+                    "linkedin_url": extracted_data.linkedin_url,
+                    "website": extracted_data.website,
+                    "industry": extracted_data.industry,
+                    "notes": extracted_data.notes
+                }
+                
+                logger.info(f"LangExtract extraction completed with {metadata.get('total_extractions', 0)} fields")
+                
+                return {
+                    "extraction_result": extraction_result,
+                    "messages": [{"role": "assistant", "content": f"LangExtract extraction: {extraction_result}"}],
+                    "langextract_metadata": metadata
+                }
+                
+            except ImportError:
+                logger.warning("LangExtract not available, falling back to OpenAI extraction")
+            except Exception as e:
+                logger.warning(f"LangExtract extraction failed: {e}, falling back to OpenAI extraction")
+        
+        # Continue with original OpenAI-based extraction
         
         # Initialize learning services for enhanced extraction
         correction_service = None

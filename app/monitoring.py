@@ -164,33 +164,52 @@ class MonitoringService:
             "total_cost": total_cost
         }
     
-    @asynccontextmanager
-    async def track_gpt_request(self, operation_name: str = "gpt_request"):
+    def track_gpt_request(self, operation_name: str = "gpt_request"):
         """Context manager for tracking GPT-5-mini requests."""
-        with self.tracer.start_as_current_span(operation_name) as span:
-            start_time = time.time()
+        # Removed @asynccontextmanager to fix generator athrow() error
+        
+        class GPTTrackingWrapper:
+            """Custom async context manager to avoid generator issues"""
+            def __init__(self, monitor, op_name):
+                self.monitor = monitor
+                self.operation_name = op_name
+                self.span = None
+                self.start_time = None
+                self.span_context = None
+                
+            async def __aenter__(self):
+                self.span_context = self.monitor.tracer.start_as_current_span(self.operation_name)
+                self.span = self.span_context.__enter__()
+                self.start_time = time.time()
+                
+                # Set span attributes
+                self.span.set_attribute("model", self.monitor.openai_model)
+                self.span.set_attribute("operation", self.operation_name)
+                
+                return self.span
             
-            # Set span attributes
-            span.set_attribute("model", self.openai_model)
-            span.set_attribute("operation", operation_name)
-            
-            try:
-                yield span
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                try:
+                    if exc_type is None:
+                        # Record success metrics
+                        duration = time.time() - self.start_time
+                        self.monitor.gpt_request_counter.add(1, {"status": "success", "operation": self.operation_name})
+                        self.monitor.gpt_latency.record(duration, {"operation": self.operation_name})
+                        
+                        self.span.set_attribute("duration_seconds", duration)
+                        self.span.set_status(trace.Status(trace.StatusCode.OK))
+                    else:
+                        # Record error metrics
+                        self.monitor.gpt_request_counter.add(1, {"status": "error", "operation": self.operation_name})
+                        self.span.record_exception(exc_val)
+                        self.span.set_status(trace.Status(trace.StatusCode.ERROR, str(exc_val)))
+                finally:
+                    if self.span_context:
+                        self.span_context.__exit__(exc_type, exc_val, exc_tb)
                 
-                # Record success metrics
-                duration = time.time() - start_time
-                self.gpt_request_counter.add(1, {"status": "success", "operation": operation_name})
-                self.gpt_latency.record(duration, {"operation": operation_name})
-                
-                span.set_attribute("duration_seconds", duration)
-                span.set_status(trace.Status(trace.StatusCode.OK))
-                
-            except Exception as e:
-                # Record error metrics
-                self.gpt_request_counter.add(1, {"status": "error", "operation": operation_name})
-                span.record_exception(e)
-                span.set_status(trace.Status(trace.StatusCode.ERROR, str(e)))
-                raise
+                return False  # Don't suppress exceptions
+        
+        return GPTTrackingWrapper(self, operation_name)
     
     def track_email_processing(self, func):
         """Decorator for tracking email processing operations."""

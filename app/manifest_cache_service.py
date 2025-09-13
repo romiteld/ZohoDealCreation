@@ -100,7 +100,8 @@ class ManifestCacheService:
             "total_requests": 0,
             "a_b_test_distributions": {},
             "environment_usage": {},
-            "error_count": 0
+            "error_count": 0,
+            "last_warmup": None
         }
         
         # A/B testing configuration
@@ -963,6 +964,9 @@ class ManifestCacheService:
                     env_results["errors"] += 1
             
             results[environment.value] = env_results
+        
+        # Update last warmup time tracking
+        self.metrics["last_warmup"] = datetime.now().isoformat()
         
         logger.info(f"Cache warmup completed: {results}")
         return results

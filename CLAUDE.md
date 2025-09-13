@@ -54,6 +54,7 @@ zoho\Scripts\activate      # Windows
 
 # Install dependencies
 pip install -r requirements.txt
+pip install -r requirements-dev.txt  # Development dependencies
 
 # Run development server
 uvicorn app.main:app --reload --port 8000
@@ -65,10 +66,36 @@ python test_langgraph.py
 python test_container_deployment.py
 ```
 
+### Testing
+```bash
+# Run all tests
+pytest
+
+# Run specific test categories
+pytest -m unit                    # Unit tests only
+pytest -m integration            # Integration tests only
+pytest -m "unit and not slow"    # Fast unit tests only
+pytest -m critical               # Critical infrastructure tests
+
+# Run tests with coverage
+pytest --cov=app --cov-report=html
+
+# Run specific service tests
+pytest -m redis                  # Redis cache tests
+pytest -m postgresql             # Database tests
+pytest -m container_app          # Container App tests
+
+# Run single test file
+pytest tests/test_specific_file.py
+
+# Run with specific verbosity and stop on first failure
+pytest -v --maxfail=1
+```
+
 ### Deployment
 ```bash
 # Full deployment (DB migrations, Docker build, Azure deploy)
-./deploy.sh
+./scripts/deploy.sh
 
 # Quick Docker deployment
 docker build -t wellintakeregistry.azurecr.io/well-intake-api:latest .
@@ -78,16 +105,28 @@ az containerapp update --name well-intake-api --resource-group TheWell-Infra-Eas
 
 # View logs
 az containerapp logs show --name well-intake-api --resource-group TheWell-Infra-East --follow
+
+# GitHub Actions deployment (preferred)
+# Push to main branch triggers deploy-production.yml workflow
+# Manual workflow dispatch available in GitHub Actions tab
 ```
 
-### Testing
+### API Testing
 ```bash
 # Test Kevin Sullivan sample
-curl -X GET "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/test/kevin-sullivan" \
+curl -X GET "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/test/kevin-sullivan" \
   -H "X-API-Key: your-api-key" | python -m json.tool
 
 # Health check
-curl https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/health
+curl https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
+
+# Test cache status
+curl -X GET "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/cache/status" \
+  -H "X-API-Key: your-api-key"
+
+# Test VoIT status
+curl -X GET "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/vault-agent/status" \
+  -H "X-API-Key: your-api-key"
 ```
 
 ## Critical Constraints

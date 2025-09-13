@@ -368,26 +368,42 @@ class EnhancedDatabaseManager:
                 self.state.circuit_breaker_open = True
                 self.state.circuit_breaker_opens_at = datetime.utcnow()
     
-    @asynccontextmanager
-    async def get_connection(self):
+    def get_connection(self):
         """
         Get database connection with circuit breaker protection
         
-        Yields None if database is unavailable (fallback mode)
+        Returns context manager that yields None if database is unavailable (fallback mode)
         """
-        if self.state.fallback_mode or self.state.circuit_breaker_open or not self.pool:
-            yield None
-            return
+        # Removed @asynccontextmanager to avoid generator athrow() error
         
-        try:
-            async with self.pool.acquire() as conn:
-                yield conn
-                self.state.health.total_queries += 1
+        class EnhancedConnectionWrapper:
+            """Custom async context manager to avoid nested generator issues"""
+            def __init__(self, manager):
+                self.manager = manager
+                self.conn = None
                 
-        except Exception as e:
-            self.state.health.failed_queries += 1
-            logger.warning(f"Database query failed: {e}")
-            yield None
+            async def __aenter__(self):
+                if self.manager.state.fallback_mode or self.manager.state.circuit_breaker_open or not self.manager.pool:
+                    return None
+                
+                try:
+                    self.conn = await self.manager.pool.acquire()
+                    self.manager.state.health.total_queries += 1
+                    return self.conn
+                except Exception as e:
+                    self.manager.state.health.failed_queries += 1
+                    logger.warning(f"Database query failed: {e}")
+                    return None
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                if self.conn:
+                    try:
+                        await self.manager.pool.release(self.conn)
+                    except Exception as e:
+                        logger.warning(f"Failed to release connection: {e}")
+                return False  # Don't suppress exceptions
+        
+        return EnhancedConnectionWrapper(self)
     
     async def execute_query(
         self,

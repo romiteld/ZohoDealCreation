@@ -343,7 +343,7 @@ async def get_cache_status(
             total_manifests_cached=cache_manager.metrics["manifests_cached"],
             cache_hit_rate=redis_metrics.get("hit_rate", "0%"),
             redis_memory_used=redis_metrics.get("redis_memory_used", "N/A"),
-            last_warmup=None  # TODO: Track last warmup time
+            last_warmup=cache_manager.metrics.get("last_warmup")
         )
         
     except Exception as e:

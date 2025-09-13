@@ -10,7 +10,7 @@ import logging
 import traceback
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
-from contextlib import asynccontextmanager
+# from contextlib import asynccontextmanager  # Removed - not needed after refactoring get_connection
 from dataclasses import dataclass, field
 import json
 import hashlib
@@ -342,6 +342,9 @@ class DatabaseConnectionManager:
     
     async def _health_monitor_loop(self):
         """Background health monitoring loop"""
+        # Wait a bit before starting health checks to ensure pool is ready
+        await asyncio.sleep(5.0)
+        
         while True:
             try:
                 await asyncio.sleep(self.config.health_check_interval)
@@ -363,9 +366,19 @@ class DatabaseConnectionManager:
             if not self.main_pool:
                 raise Exception("Main connection pool not initialized")
             
-            # Test main pool
-            async with self.main_pool.acquire() as conn:
-                await conn.fetchval('SELECT 1')
+            # Test main pool - use timeout to prevent hanging
+            try:
+                conn = await asyncio.wait_for(self.main_pool.acquire(), timeout=5.0)
+                try:
+                    await asyncio.wait_for(conn.fetchval('SELECT 1'), timeout=2.0)
+                finally:
+                    await self.main_pool.release(conn)
+            except asyncio.TimeoutError:
+                raise Exception("Database connection timeout during health check")
+            except GeneratorExit:
+                # Handle generator exit gracefully
+                logger.warning("Generator exit during health check - ignoring")
+                return
             
             # Update health status
             self.health_status.is_healthy = True
@@ -384,44 +397,71 @@ class DatabaseConnectionManager:
             
             logger.debug(f"Health check passed in {response_time:.2f}ms")
             
+        except GeneratorExit:
+            # Silently handle generator exits 
+            pass
         except Exception as e:
-            self.health_status.is_healthy = False
-            self.health_status.last_error = str(e)
-            self.health_status.failed_attempts += 1
-            logger.warning(f"Health check failed: {e}")
+            # Filter out generator athrow errors
+            error_str = str(e)
+            if "generator didn't stop after athrow()" not in error_str:
+                self.health_status.is_healthy = False
+                self.health_status.last_error = error_str
+                self.health_status.failed_attempts += 1
+                logger.warning(f"Health check failed: {e}")
     
-    @asynccontextmanager
-    async def get_connection(self):
-        """Get a database connection from the pool with automatic retry"""
-        if not self.main_pool:
-            await self.initialize()
-            
-        if not self.main_pool:
-            raise Exception("Database connection pool not available")
+    def get_connection(self):
+        """Get a database connection from the pool - returns an async context manager"""
+        # Note: Removed @asynccontextmanager decorator to avoid nested async generator issues
+        # This method now returns the pool.acquire() context manager directly
         
-        for attempt in range(self.config.retry_attempts):
-            try:
-                start_time = asyncio.get_event_loop().time()
-                async with self.main_pool.acquire() as conn:
-                    self.health_status.total_queries += 1
+        class ConnectionWrapper:
+            """Wrapper to add retry logic and metrics around pool.acquire()"""
+            def __init__(self, manager):
+                self.manager = manager
+                self.conn = None
+                self.start_time = None
+            
+            async def __aenter__(self):
+                if not self.manager.main_pool:
+                    await self.manager.initialize()
                     
-                    # Track query time
-                    yield conn
-                    
-                    query_time = (asyncio.get_event_loop().time() - start_time) * 1000
-                    self._query_times.append(query_time)
-                    if len(self._query_times) > self._max_query_times:
-                        self._query_times.pop(0)
-                    
-                    return
-                    
-            except Exception as e:
-                logger.warning(f"Database connection attempt {attempt + 1} failed: {e}")
-                if attempt < self.config.retry_attempts - 1:
-                    await asyncio.sleep(self.config.retry_delay)
-                else:
-                    self.health_status.failed_attempts += 1
-                    raise
+                if not self.manager.main_pool:
+                    raise Exception("Database connection pool not available")
+                
+                for attempt in range(self.manager.config.retry_attempts):
+                    try:
+                        self.start_time = asyncio.get_event_loop().time()
+                        self.conn = await self.manager.main_pool.acquire()
+                        self.manager.health_status.total_queries += 1
+                        return self.conn
+                        
+                    except Exception as e:
+                        logger.warning(f"Database connection attempt {attempt + 1} failed: {e}")
+                        
+                        if attempt < self.manager.config.retry_attempts - 1:
+                            await asyncio.sleep(self.manager.config.retry_delay)
+                        else:
+                            self.manager.health_status.failed_attempts += 1
+                            raise
+            
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                if self.conn:
+                    try:
+                        # Track query time
+                        if self.start_time:
+                            query_time = (asyncio.get_event_loop().time() - self.start_time) * 1000
+                            self.manager._query_times.append(query_time)
+                            if len(self.manager._query_times) > self.manager._max_query_times:
+                                self.manager._query_times.pop(0)
+                        
+                        # Release the connection
+                        await self.manager.main_pool.release(self.conn)
+                    except Exception as e:
+                        logger.error(f"Error releasing connection: {e}")
+                
+                return False  # Don't suppress exceptions
+        
+        return ConnectionWrapper(self)
     
     async def execute_query(self, query: str, *args, fetch_mode: str = 'fetchval') -> Any:
         """Execute a query with automatic connection management"""

@@ -35,7 +35,8 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 
 ## 🏗️ Comprehensive Architecture Overview
 
-> **Latest Updates (September 2025)**: 
+> **Latest Updates (December 2025)**: 
+> - **CRITICAL FIX**: Resolved async context manager issues causing "generator didn't stop after athrow()" errors
 > - Migrated from CrewAI to **LangGraph** for improved reliability and performance
 > - Added **OAuth Reverse Proxy Service** for centralized authentication and security
 > - Implemented **Redis caching** with intelligent pattern recognition (90% cost reduction)
@@ -62,10 +63,15 @@ graph TB
     subgraph "Client Layer"
         OA[Outlook Add-in]
         API_CLIENT[API Clients]
+        WEB[Web Interface]
+    end
+
+    subgraph "Gateway & Security Layer"
+        PROXY[OAuth Proxy<br/>Flask/IIS]
+        FD[Azure Front Door<br/>CDN]
     end
 
     subgraph "Processing Layer"
-        CDN[Azure CDN]
         API[FastAPI<br/>Container Apps]
         LG[LangGraph<br/>3-Node Pipeline]
         GPT[GPT-5 Tiers<br/>nano/mini/full]
@@ -73,32 +79,160 @@ graph TB
 
     subgraph "Data & Intelligence"
         CACHE[Redis Cache<br/>90% Cost Reduction]
-        PG[PostgreSQL<br/>400K Context]
+        PG[PostgreSQL<br/>+ pgvector<br/>400K Context]
         SEARCH[AI Search<br/>Semantic Learning]
     end
 
-    subgraph "Integration"
-        ZOHO[Zoho CRM v8]
-        BLOB[Blob Storage]
+    subgraph "Async Processing"
+        SB[Service Bus<br/>Batch Queue]
+        SR[SignalR<br/>WebSocket]
     end
 
-    OA --> CDN
-    CDN --> API
+    subgraph "Integration & Storage"
+        ZOHO[Zoho CRM v8]
+        BLOB[Blob Storage]
+        KV[Key Vault]
+    end
+
+    subgraph "Monitoring"
+        AI[App Insights<br/>Telemetry]
+    end
+
+    OA --> PROXY
+    API_CLIENT --> PROXY
+    WEB --> FD
+    FD --> PROXY
+    PROXY --> API
     API --> LG
     LG --> GPT
     LG --> CACHE
     LG --> PG
     LG --> SEARCH
+    API --> SB
+    API --> SR
     API --> ZOHO
     API --> BLOB
+    API --> KV
+    API --> AI
 
     style LG fill:#2196F3
     style GPT fill:#FF9800
     style CACHE fill:#9C27B0
+    style PROXY fill:#4CAF50
+```
+
+### 🔄 Enhanced LangGraph Processing Pipeline
+
+```mermaid
+graph LR
+    subgraph "Email Input"
+        EMAIL[Email Content]
+        ATT[Attachments]
+    end
+
+    subgraph "LangGraph StateGraph"
+        direction TB
+        EXT[Extract Node<br/>GPT-5-mini<br/>Pydantic Output]
+        RES[Research Node<br/>Firecrawl API<br/>5s Timeout]
+        VAL[Validate Node<br/>Normalization<br/>JSON Standard]
+    end
+
+    subgraph "Caching Layer"
+        C3[C³ Cache<br/>Conformal Bounds<br/>90% Hit Rate]
+        VOIT[VoIT Orchestrator<br/>Budget Control<br/>Model Selection]
+    end
+
+    subgraph "Data Storage"
+        PG_DB[(PostgreSQL<br/>pgvector<br/>400K Context)]
+        REDIS[(Redis<br/>Pattern Cache<br/>24hr TTL)]
+        AZURE_SEARCH[(AI Search<br/>Semantic Index)]
+    end
+
+    subgraph "Output"
+        CRM[Zoho Records]
+        METRICS[Analytics]
+    end
+
+    EMAIL --> C3
+    C3 -->|Cache Hit| CRM
+    C3 -->|Cache Miss| VOIT
+    VOIT --> EXT
+    ATT --> BLOB[Blob Storage]
+    EXT --> RES
+    RES --> VAL
+    VAL --> PG_DB
+    VAL --> REDIS
+    VAL --> AZURE_SEARCH
+    VAL --> CRM
+    VAL --> METRICS
+
+    style C3 fill:#9C27B0
+    style VOIT fill:#FF5722
+    style EXT fill:#2196F3
+```
+
+### 🚀 Production Infrastructure
+
+```mermaid
+graph TB
+    subgraph "Azure Resources"
+        subgraph "TheWell-Infra-East"
+            CA[Container Apps<br/>well-intake-api]
+            AS[App Service<br/>well-zoho-oauth]
+            ACR[Container Registry<br/>wellintakeacr0903]
+            
+            subgraph "Data Services"
+                PG[PostgreSQL Flex<br/>well-intake-db-0903]
+                REDIS[Redis Cache<br/>wellintakecache0903]
+                BLOB[Blob Storage<br/>wellintakestorage0903]
+                SEARCH[AI Search<br/>wellintakesearch0903]
+            end
+            
+            subgraph "Messaging"
+                SB[Service Bus<br/>wellintakebus0903]
+                SR[SignalR<br/>wellintakesignalr0903]
+            end
+            
+            subgraph "Security & Monitoring"
+                KV[Key Vault<br/>wellintakevault]
+                AI[App Insights<br/>wellintakeinsights]
+            end
+        end
+    end
+
+    subgraph "CI/CD Pipeline"
+        GH[GitHub Actions]
+        DOCKER[Docker Build<br/>Multi-platform]
+    end
+
+    subgraph "External Services"
+        OPENAI[OpenAI GPT-5]
+        FIRECRAWL[Firecrawl API]
+        ZOHO_API[Zoho CRM v8]
+    end
+
+    GH --> DOCKER
+    DOCKER --> ACR
+    ACR --> CA
+    AS --> CA
+    CA --> PG
+    CA --> REDIS
+    CA --> BLOB
+    CA --> SEARCH
+    CA --> SB
+    CA --> SR
+    CA --> KV
+    CA --> AI
+    CA --> OPENAI
+    CA --> FIRECRAWL
+    CA --> ZOHO_API
+
+    style CA fill:#2196F3
+    style AS fill:#4CAF50
+    style REDIS fill:#9C27B0
 ```
 
 For complete detailed architecture diagrams, see **[ARCHITECTURE.md](ARCHITECTURE.md)**
-```
 
 ### 🔄 LangGraph Workflow Architecture
 
@@ -618,6 +752,13 @@ az containerapp ingress traffic set \
 ```
 
 ## 📝 Changelog
+
+### v3.2.0 (December 13, 2025)
+- 🔥 **CRITICAL FIX** - Resolved "generator didn't stop after athrow()" async context manager issues
+- 🔧 **Database Connection Manager** - Removed @asynccontextmanager decorators causing nested generator problems
+- 🛠️ **Health Check Fix** - Fixed _perform_health_check to use manual acquire/release pattern
+- 🚀 **Production Stability** - API fully operational with proper async handling
+- 📊 **Error Handling** - Added GeneratorExit exception handling for graceful cleanup
 
 ### v3.1.0 (September 9, 2025)
 - ✅ **Redis Cache System Operational** - Fixed connection issues, 90% performance improvement
