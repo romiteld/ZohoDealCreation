@@ -56,6 +56,7 @@ class ProcessingResult(BaseModel):
     saved_to_zoho: Optional[bool] = Field(None, description="Whether the deal was saved to Zoho CRM")
     correlation_id: Optional[str] = Field(None, description="Unique correlation ID for tracking this request")
     missing_fields: Optional[list] = Field(None, description="List of missing fields if user input is required")
+    duplicate_info: Optional[dict] = Field(None, description="Information about duplicate records if found")
 
 class HealthStatus(BaseModel):
     status: str

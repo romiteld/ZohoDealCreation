@@ -92,8 +92,9 @@ class EnhancedPostgreSQLClient:
         create_tables_sql = """
         -- Enable required extensions
         CREATE EXTENSION IF NOT EXISTS vector;
-        CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- For text similarity
-        CREATE EXTENSION IF NOT EXISTS btree_gin;  -- For composite indexes
+        -- pg_trgm and btree_gin not available in Azure Database for PostgreSQL flexible server
+        -- CREATE EXTENSION IF NOT EXISTS pg_trgm;  -- For text similarity
+        -- CREATE EXTENSION IF NOT EXISTS btree_gin;  -- For composite indexes
         
         -- Context storage for 400K token windows
         CREATE TABLE IF NOT EXISTS large_contexts (

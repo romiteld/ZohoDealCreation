@@ -32,6 +32,13 @@ from app.cache.c3 import (
 from app.cache.redis_io import load_c3_entry, save_c3_entry
 from app.orchestrator.voit import voit_controller
 
+# Rate limit handling imports
+from app.rate_limit_handler import (
+    RateLimitHandler,
+    CachedFallbackExtractor,
+    with_rate_limit_handling
+)
+
 # Load environment variables
 load_dotenv('.env.local')
 load_dotenv()
@@ -130,7 +137,15 @@ class EmailProcessingWorkflow:
             # Default to GPT-5-mini if available, else caller may override
             self.model_name = os.getenv("OPENAI_MODEL", "gpt-5-mini")
             logger.info("OpenAI client initialized for LangGraph workflow")
-        
+
+        # Initialize rate limit handler and fallback extractor
+        self.rate_limit_handler = RateLimitHandler(
+            max_retries=3,
+            initial_delay=2.0,
+            max_delay=60.0
+        )
+        self.fallback_extractor = CachedFallbackExtractor()
+
         # Build the workflow
         self.graph = self._build_workflow()
         logger.info("LangGraph workflow compiled successfully")
@@ -1033,7 +1048,7 @@ class EmailProcessingWorkflow:
             CRITICAL: EXTRACT ONLY THE SPECIFIC VALUE FOR EACH FIELD:
             - candidate_name: ONLY the person's name (e.g., "John Smith") - NOT the entire email
             - job_title: ONLY the job title (e.g., "Senior Developer") - NOT job descriptions
-            - location: ONLY the location (e.g., "New York, NY") - NOT full addresses
+            - location: Leave BLANK/null - do NOT extract from email, only from research
             - company_guess: ONLY the company name (e.g., "Microsoft") - NOT descriptions
             - phone: ONLY the phone number (e.g., "555-123-4567") - NOT other text
             - email: ONLY the email address (e.g., "john@example.com") - NOT other text
@@ -1041,14 +1056,17 @@ class EmailProcessingWorkflow:
             
             CALENDLY EMAIL SPECIAL RULES:
             - For Calendly scheduling emails, look for:
-              * "Invitee:" followed by the person's name - this is the CANDIDATE
-              * "Invitee Email:" followed by email - this is the candidate's EMAIL  
+              * "Invitee:" followed by the person's name - this is the CANDIDATE NAME
+              * "Invitee Email:" followed by email - extract ONLY the email address (e.g., roy.janse@mariner.com)
               * Job title may be in the meeting title (e.g., "Recruiting Consultant Interview")
-              * Phone may be in "Questions:" section
+              * "Phone" or "Phone:" followed by number - extract ONLY the phone number to phone field
+              * "Questions:" section - look for phone numbers and recruiting goals
+              * "What recruiting goals" question - extract the answer to notes field
               * The person/company organizing the meeting is usually the REFERRER
             - Example: "Invitee: Roy Janse" → candidate_name = "Roy Janse"
-            - Example: "Invitee Email: roy.janse@mariner.com" → email = "roy.janse@mariner.com"
-            - Example: Meeting title "Recruiting Consultant Interview" → job_title = "Recruiting Consultant"
+            - Example: "Invitee Email: roy.janse@mariner.com Event Date/Time..." → email = "roy.janse@mariner.com" (ONLY the email, not the rest)
+            - Example: "Phone +1 864-430-5074" → phone = "+1 864-430-5074"
+            - Example: "What recruiting goals or ideas would you like to discuss? Mid-career advisors to our Greenville team." → notes = "Recruiting goals: Mid-career advisors to our Greenville team"
             
             CRITICAL RULES FOR FORWARDED EMAILS:
             - Check if this is a forwarded email (look for "-----Original Message-----", "From:", "Date:", "Subject:", "Begin forwarded message:", etc.)
@@ -1072,12 +1090,12 @@ class EmailProcessingWorkflow:
             - referrer_name: ONLY the name (e.g., "Daniel" not the whole email)
             - email: ONLY email address in format user@domain.com
             - phone: ONLY the phone number with standard formatting
-            - location: ONLY city/state (e.g., "Greenville, SC" not full address)
-            
+            - location: Leave BLANK/null - location is determined later from research, NOT from email text
+
             EXAMPLES OF CORRECT EXTRACTION:
-            - Calendly: "Invitee: Roy Janse" → candidate_name = "Roy Janse" 
+            - Calendly: "Invitee: Roy Janse" → candidate_name = "Roy Janse"
             - Calendly: "Recruiting Consultant Interview" → job_title = "Recruiting Consultant"
-            - Regular: "Jerry Fetta from Austin" → candidate_name = "Jerry Fetta", location = "Austin"
+            - Regular: "Jerry Fetta mentioned" → candidate_name = "Jerry Fetta", location = null (DO NOT extract location from email)
             
             {learning_hints}
             
@@ -1096,7 +1114,7 @@ class EmailProcessingWorkflow:
             # Get the schema and ensure it meets OpenAI's strict requirements
             schema = ExtractionOutput.model_json_schema()
             schema["additionalProperties"] = False
-            
+
             # OpenAI strict mode requires all properties to be in required array
             if "properties" in schema:
                 schema["required"] = list(schema["properties"].keys())
@@ -1104,23 +1122,55 @@ class EmailProcessingWorkflow:
                 for prop_name, prop_value in schema["properties"].items():
                     if isinstance(prop_value, dict) and prop_value.get("type") == "object":
                         prop_value["additionalProperties"] = False
-            
-            response = await self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_prompt},
-                    {"role": "user", "content": user_prompt}
-                ],
-                response_format={
-                    "type": "json_schema",
-                    "json_schema": {
-                        "name": "extraction_output",
-                        "schema": schema,
-                        "strict": True
+
+            # Define the API call as a separate function for retry handling
+            async def make_openai_call():
+                return await self.client.chat.completions.create(
+                    model=self.model_name,
+                    messages=[
+                        {"role": "system", "content": system_prompt},
+                        {"role": "user", "content": user_prompt}
+                    ],
+                    response_format={
+                        "type": "json_schema",
+                        "json_schema": {
+                            "name": "extraction_output",
+                            "schema": schema,
+                            "strict": True
+                        }
                     }
-                }
-            )
-            
+                )
+
+            # Define fallback function that uses pattern matching
+            async def fallback_extraction():
+                logger.info("Using fallback extraction due to API unavailability")
+                fallback_result = await self.fallback_extractor.extract_from_email(
+                    state['email_content'],
+                    sender_domain
+                )
+                # Return a mock response object that mimics OpenAI response structure
+                class MockResponse:
+                    class Choice:
+                        class Message:
+                            def __init__(self, content):
+                                self.content = content
+                        def __init__(self, content):
+                            self.message = self.Message(content)
+                    def __init__(self, content):
+                        self.choices = [self.Choice(json.dumps(fallback_result))]
+                return MockResponse(fallback_result)
+
+            # Try API call with retry and fallback
+            try:
+                response = await self.rate_limit_handler.handle_with_retry(
+                    make_openai_call,
+                    fallback_func=fallback_extraction
+                )
+            except Exception as e:
+                logger.error(f"All extraction attempts failed: {e}")
+                # Last resort: use basic fallback
+                response = await fallback_extraction()
+
             result = json.loads(response.choices[0].message.content)
             
             # Post-process to ensure we only have clean, short values
@@ -1158,6 +1208,17 @@ class EmailProcessingWorkflow:
                 elif field_name in ['email', 'referrer_email']:
                     # Extract just the email address
                     import re
+                    # First check for Calendly pattern "Invitee Email: email@domain.com"
+                    if 'Invitee Email:' in value:
+                        # Extract email after "Invitee Email:"
+                        parts = value.split('Invitee Email:')
+                        if len(parts) > 1:
+                            email_part = parts[1].strip()
+                            # Get just the email address from the remaining text
+                            email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', email_part)
+                            if email_match:
+                                return email_match.group(0)
+                    # Standard email extraction
                     email_match = re.search(r'[\w\.-]+@[\w\.-]+\.\w+', value)
                     if email_match:
                         return email_match.group(0)
@@ -1165,6 +1226,21 @@ class EmailProcessingWorkflow:
                 elif field_name == 'phone':
                     # Extract just the phone number
                     import re
+                    # First check for Calendly pattern "Phone +1 xxx-xxx-xxxx" or "Phone: +1..."
+                    if 'Phone' in value:
+                        # Extract phone after "Phone" or "Phone:"
+                        parts = re.split(r'Phone:?\s*', value)
+                        if len(parts) > 1:
+                            phone_part = parts[1].strip()
+                            # Get just the phone number from the remaining text
+                            phone_match = re.search(r'[\+\d\s\-\(\)\.]+', phone_part)
+                            if phone_match:
+                                phone = phone_match.group(0).strip()
+                                # Ensure it's at least 10 digits
+                                digits = re.sub(r'\D', '', phone)
+                                if len(digits) >= 10:
+                                    return phone[:30]
+                    # Standard phone extraction
                     phone_match = re.search(r'[\d\s\-\(\)\+\.]+', value)
                     if phone_match:
                         phone = phone_match.group(0).strip()
@@ -1206,12 +1282,40 @@ class EmailProcessingWorkflow:
                 'phone': 30,
                 'email': 100,
                 'linkedin_url': 200,
-                'notes': 200  # Notes can be longer
+                'notes': 500  # Notes can be longer to capture recruiting goals
             }
-            
+
             for field, limit in field_limits.items():
                 if field in result:
                     cleaned_result[field] = clean_field(result.get(field), field, limit)
+
+            # Special handling for Calendly emails - extract recruiting goals if not in notes
+            if 'calendly' in state['email_content'].lower():
+                import re
+                # Look for recruiting goals question and answer
+                goals_pattern = r'What recruiting goals[^?]*\?\s*([^\n]+(?:\n[^\n]+)?)'
+                goals_match = re.search(goals_pattern, state['email_content'], re.IGNORECASE)
+                if goals_match and (not cleaned_result.get('notes') or len(cleaned_result.get('notes', '')) < 50):
+                    recruiting_goals = goals_match.group(1).strip()
+                    # Clean up the goals text
+                    recruiting_goals = recruiting_goals.replace('Your confirmation email', '').strip()
+                    if recruiting_goals:
+                        # Append to existing notes or create new
+                        existing_notes = cleaned_result.get('notes', '')
+                        if existing_notes:
+                            cleaned_result['notes'] = f"{existing_notes}. Recruiting goals: {recruiting_goals[:200]}"
+                        else:
+                            cleaned_result['notes'] = f"Recruiting goals: {recruiting_goals[:200]}"
+
+                # Also look for phone number if not extracted
+                if not cleaned_result.get('phone'):
+                    phone_pattern = r'Phone[\s:]+(\+?[\d\s\-\(\)\.]+)'
+                    phone_match = re.search(phone_pattern, state['email_content'])
+                    if phone_match:
+                        phone = phone_match.group(1).strip()
+                        digits = re.sub(r'\D', '', phone)
+                        if len(digits) >= 10:
+                            cleaned_result['phone'] = phone[:30]
             
             result = cleaned_result
             logger.info(f"Extraction completed (CLEANED): {result}")

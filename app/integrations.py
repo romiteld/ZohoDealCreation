@@ -205,6 +205,32 @@ class PostgreSQLClient:
             raw_data JSONB,
             imported_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
+
+        -- Add missing columns from main.py INSERT statement
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS deal_id VARCHAR;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS deal_name TEXT;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS owner_email TEXT;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS owner_name TEXT;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS contact_name TEXT;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS contact_email TEXT;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS account_name TEXT;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS metadata JSONB DEFAULT '{}'::jsonb;
+        ALTER TABLE deals ADD COLUMN IF NOT EXISTS modified_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+        -- Ensure PRIMARY KEY exists on id column (required for ON CONFLICT)
+        DO $$
+        BEGIN
+            -- Check if primary key constraint exists
+            IF NOT EXISTS (
+                SELECT 1 FROM pg_constraint
+                WHERE contype = 'p'
+                AND conrelid = 'deals'::regclass
+            ) THEN
+                -- Add primary key if it doesn't exist
+                ALTER TABLE deals ADD PRIMARY KEY (id);
+            END IF;
+        END $$;
         
         CREATE TABLE IF NOT EXISTS deal_stage_history (
             id UUID PRIMARY KEY DEFAULT gen_random_uuid(),

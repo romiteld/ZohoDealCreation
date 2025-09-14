@@ -23,7 +23,7 @@ class FirecrawlResearcher:
     
     def __init__(self, api_key: str = None):
         self.api_key = api_key or os.getenv("FIRECRAWL_API_KEY")
-        self.base_url = "https://api.firecrawl.dev/v1"
+        self.base_url = "https://api.firecrawl.dev/v2"
         
         if not self.api_key:
             logger.warning("Firecrawl API key not configured")
@@ -63,8 +63,11 @@ class FirecrawlResearcher:
                 ) as response:
                     if response.status == 200:
                         result = await response.json()
+                        # v2 API response structure
+                        data = result.get("data", {})
+                        markdown = data.get("markdown", "") if isinstance(data, dict) else ""
                         company_info = self._extract_company_from_content(
-                            result.get("markdown", ""),
+                            markdown,
                             domain
                         )
                         return company_info
@@ -162,12 +165,16 @@ class FirecrawlResearcher:
     
     def _extract_company_from_search(self, search_results: Dict, query: str) -> Dict[str, Any]:
         """Extract company information from search results"""
-        
-        if not search_results.get("web"):
+
+        # v2 API response structure
+        data = search_results.get("data", {})
+        web_results = data.get("web", [])
+
+        if not web_results:
             return {"company_name": None, "confidence": 0}
-        
+
         # Analyze search results
-        for result in search_results["web"][:3]:
+        for result in web_results[:3]:
             title = result.get("title", "")
             description = result.get("description", "")
             markdown = result.get("markdown", "")

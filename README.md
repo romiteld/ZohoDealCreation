@@ -35,8 +35,11 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 
 ## 🏗️ Comprehensive Architecture Overview
 
-> **Latest Updates (September 2025)**: 
-> - **CRITICAL FIX**: Resolved async context manager issues causing "generator didn't stop after athrow()" errors
+> **Latest Updates (September 13, 2025)**:
+> - **CRITICAL FIX**: Azure OpenAI rate limits increased from 1 RPM to **300 RPM** (300x increase)
+> - **Enhanced Extraction**: Fixed Calendly email parsing - now correctly extracts only email addresses, not entire content
+> - **Rate Limit Handler**: Added exponential backoff with fallback pattern matching for resilience
+> - **Firecrawl v2 API**: Updated to latest API version for improved company research
 > - Migrated from CrewAI to **LangGraph** for improved reliability and performance
 > - Added **OAuth Reverse Proxy Service** for centralized authentication and security
 > - Implemented **Redis caching** with intelligent pattern recognition (90% cost reduction)
@@ -61,7 +64,7 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 ```mermaid
 graph TB
     subgraph "Client Layer"
-        OA[Outlook Add-in]
+        OA[Outlook Add-in<br/>Client Info Form]
         API_CLIENT[API Clients]
         WEB[Web Interface]
     end
@@ -73,14 +76,15 @@ graph TB
 
     subgraph "Processing Layer"
         API[FastAPI<br/>Container Apps]
-        LG[LangGraph<br/>3-Node Pipeline]
+        LG[LangGraph<br/>3-Node Pipeline<br/>Extract→Research→Validate]
         GPT[GPT-5 Tiers<br/>nano/mini/full]
     end
 
     subgraph "Data & Intelligence"
         CACHE[Redis Cache<br/>90% Cost Reduction]
-        PG[PostgreSQL<br/>+ pgvector<br/>400K Context]
+        PG[PostgreSQL<br/>Deduplication<br/>+ pgvector]
         SEARCH[AI Search<br/>Semantic Learning]
+        FIRE[Firecrawl API<br/>Company Research]
     end
 
     subgraph "Async Processing"
@@ -89,9 +93,9 @@ graph TB
     end
 
     subgraph "Integration & Storage"
-        ZOHO[Zoho CRM v8]
-        BLOB[Blob Storage]
-        KV[Key Vault]
+        ZOHO[Zoho CRM v8<br/>Clients/Deals]
+        BLOB[Blob Storage<br/>Attachments]
+        KV[Key Vault<br/>Secrets]
     end
 
     subgraph "Monitoring"

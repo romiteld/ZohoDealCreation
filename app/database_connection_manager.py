@@ -227,8 +227,9 @@ class DatabaseConnectionManager:
         learning_tables_sql = """
         -- Enable required extensions
         CREATE EXTENSION IF NOT EXISTS vector;
-        CREATE EXTENSION IF NOT EXISTS pg_trgm;
-        CREATE EXTENSION IF NOT EXISTS btree_gin;
+        -- pg_trgm and btree_gin not available in Azure Database for PostgreSQL flexible server
+        -- CREATE EXTENSION IF NOT EXISTS pg_trgm;
+        -- CREATE EXTENSION IF NOT EXISTS btree_gin;
         
         -- AI Corrections table for learning system
         CREATE TABLE IF NOT EXISTS ai_corrections (

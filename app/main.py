@@ -1727,11 +1727,12 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                         # Step 1: Upsert into deals table
                         upsert_query = """
                         INSERT INTO deals (
-                            deal_id, deal_name, owner_email, owner_name, stage,
-                            contact_name, contact_email, account_name, 
+                            id, deal_id, deal_name, owner_email, owner_name, stage,
+                            contact_name, contact_email, account_name,
                             source, source_detail, created_at, metadata
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
-                        ON CONFLICT (deal_id) DO UPDATE SET
+                        ) VALUES ($1::VARCHAR, $1::VARCHAR, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                        ON CONFLICT (id) DO UPDATE SET
+                            deal_id = EXCLUDED.deal_id,
                             deal_name = EXCLUDED.deal_name,
                             modified_at = CURRENT_TIMESTAMP,
                             metadata = EXCLUDED.metadata
@@ -1772,6 +1773,44 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                                 
                                 saved_to_zoho = True
                                 zoho_id = zoho_result.get("deal_id")
+
+                                # Check if this was a duplicate
+                                if zoho_result.get('was_duplicate'):
+                                    logger.info(f"Duplicate records found in Zoho for {request.sender_email}")
+
+                                    # Prepare detailed duplicate message
+                                    duplicate_details = []
+                                    if zoho_result.get('existing_contact_id'):
+                                        duplicate_details.append(f"Contact (ID: {zoho_result.get('existing_contact_id')})")
+                                    if zoho_result.get('existing_account_id'):
+                                        duplicate_details.append(f"Company (ID: {zoho_result.get('existing_account_id')})")
+                                    if zoho_result.get('deal_id') and zoho_result.get('was_duplicate'):
+                                        duplicate_details.append(f"Deal '{deal_name}'")
+
+                                    duplicate_message = f"Record already exists in Zoho: {', '.join(duplicate_details) if duplicate_details else 'Duplicate found'}"
+
+                                    # Return duplicate response with specific status
+                                    return ZohoResponse(
+                                        status="duplicate",
+                                        deal_id=zoho_id,
+                                        account_id=zoho_result.get("account_id"),
+                                        contact_id=zoho_result.get("contact_id"),
+                                        deal_name=zoho_result.get("deal_name", deal_name),
+                                        primary_email=zoho_result.get("primary_email", request.sender_email),
+                                        message=duplicate_message,
+                                        extracted=enhanced_data,
+                                        saved_to_db=saved_to_db,
+                                        saved_to_zoho=True,
+                                        correlation_id=correlation_id,
+                                        duplicate_info={
+                                            "is_duplicate": True,
+                                            "duplicate_types": duplicate_details,
+                                            "existing_contact": zoho_result.get('existing_contact_id'),
+                                            "existing_account": zoho_result.get('existing_account_id'),
+                                            "existing_deal": zoho_id if zoho_result.get('was_duplicate') else None
+                                        }
+                                    )
+
                                 logger.info(f"Created Zoho records on attempt {attempt + 1}: {zoho_id}")
                                 break
                                 

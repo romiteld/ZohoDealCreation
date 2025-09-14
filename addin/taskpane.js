@@ -1033,11 +1033,16 @@ async function handleSendToZoho() {
         }
         
         const result = await response.json();
-        
+
         await updateProgress(6, 'Complete!');
-        
-        // Show success message
-        showSuccess(result);
+
+        // Check if this was a duplicate
+        if (result.status === 'duplicate') {
+            showDuplicate(result);
+        } else {
+            // Show success message
+            showSuccess(result);
+        }
         
     } catch (error) {
         console.error('Error sending to Zoho:', error);
@@ -1199,6 +1204,35 @@ async function updateProgress(step, message) {
 }
 
 /**
+ * Show duplicate notification
+ */
+function showDuplicate(result) {
+    const successMessage = document.getElementById('successMessage');
+    const warningMessage = document.getElementById('warningMessage') || successMessage;
+
+    // Build duplicate details HTML
+    let duplicateDetails = '';
+    if (result.duplicate_info && result.duplicate_info.duplicate_types) {
+        duplicateDetails = `<br><small>Found: ${result.duplicate_info.duplicate_types.join(', ')}</small>`;
+    }
+
+    warningMessage.innerHTML = `
+        <strong>⚠️ Duplicate Record Found</strong><br>
+        ${result.message || 'Record already exists in Zoho CRM'}${duplicateDetails}<br>
+        <small>
+            ${result.deal_id ? `Deal ID: ${result.deal_id}` : ''}
+            ${result.contact_id ? ` | Contact ID: ${result.contact_id}` : ''}
+        </small>
+    `;
+    warningMessage.style.display = 'block';
+    warningMessage.style.backgroundColor = '#fff3cd';
+    warningMessage.style.borderColor = '#ffc107';
+    warningMessage.style.color = '#856404';
+
+    document.getElementById('btnClose').style.display = 'block';
+}
+
+/**
  * Show success message
  */
 function showSuccess(result) {
@@ -1209,7 +1243,7 @@ function showSuccess(result) {
         <small>Deal ID: ${result.deal_id}</small>
     `;
     successMessage.style.display = 'block';
-    
+
     document.getElementById('btnClose').style.display = 'block';
 }
 
