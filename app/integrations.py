@@ -403,19 +403,20 @@ class PostgreSQLClient:
                 logger.warning(f"Found {recent_count} recent entries for candidate {candidate_name} from {sender_email} in last 30 days")
                 return True
             
-            # Also check if exact same email was processed recently (within 24 hours) by email hash
+            # Also check if exact same email was processed recently (within 5 minutes) to prevent rapid duplicates
             email_query = """
             SELECT COUNT(*) as count
             FROM email_processing_history
             WHERE sender_email = $1
-              AND processed_at > NOW() - INTERVAL '24 hours'
+              AND contact_name = $2
+              AND processed_at > NOW() - INTERVAL '5 minutes'
             """
-            
-            email_row = await conn.fetchrow(email_query, sender_email)
+
+            email_row = await conn.fetchrow(email_query, sender_email, candidate_name)
             email_count = email_row['count'] if email_row else 0
-            
+
             if email_count > 0:
-                logger.warning(f"Same email from {sender_email} processed within last hour")
+                logger.warning(f"Same candidate {candidate_name} from {sender_email} processed within last 5 minutes - likely duplicate click")
                 return True
                 
             return False
