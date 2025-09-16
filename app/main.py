@@ -476,7 +476,8 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                        "/addin/manifest.xml", "/addin/commands.html", "/addin/commands.js",
                        "/addin/taskpane.html", "/addin/taskpane.js", "/addin/config.js",
                        "/addin/icon-16.png", "/addin/icon-32.png", "/addin/icon-64.png", "/addin/icon-80.png", "/addin/icon-128.png",
-                       "/apollo-styles.css", "/apollo-websocket.js"]  # Apollo integration files
+                       "/apollo-styles.css", "/apollo-websocket.js", "/signalr.min.js",
+                       "/addin/signalr.min.js"]  # Apollo integration files
         if not any(request.url.path.startswith(path) for path in add_in_paths):
             # Only set X-Frame-Options for non-add-in endpoints
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -495,16 +496,16 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # More permissive CSP for add-in pages
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com https://ajax.aspnetcdn.com https://cdnjs.cloudflare.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com https://ajax.aspnetcdn.com https://*.azurefd.net; "
                 "style-src 'self' 'unsafe-inline' https://*.office.com; "
                 "img-src 'self' data: https://*.office.com https://*.microsoft.com https://*.azurecontainerapps.io; "
-                "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com https://*.service.signalr.net wss://*.service.signalr.net https://cdnjs.cloudflare.com; "
+                "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com https://*.service.signalr.net wss://*.service.signalr.net https://*.azurefd.net; "
                 "frame-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com https://telemetryservice.firstpartyapps.oaspapps.com; "
                 "frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com https://outlook.officeppe.com https://*.microsoft.com https://*.office.com;"
             )
         else:
             # Standard CSP for API endpoints
-            response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline';"
+            response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com https://*.azurefd.net; style-src 'self' 'unsafe-inline';"
         
         return response
 
@@ -3939,6 +3940,22 @@ async def get_apollo_websocket():
 
     logger.error(f"apollo-websocket.js not found. Tried paths: {possible_paths}")
     raise HTTPException(status_code=404, detail=f"Apollo WebSocket not found. Tried: {possible_paths}")
+
+@app.get("/signalr.min.js")
+async def get_signalr():
+    """Serve SignalR client library"""
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "addin", "signalr.min.js"),
+        os.path.join("/app", "addin", "signalr.min.js"),
+        os.path.join(os.getcwd(), "addin", "signalr.min.js"),
+    ]
+
+    for js_path in possible_paths:
+        if os.path.exists(js_path):
+            return FileResponse(js_path, media_type="application/javascript")
+
+    logger.error(f"signalr.min.js not found. Tried paths: {possible_paths}")
+    raise HTTPException(status_code=404, detail=f"SignalR client library not found. Tried: {possible_paths}")
 
 # Voice UI API Endpoints
 @app.post("/api/voice/process", dependencies=[Depends(verify_api_key)])

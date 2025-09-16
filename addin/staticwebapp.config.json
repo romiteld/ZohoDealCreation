@@ -25,7 +25,7 @@
     "Cache-Control": "no-cache, no-store, must-revalidate",
     "X-Content-Type-Options": "nosniff",
     "X-Frame-Options": "SAMEORIGIN",
-    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io wss://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io https://*.service.signalr.net wss://*.service.signalr.net https://*.office.com https://cdnjs.cloudflare.com",
+    "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.azurefd.net; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io wss://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io https://*.service.signalr.net wss://*.service.signalr.net https://*.office.com https://*.azurefd.net",
     "Access-Control-Allow-Origin": "*",
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
     "Access-Control-Allow-Headers": "Content-Type, Authorization, X-API-Key"
