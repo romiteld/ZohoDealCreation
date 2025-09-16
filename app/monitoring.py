@@ -142,8 +142,11 @@ class MonitoringService:
     def _get_memory_usage(self, options):
         """Callback for memory usage metric."""
         import psutil
+        from opentelemetry.metrics import Observation
         process = psutil.Process()
-        return process.memory_info().rss
+        memory_bytes = process.memory_info().rss
+        # OpenTelemetry expects an iterable of Observations
+        yield Observation(value=memory_bytes)
     
     def calculate_token_cost(self, input_text: str, output_text: str) -> Dict[str, float]:
         """Calculate the cost of GPT-5-mini usage."""

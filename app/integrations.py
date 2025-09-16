@@ -730,6 +730,19 @@ class PostgreSQLClient:
                 results.append(result)
             return results
 
+    async def close(self):
+        """Close the database connection pool."""
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
+            logger.info("PostgreSQL connection pool closed")
+
+        if self.enhanced_client and hasattr(self.enhanced_client, 'close'):
+            try:
+                await self.enhanced_client.close()
+            except Exception as e:
+                logger.warning(f"Could not close enhanced client: {e}")
+
 class AzureBlobStorageClient:
     """Handles uploading files to Azure Blob Storage."""
     

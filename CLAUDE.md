@@ -44,7 +44,41 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Integrations** (`app/integrations.py`): Zoho API v8, Azure services
 - **Outlook Add-in** (`addin/`): Manifest with WebSocket support
 
+### Outlook Add-in Components
+- **Manifest Files** (`addin/manifest.xml`, `addin/manifest.json`): Office add-in configuration
+- **Task Pane** (`addin/taskpane.html`, `addin/taskpane.js`): Main UI and functionality
+- **Commands** (`addin/commands.html`, `addin/commands.js`): Ribbon button handlers
+- **Apollo Integration** (`addin/apollo-websocket.js`): Real-time contact enrichment
+- **App Logic** (`addin/app.js`): Core application functionality
+- **Configuration** (`addin/config.js`): Environment and API settings
+- **Static Assets** (`addin/icon-*.png`): Add-in icons and resources
+
 ## Essential Commands
+
+### Outlook Add-in Development
+```bash
+# Validate manifest files
+npm run validate          # Validate manifest.xml
+npm run validate:json     # Validate manifest.json
+npm run validate:all      # Validate both manifests
+
+# Convert between manifest formats
+npm run convert           # Convert XML to JSON
+
+# Package add-in for distribution
+npm run package           # Package both formats
+npm run package:json      # Package JSON manifest only
+npm run package:xml       # Package XML manifest only
+
+# Serve add-in locally for testing
+npm run serve             # Serve on http://localhost:8080
+
+# Run all validation tests
+npm run test
+
+# Full deployment workflow
+npm run deploy            # Validate and package
+```
 
 ### Local Development
 ```bash
@@ -145,6 +179,16 @@ curl -X GET "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerap
 - **Owner Assignment**: Use `ZOHO_DEFAULT_OWNER_EMAIL` environment variable, never hardcode IDs
 - **Zoho API**: Use v8 endpoints (not v6)
 - **Field Names**: Use `Source` (not `Lead_Source`), `Source_Detail` for referrer names
+
+### Outlook Add-in Constraints
+⚠️ **Office Add-in Specific Requirements**:
+- **Manifest ID**: Never change the add-in ID `d2422753-f7f6-4a4a-9e1e-7512f37a50e5`
+- **CDN URLs**: Always use Azure Front Door CDN URLs for production manifests
+- **CSP Headers**: All external domains must be included in Content Security Policy
+- **HTTPS Only**: All add-in resources must be served over HTTPS
+- **Versioning**: Auto-increment manifest version on deployment (handled by CI/CD)
+- **Icon Requirements**: Must provide 16px, 32px, and 80px PNG icons
+- **App Domains**: All API endpoints must be listed in `<AppDomains>` section
 
 ## LangGraph Workflow
 

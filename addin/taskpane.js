@@ -1900,10 +1900,16 @@ function handleCancel() {
     });
 
     // Reset source dropdown to default
-    document.getElementById('source').value = 'Email Inbound';
+    const sourceElement = document.getElementById('source');
+    if (sourceElement) {
+        sourceElement.value = 'Email Inbound';
+    }
 
     // Clear correction prompt
-    document.getElementById('correctionPrompt').value = '';
+    const correctionElement = document.getElementById('correctionPrompt');
+    if (correctionElement) {
+        correctionElement.value = '';
+    }
 
     // Hide quick fixes if shown
     const quickFixes = document.getElementById('quickFixes');
