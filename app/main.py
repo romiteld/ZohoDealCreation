@@ -469,13 +469,14 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["X-Content-Type-Options"] = "nosniff"
         
         # Allow framing for Outlook Add-in endpoints
-        add_in_paths = ["/manifest.xml", "/commands.html", "/commands.js", "/taskpane.html", 
+        add_in_paths = ["/manifest.xml", "/commands.html", "/commands.js", "/taskpane.html",
                        "/taskpane.js", "/placeholder.html", "/loader.html", "/config.js",
                        "/icon-16.png", "/icon-32.png", "/icon-64.png", "/icon-80.png", "/icon-128.png",
                        "/icons/",  # versioned icon path prefix
-                       "/addin/manifest.xml", "/addin/commands.html", "/addin/commands.js", 
+                       "/addin/manifest.xml", "/addin/commands.html", "/addin/commands.js",
                        "/addin/taskpane.html", "/addin/taskpane.js", "/addin/config.js",
-                       "/addin/icon-16.png", "/addin/icon-32.png", "/addin/icon-64.png", "/addin/icon-80.png", "/addin/icon-128.png"]
+                       "/addin/icon-16.png", "/addin/icon-32.png", "/addin/icon-64.png", "/addin/icon-80.png", "/addin/icon-128.png",
+                       "/apollo-styles.css", "/apollo-websocket.js"]  # Apollo integration files
         if not any(request.url.path.startswith(path) for path in add_in_paths):
             # Only set X-Frame-Options for non-add-in endpoints
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -1647,56 +1648,415 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                         logger.error(f"Client extraction error: {str(e)}")
                         # Don't fail the entire processing - this is an enhancement feature
 
-                # APOLLO ENRICHMENT: Enrich contact information after successful AI extraction
+                # APOLLO DEEP ENRICHMENT: Use comprehensive Apollo capabilities for maximum data extraction
                 try:
-                    apollo_data = await enrich_contact_with_apollo(request.sender_email)
-                    if apollo_data:
-                        logger.info(f"Apollo enrichment successful for {request.sender_email}")
+                    from app.apollo_enricher import apollo_deep_enrichment, extract_linkedin_urls
+
+                    # Extract company name from existing data for better enrichment
+                    company_hint = None
+                    if hasattr(extracted_data, 'company_name') and extracted_data.company_name:
+                        company_hint = extracted_data.company_name
+                    elif hasattr(extracted_data, 'model_dump'):
+                        extracted_dict = extracted_data.model_dump()
+                        company_hint = extracted_dict.get('company_name')
+
+                    # First, specifically extract LinkedIn URLs for maximum discovery
+                    linkedin_data = await extract_linkedin_urls(
+                        email=request.sender_email,
+                        name=request.sender_name,
+                        company=company_hint,
+                        save_to_db=True
+                    )
+
+                    # Log LinkedIn extraction results
+                    if linkedin_data and linkedin_data.get("linkedin_url"):
+                        logger.info(f"LinkedIn URL found: {linkedin_data['linkedin_url']}")
+
+                        # Prepare social profiles information
+                        social_profiles = []
+                        if linkedin_data.get("linkedin_url"):
+                            social_profiles.append(f"LinkedIn: {linkedin_data['linkedin_url']}")
+                        if linkedin_data.get("company_linkedin_url"):
+                            social_profiles.append(f"Company LinkedIn: {linkedin_data['company_linkedin_url']}")
+                        if linkedin_data.get("twitter_url"):
+                            social_profiles.append(f"Twitter: {linkedin_data['twitter_url']}")
+                        if linkedin_data.get("facebook_url"):
+                            social_profiles.append(f"Facebook: {linkedin_data['facebook_url']}")
+                        if linkedin_data.get("github_url"):
+                            social_profiles.append(f"GitHub: {linkedin_data['github_url']}")
+
+                        # Add social profiles to notes
+                        if social_profiles:
+                            social_note = "\n\nSOCIAL PROFILES:\n" + "\n".join(social_profiles)
+                            if hasattr(extracted_data, 'notes'):
+                                extracted_data.notes = (extracted_data.notes or "") + social_note
+                            elif extracted_dict:
+                                extracted_dict['notes'] = extracted_dict.get('notes', '') + social_note
+
+                    # Perform deep enrichment with all Apollo capabilities
+                    apollo_result = await apollo_deep_enrichment(
+                        email=request.sender_email,
+                        name=request.sender_name,
+                        company=company_hint,
+                        extract_all=True  # Get everything including employees
+                    )
+
+                    # Extract comprehensive location and website data
+                    location_result = None
+                    try:
+                        from app.apollo_location_extractor import extract_company_location_data, extract_person_location_data
+
+                        # Try to extract company location data if we have company information
+                        if company_hint or (apollo_result and apollo_result.get('company', {}).get('domain')):
+                            company_domain = None
+                            if apollo_result and apollo_result.get('company', {}).get('domain'):
+                                company_domain = apollo_result['company']['domain']
+
+                            location_result = await extract_company_location_data(
+                                company_name=company_hint,
+                                company_domain=company_domain,
+                                include_geocoding=False  # Skip geocoding for speed
+                            )
+                            logger.info(f"Extracted location data: {len(location_result.get('locations', []))} locations found")
+
+                        # If no company data, try person location extraction
+                        elif request.sender_email or request.sender_name:
+                            location_result = await extract_person_location_data(
+                                email=request.sender_email,
+                                name=request.sender_name,
+                                include_company_locations=True
+                            )
+                            logger.info(f"Extracted person location data with {len(location_result.get('company_locations', []))} company locations")
+
+                    except Exception as loc_e:
+                        logger.warning(f"Location extraction failed: {str(loc_e)}")
+                        location_result = None
+
+                    if apollo_result and (apollo_result.get('person') or apollo_result.get('company')):
+                        logger.info(f"Apollo deep enrichment successful - Completeness: {apollo_result.get('data_completeness', 0):.0f}%")
+
+                        # Initialize enrichment metrics for monitoring
+                        enrichment_metrics = {
+                            'data_points_extracted': 0,
+                            'linkedin_found': False,
+                            'phone_numbers_found': 0,
+                            'company_enriched': False,
+                            'employees_found': 0,
+                            'decision_makers_found': 0
+                        }
 
                         # Map Apollo response fields to internal schema if no user corrections exist
                         if not request.user_corrections:
                             apollo_mapped = {}
 
-                            # Map Apollo fields to our internal schema
-                            if apollo_data.get('client_name'):
-                                apollo_mapped['candidate_name'] = apollo_data['client_name']
-                            if apollo_data.get('firm_company'):
-                                apollo_mapped['company_name'] = apollo_data['firm_company']
-                            if apollo_data.get('job_title'):
-                                apollo_mapped['job_title'] = apollo_data['job_title']
-                            if apollo_data.get('phone'):
-                                apollo_mapped['phone_number'] = apollo_data['phone']
-                            if apollo_data.get('website'):
-                                apollo_mapped['company_website'] = apollo_data['website']
-                            if apollo_data.get('location'):
-                                apollo_mapped['location'] = apollo_data['location']
+                            # Extract person data if available
+                            person_data = apollo_result.get('person', {})
+                            if person_data:
+                                # Core contact information
+                                if person_data.get('client_name'):
+                                    apollo_mapped['candidate_name'] = person_data['client_name']
+                                    enrichment_metrics['data_points_extracted'] += 1
 
-                            # Store enriched data in user_corrections if we have mapped data
+                                if person_data.get('job_title'):
+                                    apollo_mapped['job_title'] = person_data['job_title']
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                if person_data.get('location'):
+                                    apollo_mapped['location'] = person_data['location']
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                # Phone numbers - prioritize mobile, then work, then any
+                                phone_added = False
+                                if person_data.get('mobile_phone'):
+                                    apollo_mapped['mobile_phone'] = person_data['mobile_phone']
+                                    phone_added = True
+                                    enrichment_metrics['phone_numbers_found'] += 1
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                if person_data.get('work_phone'):
+                                    apollo_mapped['work_phone'] = person_data['work_phone']
+                                    if not phone_added:
+                                        apollo_mapped['phone_number'] = person_data['work_phone']
+                                    enrichment_metrics['phone_numbers_found'] += 1
+                                    enrichment_metrics['data_points_extracted'] += 1
+                                elif person_data.get('phone') and not phone_added:
+                                    apollo_mapped['phone_number'] = person_data['phone']
+                                    enrichment_metrics['phone_numbers_found'] += 1
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                # LinkedIn and social profiles
+                                if person_data.get('linkedin_url'):
+                                    apollo_mapped['linkedin_url'] = person_data['linkedin_url']
+                                    enrichment_metrics['linkedin_found'] = True
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                # Company information from person data
+                                if person_data.get('firm_company'):
+                                    apollo_mapped['company_name'] = person_data['firm_company']
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                if person_data.get('company_website'):
+                                    apollo_mapped['company_website'] = person_data['company_website']
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                            # Extract company data if available
+                            company_data = apollo_result.get('company', {})
+                            if company_data:
+                                enrichment_metrics['company_enriched'] = True
+
+                                # Override with more detailed company info if available
+                                if company_data.get('company_name') and not apollo_mapped.get('company_name'):
+                                    apollo_mapped['company_name'] = company_data['company_name']
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                if company_data.get('website') and not apollo_mapped.get('company_website'):
+                                    apollo_mapped['company_website'] = company_data['website']
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                # Add comprehensive location data if extracted
+                                if location_result:
+                                    # Primary company location with full address details
+                                    if location_result.get('locations'):
+                                        primary_location = None
+                                        all_locations = []
+
+                                        for loc in location_result['locations']:
+                                            if loc.get('is_primary'):
+                                                primary_location = loc
+                                            location_str = loc.get('formatted_address', loc.get('full_address', ''))
+                                            if location_str:
+                                                location_type = loc.get('location_type', 'Office').capitalize()
+                                                all_locations.append(f"{location_type}: {location_str}")
+
+                                        # Update primary location with full address
+                                        if primary_location:
+                                            # Full address with all components
+                                            if primary_location.get('full_address'):
+                                                apollo_mapped['location'] = primary_location['full_address']
+                                                enrichment_metrics['data_points_extracted'] += 1
+
+                                            # Store individual address components
+                                            if primary_location.get('street_address'):
+                                                apollo_mapped['company_street'] = primary_location['street_address']
+                                            if primary_location.get('city'):
+                                                apollo_mapped['company_city'] = primary_location['city']
+                                            if primary_location.get('state'):
+                                                apollo_mapped['company_state'] = primary_location['state']
+                                            if primary_location.get('postal_code'):
+                                                apollo_mapped['company_postal_code'] = primary_location['postal_code']
+                                            if primary_location.get('country'):
+                                                apollo_mapped['company_country'] = primary_location['country']
+
+                                            # Add timezone if available
+                                            if primary_location.get('timezone'):
+                                                apollo_mapped['timezone'] = primary_location['timezone']
+                                                enrichment_metrics['data_points_extracted'] += 1
+
+                                        # Store all locations if multiple offices found
+                                        if len(all_locations) > 1:
+                                            apollo_mapped['all_office_locations'] = '\n'.join(all_locations)
+                                            enrichment_metrics['data_points_extracted'] += 1
+
+                                    # Add comprehensive website data
+                                    if location_result.get('websites'):
+                                        websites_data = location_result['websites']
+
+                                        # Update company website if more comprehensive
+                                        if websites_data.get('primary_website') and not apollo_mapped.get('company_website'):
+                                            apollo_mapped['company_website'] = websites_data['primary_website']
+                                            enrichment_metrics['data_points_extracted'] += 1
+
+                                        # Blog URL
+                                        if websites_data.get('blog_url'):
+                                            apollo_mapped['blog_url'] = websites_data['blog_url']
+                                            enrichment_metrics['data_points_extracted'] += 1
+
+                                        # Careers page
+                                        if websites_data.get('careers_page'):
+                                            apollo_mapped['careers_page'] = websites_data['careers_page']
+                                            enrichment_metrics['data_points_extracted'] += 1
+
+                                        # Social profiles
+                                        social_profiles = websites_data.get('social_profiles', {})
+                                        if social_profiles:
+                                            if social_profiles.get('linkedin') and not apollo_mapped.get('company_linkedin'):
+                                                apollo_mapped['company_linkedin'] = social_profiles['linkedin']
+                                            if social_profiles.get('twitter'):
+                                                apollo_mapped['company_twitter'] = social_profiles['twitter']
+                                            if social_profiles.get('facebook'):
+                                                apollo_mapped['company_facebook'] = social_profiles['facebook']
+
+                                # Company phone if no personal phone found
+                                if company_data.get('phone') and not apollo_mapped.get('phone_number'):
+                                    apollo_mapped['company_phone'] = company_data['phone']
+                                    enrichment_metrics['data_points_extracted'] += 1
+
+                                # Company details for context
+                                company_details = []
+                                if company_data.get('employee_count'):
+                                    company_details.append(f"Employees: {company_data['employee_count']}")
+                                if company_data.get('industry'):
+                                    company_details.append(f"Industry: {company_data['industry']}")
+                                if company_data.get('founded_year'):
+                                    company_details.append(f"Founded: {company_data['founded_year']}")
+
+                                # Key employees and decision makers
+                                if company_data.get('key_employees'):
+                                    enrichment_metrics['employees_found'] = len(company_data['key_employees'])
+
+                                    # Format key employees for notes
+                                    employee_info = []
+                                    for emp in company_data['key_employees'][:5]:  # Top 5
+                                        emp_str = f"• {emp.get('name', 'Unknown')} - {emp.get('title', 'No title')}"
+                                        if emp.get('email'):
+                                            emp_str += f" ({emp['email']})"
+                                        if emp.get('linkedin'):
+                                            emp_str += f" [LinkedIn]"
+                                        employee_info.append(emp_str)
+
+                                    if employee_info:
+                                        apollo_mapped['key_employees'] = '\n'.join(employee_info)
+                                        enrichment_metrics['data_points_extracted'] += 1
+
+                                if company_data.get('decision_makers'):
+                                    enrichment_metrics['decision_makers_found'] = len(company_data['decision_makers'])
+
+                                if company_data.get('recruiters'):
+                                    # Store recruiter contacts for future reference
+                                    recruiter_info = []
+                                    for rec in company_data['recruiters'][:3]:  # Top 3
+                                        rec_str = f"• {rec.get('name', 'Unknown')} - {rec.get('title', 'Recruiter')}"
+                                        if rec.get('email'):
+                                            rec_str += f" ({rec['email']})"
+                                        if rec.get('phone'):
+                                            rec_str += f" Ph: {rec['phone']}"
+                                        recruiter_info.append(rec_str)
+
+                                    if recruiter_info:
+                                        apollo_mapped['recruiters'] = '\n'.join(recruiter_info)
+                                        enrichment_metrics['data_points_extracted'] += 1
+
+                            # Handle alternative matches for validation
+                            if person_data and person_data.get('alternative_matches'):
+                                alt_matches_str = []
+                                for alt in person_data['alternative_matches'][:2]:  # Top 2 alternatives
+                                    alt_str = f"• {alt.get('name', 'Unknown')} at {alt.get('company', 'Unknown Company')}"
+                                    if alt.get('email'):
+                                        alt_str += f" ({alt['email']})"
+                                    alt_matches_str.append(alt_str)
+
+                                if alt_matches_str:
+                                    apollo_mapped['alternative_contacts'] = '\n'.join(alt_matches_str)
+
+                            # Build comprehensive notes with all enriched data
                             if apollo_mapped:
-                                # Preserve any existing AI extraction notes
+                                notes_sections = []
+
+                                # Preserve existing notes
                                 if hasattr(extracted_data, 'notes') and extracted_data.notes:
-                                    apollo_mapped['notes'] = extracted_data.notes
+                                    notes_sections.append(extracted_data.notes)
                                 elif hasattr(extracted_data, 'model_dump'):
                                     extracted_dict = extracted_data.model_dump()
                                     if extracted_dict.get('notes'):
-                                        apollo_mapped['notes'] = extracted_dict['notes']
+                                        notes_sections.append(extracted_dict['notes'])
+
+                                # Add Apollo enrichment section
+                                notes_sections.append("\n=== APOLLO.IO ENRICHMENT ===")
+
+                                if apollo_mapped.get('linkedin_url'):
+                                    notes_sections.append(f"LinkedIn: {apollo_mapped['linkedin_url']}")
+
+                                if apollo_mapped.get('mobile_phone') or apollo_mapped.get('work_phone'):
+                                    phone_section = "Phone Numbers:"
+                                    if apollo_mapped.get('mobile_phone'):
+                                        phone_section += f"\n  • Mobile: {apollo_mapped['mobile_phone']}"
+                                    if apollo_mapped.get('work_phone'):
+                                        phone_section += f"\n  • Work: {apollo_mapped['work_phone']}"
+                                    notes_sections.append(phone_section)
+
+                                if apollo_mapped.get('key_employees'):
+                                    notes_sections.append(f"\nKey Employees:\n{apollo_mapped['key_employees']}")
+
+                                if apollo_mapped.get('recruiters'):
+                                    notes_sections.append(f"\nRecruiters:\n{apollo_mapped['recruiters']}")
+
+                                if apollo_mapped.get('alternative_contacts'):
+                                    notes_sections.append(f"\nAlternative Matches:\n{apollo_mapped['alternative_contacts']}")
+
+                                # Add location and website information
+                                if apollo_mapped.get('all_office_locations'):
+                                    notes_sections.append(f"\nOffice Locations:\n{apollo_mapped['all_office_locations']}")
+                                elif apollo_mapped.get('location'):
+                                    notes_sections.append(f"\nLocation: {apollo_mapped['location']}")
+
+                                if apollo_mapped.get('timezone'):
+                                    notes_sections.append(f"Timezone: {apollo_mapped['timezone']}")
+
+                                # Add website information
+                                website_info = []
+                                if apollo_mapped.get('blog_url'):
+                                    website_info.append(f"Blog: {apollo_mapped['blog_url']}")
+                                if apollo_mapped.get('careers_page'):
+                                    website_info.append(f"Careers: {apollo_mapped['careers_page']}")
+                                if apollo_mapped.get('company_twitter'):
+                                    website_info.append(f"Twitter: {apollo_mapped['company_twitter']}")
+                                if apollo_mapped.get('company_facebook'):
+                                    website_info.append(f"Facebook: {apollo_mapped['company_facebook']}")
+
+                                if website_info:
+                                    notes_sections.append("\nWeb Presence:")
+                                    notes_sections.extend(website_info)
+
+                                # Add data completeness and metrics
+                                notes_sections.append(f"\nEnrichment Completeness: {apollo_result.get('data_completeness', 0):.0f}%")
+                                notes_sections.append(f"Data Points Extracted: {enrichment_metrics['data_points_extracted']}")
+
+                                apollo_mapped['notes'] = '\n'.join(notes_sections)
 
                                 # Store Apollo enrichment as user corrections for consistent processing
                                 request.user_corrections = apollo_mapped
-                                logger.info(f"Applied Apollo enrichment: {list(apollo_mapped.keys())}")
+                                logger.info(f"Applied Apollo deep enrichment: {list(apollo_mapped.keys())}")
+
+                                # Log enrichment metrics for monitoring
+                                logger.info(f"Apollo Enrichment Metrics: {enrichment_metrics}")
 
                                 # Update sender name and email from enriched data if available
-                                if apollo_data.get('client_name') and not request.sender_name:
-                                    request.sender_name = apollo_data['client_name']
-                                if apollo_data.get('email') and apollo_data['email'] != request.sender_email:
+                                if person_data.get('client_name') and not request.sender_name:
+                                    request.sender_name = person_data['client_name']
+                                if person_data.get('email') and person_data['email'] != request.sender_email:
                                     # Keep original sender_email but log the enriched one
-                                    logger.info(f"Apollo provided alternative email: {apollo_data['email']}")
+                                    logger.info(f"Apollo provided alternative email: {person_data['email']}")
                             else:
                                 logger.info("Apollo data received but no mappable fields found")
                         else:
                             logger.info("User corrections already exist, skipping Apollo mapping")
                     else:
-                        logger.info(f"No Apollo enrichment data found for {request.sender_email}")
+                        # Fallback to simple enrichment if deep enrichment fails
+                        logger.info(f"Apollo deep enrichment failed, trying simple enrichment for {request.sender_email}")
+                        simple_apollo_data = await enrich_contact_with_apollo(request.sender_email)
+
+                        if simple_apollo_data and not request.user_corrections:
+                            apollo_mapped = {}
+
+                            # Map basic fields
+                            if simple_apollo_data.get('client_name'):
+                                apollo_mapped['candidate_name'] = simple_apollo_data['client_name']
+                            if simple_apollo_data.get('firm_company'):
+                                apollo_mapped['company_name'] = simple_apollo_data['firm_company']
+                            if simple_apollo_data.get('job_title'):
+                                apollo_mapped['job_title'] = simple_apollo_data['job_title']
+                            if simple_apollo_data.get('phone'):
+                                apollo_mapped['phone_number'] = simple_apollo_data['phone']
+                            if simple_apollo_data.get('website'):
+                                apollo_mapped['company_website'] = simple_apollo_data['website']
+                            if simple_apollo_data.get('location'):
+                                apollo_mapped['location'] = simple_apollo_data['location']
+
+                            if apollo_mapped:
+                                request.user_corrections = apollo_mapped
+                                logger.info(f"Applied Apollo simple enrichment: {list(apollo_mapped.keys())}")
+                        else:
+                            logger.info(f"No Apollo enrichment data found for {request.sender_email}")
                 except Exception as e:
                     logger.warning(f"Apollo enrichment failed for {request.sender_email}: {str(e)}")
                     # Continue processing without Apollo enrichment
@@ -1779,17 +2139,85 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                 from app.langgraph_manager import SimplifiedEmailExtractor
                 extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
 
-                # APOLLO ENRICHMENT: Also apply Apollo enrichment for fallback extraction
+                # APOLLO DEEP ENRICHMENT: Apply comprehensive enrichment for fallback extraction
                 try:
-                    apollo_data = await enrich_contact_with_apollo(request.sender_email)
-                    if apollo_data:
-                        logger.info(f"Apollo enrichment successful for {request.sender_email} (fallback case)")
+                    from app.apollo_enricher import apollo_deep_enrichment
+
+                    # Extract company name from fallback data
+                    company_hint = None
+                    if hasattr(extracted_data, 'company_name') and extracted_data.company_name:
+                        company_hint = extracted_data.company_name
+                    elif hasattr(extracted_data, '__dict__'):
+                        company_hint = extracted_data.__dict__.get('company_name')
+
+                    # Try deep enrichment first
+                    apollo_result = await apollo_deep_enrichment(
+                        email=request.sender_email,
+                        name=request.sender_name,
+                        company=company_hint,
+                        extract_all=True
+                    )
+
+                    if apollo_result and (apollo_result.get('person') or apollo_result.get('company')):
+                        logger.info(f"Apollo deep enrichment successful (fallback) - Completeness: {apollo_result.get('data_completeness', 0):.0f}%")
 
                         # Map Apollo response fields to internal schema if no user corrections exist
                         if not request.user_corrections:
                             apollo_mapped = {}
+                            person_data = apollo_result.get('person', {})
+                            company_data = apollo_result.get('company', {})
 
-                            # Map Apollo fields to our internal schema
+                            # Extract essential fields with deep data
+                            if person_data:
+                                if person_data.get('client_name'):
+                                    apollo_mapped['candidate_name'] = person_data['client_name']
+                                if person_data.get('job_title'):
+                                    apollo_mapped['job_title'] = person_data['job_title']
+                                if person_data.get('location'):
+                                    apollo_mapped['location'] = person_data['location']
+                                if person_data.get('linkedin_url'):
+                                    apollo_mapped['linkedin_url'] = person_data['linkedin_url']
+                                if person_data.get('mobile_phone'):
+                                    apollo_mapped['mobile_phone'] = person_data['mobile_phone']
+                                elif person_data.get('phone'):
+                                    apollo_mapped['phone_number'] = person_data['phone']
+
+                            # Add company enrichment
+                            if company_data:
+                                if company_data.get('company_name'):
+                                    apollo_mapped['company_name'] = company_data['company_name']
+                                if company_data.get('website'):
+                                    apollo_mapped['company_website'] = company_data['website']
+
+                            # Store enriched data in user_corrections if we have mapped data
+                            if apollo_mapped:
+                                # Preserve any existing AI extraction notes
+                                if hasattr(extracted_data, 'notes') and extracted_data.notes:
+                                    apollo_mapped['notes'] = extracted_data.notes + "\n\n=== Apollo Enrichment (Fallback) ==="
+                                else:
+                                    apollo_mapped['notes'] = "=== Apollo Enrichment (Fallback) ==="
+
+                                # Add enrichment completeness
+                                apollo_mapped['notes'] += f"\nCompleteness: {apollo_result.get('data_completeness', 0):.0f}%"
+
+                                # Store Apollo enrichment as user corrections for consistent processing
+                                request.user_corrections = apollo_mapped
+                                logger.info(f"Applied Apollo deep enrichment (fallback): {list(apollo_mapped.keys())}")
+
+                                # Update sender name from enriched data if available
+                                if person_data.get('client_name') and not request.sender_name:
+                                    request.sender_name = person_data['client_name']
+                            else:
+                                logger.info("Apollo data received but no mappable fields found (fallback)")
+                        else:
+                            logger.info("User corrections already exist, skipping Apollo mapping (fallback)")
+                    else:
+                        # Fall back to simple enrichment
+                        logger.info(f"Trying simple Apollo enrichment for {request.sender_email} (fallback case)")
+                        apollo_data = await enrich_contact_with_apollo(request.sender_email)
+
+                        if apollo_data and not request.user_corrections:
+                            apollo_mapped = {}
                             if apollo_data.get('client_name'):
                                 apollo_mapped['candidate_name'] = apollo_data['client_name']
                             if apollo_data.get('firm_company'):
@@ -1803,32 +2231,11 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                             if apollo_data.get('location'):
                                 apollo_mapped['location'] = apollo_data['location']
 
-                            # Store enriched data in user_corrections if we have mapped data
                             if apollo_mapped:
-                                # Preserve any existing AI extraction notes
-                                if hasattr(extracted_data, 'notes') and extracted_data.notes:
-                                    apollo_mapped['notes'] = extracted_data.notes
-                                elif hasattr(extracted_data, 'model_dump'):
-                                    extracted_dict = extracted_data.model_dump()
-                                    if extracted_dict.get('notes'):
-                                        apollo_mapped['notes'] = extracted_dict['notes']
-
-                                # Store Apollo enrichment as user corrections for consistent processing
                                 request.user_corrections = apollo_mapped
-                                logger.info(f"Applied Apollo enrichment (fallback): {list(apollo_mapped.keys())}")
-
-                                # Update sender name and email from enriched data if available
-                                if apollo_data.get('client_name') and not request.sender_name:
-                                    request.sender_name = apollo_data['client_name']
-                                if apollo_data.get('email') and apollo_data['email'] != request.sender_email:
-                                    # Keep original sender_email but log the enriched one
-                                    logger.info(f"Apollo provided alternative email: {apollo_data['email']}")
-                            else:
-                                logger.info("Apollo data received but no mappable fields found (fallback)")
+                                logger.info(f"Applied Apollo simple enrichment (fallback): {list(apollo_mapped.keys())}")
                         else:
-                            logger.info("User corrections already exist, skipping Apollo mapping (fallback)")
-                    else:
-                        logger.info(f"No Apollo enrichment data found for {request.sender_email} (fallback case)")
+                            logger.info(f"No Apollo enrichment data found for {request.sender_email} (fallback case)")
                 except Exception as apollo_e:
                     logger.warning(f"Apollo enrichment failed for {request.sender_email} (fallback case): {str(apollo_e)}")
                     # Continue processing without Apollo enrichment
@@ -2712,6 +3119,10 @@ app.include_router(policies_router)
 # Include Admin import v2 router
 app.include_router(import_v2_router)
 
+# Include Apollo.io API router for comprehensive phone discovery
+from app.api.apollo.routes import router as apollo_router
+app.include_router(apollo_router)
+
 @app.get("/cache/status", dependencies=[Depends(verify_api_key)])
 async def get_cache_status():
     """Get comprehensive Redis cache performance metrics, health status, and optimization recommendations"""
@@ -3496,6 +3907,38 @@ async def get_taskpane_js():
     # Log which paths were tried for debugging
     logger.error(f"taskpane.js not found. Tried paths: {possible_paths}")
     raise HTTPException(status_code=404, detail=f"Taskpane.js not found. Tried: {possible_paths}")
+
+@app.get("/apollo-styles.css")
+async def get_apollo_styles():
+    """Serve Apollo integration CSS styles"""
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "addin", "apollo-styles.css"),
+        os.path.join("/app", "addin", "apollo-styles.css"),
+        os.path.join(os.getcwd(), "addin", "apollo-styles.css"),
+    ]
+
+    for css_path in possible_paths:
+        if os.path.exists(css_path):
+            return FileResponse(css_path, media_type="text/css")
+
+    logger.error(f"apollo-styles.css not found. Tried paths: {possible_paths}")
+    raise HTTPException(status_code=404, detail=f"Apollo styles not found. Tried: {possible_paths}")
+
+@app.get("/apollo-websocket.js")
+async def get_apollo_websocket():
+    """Serve Apollo WebSocket integration JavaScript"""
+    possible_paths = [
+        os.path.join(os.path.dirname(__file__), "..", "addin", "apollo-websocket.js"),
+        os.path.join("/app", "addin", "apollo-websocket.js"),
+        os.path.join(os.getcwd(), "addin", "apollo-websocket.js"),
+    ]
+
+    for js_path in possible_paths:
+        if os.path.exists(js_path):
+            return FileResponse(js_path, media_type="application/javascript")
+
+    logger.error(f"apollo-websocket.js not found. Tried paths: {possible_paths}")
+    raise HTTPException(status_code=404, detail=f"Apollo WebSocket not found. Tried: {possible_paths}")
 
 # Voice UI API Endpoints
 @app.post("/api/voice/process", dependencies=[Depends(verify_api_key)])
@@ -5001,6 +5444,1562 @@ async def get_versioned_icon(version: str, size: int):
         raise HTTPException(status_code=404, detail="Invalid icon size")
     # Reuse existing resolver; ignore version in path and map to standard icon files
     return await get_icon(size)
+
+# ==================== APOLLO.IO PRODUCTION ENDPOINTS ====================
+
+@app.post("/api/apollo/extract/linkedin", dependencies=[Depends(verify_api_key)])
+async def apollo_extract_linkedin_urls(
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    company: Optional[str] = None,
+    job_title: Optional[str] = None,
+    location: Optional[str] = None
+):
+    """
+    Specialized endpoint for extracting LinkedIn URLs and social media profiles.
+
+    This endpoint maximizes LinkedIn URL discovery using Apollo.io's search capabilities.
+    It searches for people and companies to extract all available social media URLs,
+    with a focus on LinkedIn profiles.
+
+    Args:
+        email: Email address to search (most accurate)
+        name: Person's full name
+        company: Company name or domain
+        job_title: Job title for better matching
+        location: Location for filtering
+
+    Returns:
+        JSON with:
+        - linkedin_url: Person's LinkedIn profile
+        - company_linkedin_url: Company LinkedIn page
+        - twitter_url, facebook_url, github_url: Other social profiles
+        - phone_numbers: All discovered phone numbers
+        - alternative_profiles: Other potential matches
+        - confidence_score: Match confidence (0-100)
+
+    Example:
+        POST /api/apollo/extract/linkedin
+        {
+            "email": "john.doe@company.com",
+            "name": "John Doe",
+            "company": "Company Inc"
+        }
+    """
+    from app.apollo_enricher import extract_linkedin_urls
+
+    try:
+        logger.info(f"LinkedIn URL extraction request: email={email}, name={name}, company={company}")
+
+        # Extract LinkedIn and social media URLs
+        result = await extract_linkedin_urls(
+            email=email,
+            name=name,
+            company=company,
+            job_title=job_title,
+            location=location,
+            save_to_db=True
+        )
+
+        # Track API usage
+        if result.get("source") == "apollo":
+            logger.info(f"Apollo API call made for LinkedIn extraction")
+        elif result.get("source") == "cache":
+            logger.info(f"LinkedIn data served from cache")
+
+        # Log success metrics
+        logger.info(
+            f"LinkedIn extraction results: "
+            f"Personal LinkedIn: {bool(result.get('linkedin_url'))}, "
+            f"Company LinkedIn: {bool(result.get('company_linkedin_url'))}, "
+            f"Phone numbers: {len(result.get('phone_numbers', []))}, "
+            f"Alternatives: {len(result.get('alternative_profiles', []))}, "
+            f"Confidence: {result.get('confidence_score')}%"
+        )
+
+        return result
+
+    except Exception as e:
+        logger.error(f"LinkedIn URL extraction failed: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"LinkedIn extraction failed: {str(e)}"
+        )
+
+
+@app.post("/api/apollo/enrich", dependencies=[Depends(verify_api_key)])
+async def apollo_comprehensive_enrichment(
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    company: Optional[str] = None,
+    extract_all: bool = True
+):
+    """
+    Production Apollo.io comprehensive enrichment endpoint.
+    Maximizes data extraction with unlimited searches for:
+    - LinkedIn URLs
+    - Phone numbers (mobile, work)
+    - Company website and location
+    - Key employees and decision makers
+    - Alternative matches for validation
+    """
+    from app.apollo_enricher import apollo_deep_enrichment
+
+    try:
+        result = await apollo_deep_enrichment(
+            email=email,
+            name=name,
+            company=company,
+            extract_all=extract_all
+        )
+
+        # Store enriched data in database for future reference
+        if result["person"] or result["company"]:
+            try:
+                async with req.app.state.postgres_client.pool.acquire() as conn:
+                    await conn.execute("""
+                        INSERT INTO apollo_enrichments (
+                            email, enriched_data, created_at
+                        ) VALUES ($1, $2, $3)
+                        ON CONFLICT (email) DO UPDATE
+                        SET enriched_data = $2, updated_at = $3
+                    """, email or name, json.dumps(result), datetime.utcnow())
+            except Exception as db_error:
+                logger.warning(f"Failed to store Apollo enrichment: {db_error}")
+
+        return {
+            "status": "success",
+            "data": result,
+            "completeness": result["data_completeness"],
+            "features_extracted": {
+                "person": bool(result["person"]),
+                "company": bool(result["company"]),
+                "linkedin_url": result["person"].get("linkedin_url") if result["person"] else None,
+                "phone": result["person"].get("phone") if result["person"] else None,
+                "company_website": result["company"].get("website") if result["company"] else None,
+                "key_employees": len(result["company"].get("key_employees", [])) if result["company"] else 0,
+                "decision_makers": len(result["company"].get("decision_makers", [])) if result["company"] else 0
+            }
+        }
+    except Exception as e:
+        logger.error(f"Apollo enrichment failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/test/search-people", dependencies=[Depends(verify_api_key)])
+async def test_apollo_people_search(
+    query: Optional[str] = None,
+    titles: Optional[List[str]] = None,
+    company_domains: Optional[List[str]] = None,
+    locations: Optional[List[str]] = None,
+    industries: Optional[List[str]] = None,
+    page: int = 1,
+    per_page: int = 25
+):
+    """
+    Test Apollo.io people search with advanced filters.
+    """
+    from app.apollo_service_manager import ApolloServiceManager
+
+    try:
+        manager = ApolloServiceManager()
+        result = await manager.search_people(
+            query=query,
+            titles=titles,
+            company_domains=company_domains,
+            locations=locations,
+            industries=industries,
+            page=page,
+            per_page=per_page
+        )
+
+        return {
+            "status": "success",
+            "data": result,
+            "count": len(result.get("people", [])) if result else 0
+        }
+    except Exception as e:
+        logger.error(f"Apollo people search test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/test/search-organizations", dependencies=[Depends(verify_api_key)])
+async def test_apollo_organization_search(
+    query: Optional[str] = None,
+    domains: Optional[List[str]] = None,
+    industries: Optional[List[str]] = None,
+    locations: Optional[List[str]] = None,
+    technologies: Optional[List[str]] = None,
+    page: int = 1,
+    per_page: int = 25
+):
+    """
+    Test Apollo.io organization search.
+    """
+    from app.apollo_service_manager import ApolloServiceManager
+
+    try:
+        manager = ApolloServiceManager()
+        result = await manager.search_organizations(
+            query=query,
+            domains=domains,
+            industries=industries,
+            locations=locations,
+            technologies=technologies,
+            page=page,
+            per_page=per_page
+        )
+
+        return {
+            "status": "success",
+            "data": result,
+            "count": len(result.get("organizations", [])) if result else 0
+        }
+    except Exception as e:
+        logger.error(f"Apollo organization search test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/search/people", dependencies=[Depends(verify_api_key)])
+async def apollo_production_people_search(
+    email: Optional[str] = None,
+    name: Optional[str] = None,
+    company_domain: Optional[str] = None,
+    job_title: Optional[str] = None,
+    location: Optional[str] = None,
+    page: int = Query(default=1, ge=1, le=100, description="Page number (1-100)"),
+    per_page: int = Query(default=25, ge=1, le=100, description="Results per page (1-100)")
+):
+    """
+    Production endpoint for unlimited Apollo.io people search with comprehensive data extraction.
+
+    Features:
+    - Unlimited people search (no credit consumption)
+    - Maximum data extraction including LinkedIn URLs, phone numbers, emails
+    - Intelligent caching to prevent redundant API calls
+    - Support for multiple search criteria
+    - Pagination support for large result sets
+
+    Parameters:
+    - email: Search by email address (exact or partial match)
+    - name: Search by person's full name
+    - company_domain: Filter by company domain
+    - job_title: Filter by job title/role
+    - location: Filter by location (city, state, or country)
+    - page: Page number for pagination (default: 1)
+    - per_page: Number of results per page (default: 25, max: 100)
+
+    Returns:
+    - Comprehensive person data including all social profiles, contact info, and company details
+    - Alternative matches for validation
+    - Data completeness metrics
+    - Cache status
+    """
+    from app.apollo_enricher import apollo_unlimited_people_search
+    import hashlib
+
+    try:
+        # Create cache key from search parameters
+        cache_key_parts = [
+            f"email:{email or ''}",
+            f"name:{name or ''}",
+            f"domain:{company_domain or ''}",
+            f"title:{job_title or ''}",
+            f"location:{location or ''}",
+            f"page:{page}",
+            f"per_page:{per_page}"
+        ]
+        cache_key = "apollo:people:" + hashlib.md5(":".join(cache_key_parts).encode()).hexdigest()
+
+        # Check cache first
+        cached_result = None
+        if config.redis_client:
+            try:
+                cached_result = await config.redis_client.get(cache_key)
+                if cached_result:
+                    logger.info(f"Apollo people search cache hit for key: {cache_key}")
+                    cached_data = json.loads(cached_result)
+                    cached_data["cache_hit"] = True
+                    cached_data["cache_key"] = cache_key
+                    return cached_data
+            except Exception as cache_error:
+                logger.warning(f"Cache retrieval failed: {cache_error}")
+
+        # Log search parameters
+        logger.info(f"Apollo people search - email: {email}, name: {name}, domain: {company_domain}, "
+                   f"title: {job_title}, location: {location}, page: {page}, per_page: {per_page}")
+
+        # Perform the search using the enhanced function
+        search_result = await apollo_unlimited_people_search(
+            email=email,
+            name=name,
+            company_domain=company_domain,
+            job_title=job_title,
+            location=location,
+            page=page,
+            per_page=per_page
+        )
+
+        if not search_result:
+            # Return empty result with metadata
+            empty_response = {
+                "status": "success",
+                "data": {
+                    "people": [],
+                    "total_count": 0,
+                    "page": page,
+                    "per_page": per_page
+                },
+                "message": "No matching people found",
+                "search_criteria": {
+                    "email": email,
+                    "name": name,
+                    "company_domain": company_domain,
+                    "job_title": job_title,
+                    "location": location
+                },
+                "cache_hit": False
+            }
+
+            # Cache empty results for 5 minutes to prevent repeated failed searches
+            if config.redis_client:
+                try:
+                    await config.redis_client.setex(
+                        cache_key,
+                        300,  # 5 minutes for empty results
+                        json.dumps(empty_response)
+                    )
+                except Exception as cache_error:
+                    logger.warning(f"Failed to cache empty result: {cache_error}")
+
+            return empty_response
+
+        # Extract comprehensive data
+        person_data = {
+            # Core Identity
+            "id": search_result.get("apollo_id"),
+            "full_name": search_result.get("client_name"),
+            "first_name": search_result.get("first_name"),
+            "last_name": search_result.get("last_name"),
+            "email": search_result.get("email"),
+
+            # Professional Information
+            "job_title": search_result.get("job_title"),
+            "headline": search_result.get("headline"),
+            "seniority": search_result.get("seniority"),
+
+            # Contact Information (ALL phone numbers)
+            "phone_numbers": search_result.get("phone_numbers", []),
+            "primary_phone": search_result.get("phone"),
+            "mobile_phone": search_result.get("mobile_phone"),
+            "work_phone": search_result.get("work_phone"),
+
+            # Social Profiles (CRITICAL - Extract ALL)
+            "linkedin_url": search_result.get("linkedin_url"),
+            "twitter_url": search_result.get("twitter_url"),
+            "facebook_url": search_result.get("facebook_url"),
+            "github_url": search_result.get("github_url"),
+
+            # Location Details
+            "city": search_result.get("city"),
+            "state": search_result.get("state"),
+            "country": search_result.get("country"),
+            "location": search_result.get("location"),
+            "time_zone": search_result.get("time_zone"),
+
+            # Company Information
+            "company": {
+                "name": search_result.get("firm_company"),
+                "domain": search_result.get("company_domain"),
+                "website": search_result.get("company_website"),
+                "linkedin_url": search_result.get("company_linkedin"),
+                "twitter_url": search_result.get("company_twitter"),
+                "facebook_url": search_result.get("company_facebook"),
+                "size": search_result.get("company_size"),
+                "industry": search_result.get("company_industry"),
+                "keywords": search_result.get("company_keywords", []),
+                "location": search_result.get("company_location"),
+                "phone": search_result.get("company_phone"),
+                "founded_year": search_result.get("company_founded_year"),
+                "revenue": search_result.get("company_revenue"),
+                "funding": search_result.get("company_funding"),
+                "technologies": search_result.get("technologies", [])
+            },
+
+            # Metadata
+            "confidence_score": search_result.get("confidence_score"),
+            "last_updated": search_result.get("last_updated"),
+            "alternative_matches": search_result.get("alternative_matches", [])
+        }
+
+        # Calculate data completeness
+        total_fields = 0
+        filled_fields = 0
+        critical_fields = ["email", "linkedin_url", "primary_phone", "full_name", "company"]
+        critical_filled = 0
+
+        for key, value in person_data.items():
+            if key != "company":
+                total_fields += 1
+                if value and value != "":
+                    filled_fields += 1
+                    if key in critical_fields:
+                        critical_filled += 1
+            else:
+                # Check company fields
+                for comp_key, comp_value in value.items():
+                    total_fields += 1
+                    if comp_value and comp_value != "":
+                        filled_fields += 1
+
+        completeness_score = round((filled_fields / total_fields * 100) if total_fields > 0 else 0, 2)
+        critical_completeness = round((critical_filled / len(critical_fields) * 100), 2)
+
+        # Build response
+        response_data = {
+            "status": "success",
+            "data": {
+                "person": person_data,
+                "search_rank": 1,  # This is the best match
+                "total_results": 1 if search_result else 0,
+                "page": page,
+                "per_page": per_page
+            },
+            "data_quality": {
+                "completeness_score": completeness_score,
+                "critical_completeness": critical_completeness,
+                "total_fields": total_fields,
+                "filled_fields": filled_fields,
+                "has_linkedin": bool(person_data.get("linkedin_url")),
+                "has_phone": bool(person_data.get("primary_phone") or person_data.get("phone_numbers")),
+                "has_email": bool(person_data.get("email")),
+                "has_company_website": bool(person_data.get("company", {}).get("website"))
+            },
+            "search_criteria": {
+                "email": email,
+                "name": name,
+                "company_domain": company_domain,
+                "job_title": job_title,
+                "location": location
+            },
+            "cache_hit": False,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        # Store in cache for 24 hours (successful results)
+        if config.redis_client:
+            try:
+                await config.redis_client.setex(
+                    cache_key,
+                    86400,  # 24 hours for successful results
+                    json.dumps(response_data)
+                )
+                logger.info(f"Cached Apollo people search result for 24 hours: {cache_key}")
+            except Exception as cache_error:
+                logger.warning(f"Failed to cache result: {cache_error}")
+
+        # Store in PostgreSQL for long-term analysis and learning
+        if config.postgres_client:
+            try:
+                async with config.postgres_client.pool.acquire() as conn:
+                    # First ensure the table exists
+                    await conn.execute("""
+                        CREATE TABLE IF NOT EXISTS apollo_search_cache (
+                            id SERIAL PRIMARY KEY,
+                            search_type VARCHAR(50) NOT NULL,
+                            search_params JSONB NOT NULL,
+                            result_data JSONB NOT NULL,
+                            completeness_score FLOAT,
+                            has_linkedin BOOLEAN,
+                            has_phone BOOLEAN,
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            expires_at TIMESTAMP,
+                            hit_count INTEGER DEFAULT 0,
+                            UNIQUE (search_type, search_params)
+                        )
+                    """)
+
+                    # Create indexes if they don't exist
+                    await conn.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_apollo_cache_expires
+                        ON apollo_search_cache (expires_at)
+                    """)
+                    await conn.execute("""
+                        CREATE INDEX IF NOT EXISTS idx_apollo_cache_search_params
+                        ON apollo_search_cache USING GIN (search_params)
+                    """)
+
+                    # Now insert/update the cache entry
+                    await conn.execute("""
+                        INSERT INTO apollo_search_cache (
+                            search_type, search_params, result_data,
+                            completeness_score, has_linkedin, has_phone,
+                            created_at, expires_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+                        ON CONFLICT (search_type, search_params) DO UPDATE
+                        SET result_data = $3,
+                            completeness_score = $4,
+                            has_linkedin = $5,
+                            has_phone = $6,
+                            updated_at = CURRENT_TIMESTAMP,
+                            expires_at = $8,
+                            hit_count = apollo_search_cache.hit_count + 1
+                    """,
+                    "people",
+                    json.dumps(cache_key_parts),
+                    json.dumps(response_data),
+                    completeness_score,
+                    bool(person_data.get("linkedin_url")),
+                    bool(person_data.get("primary_phone") or person_data.get("phone_numbers")),
+                    datetime.utcnow(),
+                    datetime.utcnow() + timedelta(days=7)
+                    )
+                    logger.info("Stored Apollo search in PostgreSQL cache")
+            except Exception as db_error:
+                logger.warning(f"Failed to store in database: {db_error}")
+
+        return response_data
+
+    except Exception as e:
+        logger.error(f"Apollo people search error: {str(e)}", exc_info=True)
+
+        # Return detailed error response
+        error_response = {
+            "status": "error",
+            "error": {
+                "message": str(e),
+                "type": type(e).__name__,
+                "search_params": {
+                    "email": email,
+                    "name": name,
+                    "company_domain": company_domain,
+                    "job_title": job_title,
+                    "location": location,
+                    "page": page,
+                    "per_page": per_page
+                }
+            },
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+        raise HTTPException(
+            status_code=500,
+            detail=error_response
+        )
+
+
+@app.get("/api/apollo/cache/status", dependencies=[Depends(verify_api_key)])
+async def get_apollo_cache_status():
+    """
+    Get Apollo search cache statistics and health metrics.
+
+    Returns:
+    - Cache summary statistics
+    - Top searched items
+    - High quality cached results
+    - Cache hit rates and performance metrics
+    """
+    from app.apollo_cache_manager import ApolloCacheManager
+
+    try:
+        # Initialize cache manager
+        cache_manager = ApolloCacheManager(
+            postgres_conn=os.getenv("DATABASE_URL"),
+            redis_client=config.redis_client if hasattr(config, 'redis_client') else None
+        )
+
+        # Ensure table exists
+        await cache_manager.ensure_cache_table()
+
+        # Get statistics
+        stats = await cache_manager.get_cache_statistics()
+
+        return {
+            "status": "success",
+            "cache_statistics": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get Apollo cache status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/cache/cleanup", dependencies=[Depends(verify_api_key)])
+async def cleanup_apollo_cache():
+    """
+    Clean up expired Apollo cache entries.
+
+    Returns:
+    - Number of entries cleaned up
+    - Updated cache statistics
+    """
+    from app.apollo_cache_manager import ApolloCacheManager
+
+    try:
+        # Initialize cache manager
+        cache_manager = ApolloCacheManager(
+            postgres_conn=os.getenv("DATABASE_URL"),
+            redis_client=config.redis_client if hasattr(config, 'redis_client') else None
+        )
+
+        # Ensure table exists
+        await cache_manager.ensure_cache_table()
+
+        # Cleanup expired entries
+        deleted_count = await cache_manager.cleanup_expired_cache()
+
+        # Get updated statistics
+        stats = await cache_manager.get_cache_statistics()
+
+        return {
+            "status": "success",
+            "deleted_entries": deleted_count,
+            "cache_statistics": stats,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to cleanup Apollo cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/apollo/cache/export", dependencies=[Depends(verify_api_key)])
+async def export_apollo_cache(min_completeness: float = 80):
+    """
+    Export high-value Apollo cache entries for backup or analysis.
+
+    Parameters:
+    - min_completeness: Minimum data completeness score (0-100)
+
+    Returns:
+    - List of high-value cached search results
+    """
+    from app.apollo_cache_manager import ApolloCacheManager
+
+    try:
+        # Initialize cache manager
+        cache_manager = ApolloCacheManager(
+            postgres_conn=os.getenv("DATABASE_URL"),
+            redis_client=config.redis_client if hasattr(config, 'redis_client') else None
+        )
+
+        # Ensure table exists
+        await cache_manager.ensure_cache_table()
+
+        # Export high-value cache
+        results = await cache_manager.export_high_value_cache(min_completeness)
+
+        return {
+            "status": "success",
+            "exported_count": len(results),
+            "min_completeness_filter": min_completeness,
+            "results": results,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to export Apollo cache: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/apollo/test/decision-makers/{company_domain}", dependencies=[Depends(verify_api_key)])
+async def test_apollo_decision_makers(company_domain: str):
+    """
+    Test finding decision makers at a company.
+    """
+    from app.apollo_service_manager import ApolloServiceManager
+
+    try:
+        manager = ApolloServiceManager()
+        result = await manager.find_decision_makers(company_domain)
+
+        return {
+            "status": "success",
+            "company_domain": company_domain,
+            "decision_makers": result,
+            "count": len(result) if result else 0
+        }
+    except Exception as e:
+        logger.error(f"Apollo decision makers test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/apollo/test/similar-companies/{company_domain}", dependencies=[Depends(verify_api_key)])
+async def test_apollo_similar_companies(company_domain: str, limit: int = 10):
+    """
+    Test finding similar companies.
+    """
+    from app.apollo_service_manager import ApolloServiceManager
+
+    try:
+        manager = ApolloServiceManager()
+        result = await manager.find_similar_companies(company_domain, limit)
+
+        return {
+            "status": "success",
+            "reference_company": company_domain,
+            "similar_companies": result,
+            "count": len(result) if result else 0
+        }
+    except Exception as e:
+        logger.error(f"Apollo similar companies test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/test/recruitment-landscape", dependencies=[Depends(verify_api_key)])
+async def test_apollo_recruitment_landscape(
+    job_title: str,
+    location: Optional[str] = None,
+    industries: Optional[List[str]] = None
+):
+    """
+    Test recruitment landscape analysis.
+    """
+    from app.apollo_service_manager import ApolloServiceManager
+
+    try:
+        manager = ApolloServiceManager()
+        result = await manager.analyze_recruitment_landscape(
+            job_title=job_title,
+            location=location,
+            industries=industries
+        )
+
+        return {
+            "status": "success",
+            "analysis": result
+        }
+    except Exception as e:
+        logger.error(f"Apollo recruitment landscape test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/test/competitor-analysis/{company_domain}", dependencies=[Depends(verify_api_key)])
+async def test_apollo_competitor_analysis(company_domain: str, limit: int = 5):
+    """
+    Test competitor analysis with recruitment insights.
+    """
+    from app.apollo_service_manager import ApolloServiceManager
+
+    try:
+        manager = ApolloServiceManager()
+        result = await manager.analyze_competitors(company_domain, limit)
+
+        return {
+            "status": "success",
+            "analysis": result
+        }
+    except Exception as e:
+        logger.error(f"Apollo competitor analysis test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/test/batch-enrich", dependencies=[Depends(verify_api_key)])
+async def test_apollo_batch_enrichment(contacts: List[Dict[str, str]]):
+    """
+    Test batch contact enrichment.
+    Expects list of dicts with email/name/company fields.
+    """
+    from app.apollo_service_manager import ApolloServiceManager
+
+    try:
+        manager = ApolloServiceManager()
+        result = await manager.batch_enrich_contacts(contacts)
+
+        success_count = sum(1 for r in result if r["success"])
+
+        return {
+            "status": "success",
+            "enriched_contacts": result,
+            "total": len(result),
+            "successful": success_count,
+            "failed": len(result) - success_count
+        }
+    except Exception as e:
+        logger.error(f"Apollo batch enrichment test failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/search/companies", dependencies=[Depends(verify_api_key)])
+async def apollo_company_search_production(
+    company_name: Optional[str] = None,
+    domain: Optional[str] = None,
+    location: Optional[str] = None,
+    industry: Optional[str] = None,
+    technologies: Optional[List[str]] = None,
+    employee_count_min: Optional[int] = None,
+    employee_count_max: Optional[int] = None,
+    revenue_min: Optional[int] = None,
+    revenue_max: Optional[int] = None,
+    include_employees: bool = True,
+    include_decision_makers: bool = True,
+    include_recruiters: bool = True,
+    include_technologies: bool = True,
+    max_employees_per_company: int = 50,
+    page: int = 1,
+    per_page: int = 10
+):
+    """
+    Production-ready Apollo.io unlimited company search endpoint.
+
+    Extracts comprehensive company intelligence including:
+    - Full company details (website, phone, all social profiles)
+    - Complete address and location information
+    - Key employees with LinkedIn URLs and phone numbers
+    - Decision makers (C-level executives, VPs, Directors)
+    - Recruiters and HR contacts with full contact info
+    - Technologies used
+    - Funding information
+    - Revenue data
+
+    Parameters:
+    - company_name: Company name to search for
+    - domain: Company domain (e.g., "microsoft.com")
+    - location: Location filter (e.g., "San Francisco, CA")
+    - industry: Industry filter
+    - technologies: List of technologies the company uses
+    - employee_count_min/max: Employee count range
+    - revenue_min/max: Annual revenue range
+    - include_employees: Include detailed employee list
+    - include_decision_makers: Include C-suite and leadership
+    - include_recruiters: Include HR and recruitment contacts
+    - include_technologies: Include technology stack
+    - max_employees_per_company: Max employees to fetch per company (default 50)
+    - page: Page number for pagination
+    - per_page: Results per page (max 25)
+
+    Returns:
+    Comprehensive company data with full employee intelligence
+    """
+    from app.apollo_enricher import apollo_unlimited_company_search
+
+    try:
+        logger.info(f"Apollo company search request: company={company_name}, domain={domain}, location={location}")
+
+        # Validate at least one search parameter is provided
+        if not any([company_name, domain, location, industry]):
+            raise HTTPException(
+                status_code=400,
+                detail="At least one search parameter (company_name, domain, location, or industry) is required"
+            )
+
+        # Call the enhanced company search function
+        result = await apollo_unlimited_company_search(
+            company_name=company_name,
+            domain=domain,
+            location=location,
+            industry=industry
+        )
+
+        if not result:
+            return {
+                "status": "no_results",
+                "message": "No companies found matching the search criteria",
+                "search_params": {
+                    "company_name": company_name,
+                    "domain": domain,
+                    "location": location,
+                    "industry": industry
+                }
+            }
+
+        # Enhanced data extraction with additional processing
+        enhanced_result = {
+            "status": "success",
+            "company": {
+                # Core company information
+                "name": result.get("company_name"),
+                "domain": result.get("domain"),
+                "website": result.get("website"),
+                "description": result.get("description"),
+                "apollo_id": result.get("apollo_org_id"),
+
+                # Contact information
+                "contact": {
+                    "phone": result.get("phone"),
+                    "email_pattern": result.get("email_pattern"),
+                },
+
+                # Social profiles
+                "social_profiles": {
+                    "linkedin": result.get("linkedin_url"),
+                    "twitter": result.get("twitter_url"),
+                    "facebook": result.get("facebook_url"),
+                    "youtube": result.get("youtube_url"),
+                    "blog": result.get("blog_url"),
+                },
+
+                # Location details
+                "location": {
+                    "full_address": result.get("full_address"),
+                    "street": result.get("street_address"),
+                    "city": result.get("city"),
+                    "state": result.get("state"),
+                    "postal_code": result.get("postal_code"),
+                    "country": result.get("country"),
+                },
+
+                # Company metrics
+                "metrics": {
+                    "employee_count": result.get("employee_count"),
+                    "revenue": result.get("revenue"),
+                    "revenue_range": result.get("revenue_range"),
+                    "funding_total": result.get("funding_total"),
+                    "funding_stage": result.get("funding_stage"),
+                    "founded_year": result.get("founded_year"),
+                },
+
+                # Industry and market
+                "market": {
+                    "industry": result.get("industry"),
+                    "industries": result.get("industries"),
+                    "keywords": result.get("keywords"),
+                    "naics_codes": result.get("naics_codes"),
+                    "sic_codes": result.get("sic_codes"),
+                },
+
+                # Technology stack if requested
+                "technologies": result.get("technologies", []) if include_technologies else [],
+
+                # Employee intelligence
+                "employees": {
+                    "total_contacts": result.get("total_contacts"),
+                    "key_employees": result.get("key_employees", []) if include_employees else [],
+                    "decision_makers": result.get("decision_makers", []) if include_decision_makers else [],
+                    "recruiters": result.get("recruiters", []) if include_recruiters else [],
+                },
+
+                # Data quality metrics
+                "data_quality": {
+                    "confidence_score": result.get("confidence_score"),
+                    "completeness": calculate_data_completeness(result),
+                    "last_updated": datetime.utcnow().isoformat(),
+                }
+            },
+
+            # Metadata for tracking and analytics
+            "metadata": {
+                "search_params": {
+                    "company_name": company_name,
+                    "domain": domain,
+                    "location": location,
+                    "industry": industry,
+                    "technologies": technologies
+                },
+                "response_time_ms": None,  # Will be calculated by monitoring
+                "api_credits_used": 1,  # Apollo credits consumed
+                "data_points_extracted": count_data_points(result),
+            }
+        }
+
+        # Log successful extraction
+        logger.info(
+            f"Apollo company search successful: {enhanced_result['company']['name']} "
+            f"with {len(result.get('key_employees', []))} employees extracted"
+        )
+
+        return enhanced_result
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Apollo company search error: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=500,
+            detail=f"Company search failed: {str(e)}"
+        )
+
+
+def calculate_data_completeness(data: dict) -> float:
+    """Calculate the completeness of extracted company data"""
+    important_fields = [
+        "company_name", "domain", "website", "phone", "linkedin_url",
+        "street_address", "city", "state", "employee_count", "industry",
+        "key_employees", "decision_makers", "technologies"
+    ]
+
+    filled_fields = sum(1 for field in important_fields if data.get(field))
+    return round(filled_fields / len(important_fields) * 100, 1)
+
+
+def count_data_points(data: dict) -> int:
+    """Count total number of extracted data points"""
+    count = 0
+    for key, value in data.items():
+        if value is not None:
+            if isinstance(value, list):
+                count += len(value)
+            elif isinstance(value, dict):
+                count += count_data_points(value)
+            else:
+                count += 1
+    return count
+
+
+@app.post("/api/apollo/extract/location", dependencies=[Depends(verify_api_key)])
+async def apollo_extract_location_data(
+    company_name: Optional[str] = None,
+    company_domain: Optional[str] = None,
+    email: Optional[str] = None,
+    person_name: Optional[str] = None,
+    include_geocoding: bool = False,
+    extract_type: str = "company"  # "company" or "person"
+):
+    """
+    Extract comprehensive location and website data using Apollo.io.
+
+    Features:
+    - Complete company addresses (street, city, state, zip, country)
+    - Multiple office locations for multi-location companies
+    - Company websites, blog URLs, and social media profiles
+    - Timezone information for each location
+    - Optional geocoding for geographical coordinates
+    - Person location data with company locations
+
+    Args:
+        company_name: Company name to search for
+        company_domain: Company domain (e.g., "example.com")
+        email: Person's email (for person location extraction)
+        person_name: Person's name (for person location extraction)
+        include_geocoding: Whether to geocode addresses for coordinates
+        extract_type: Type of extraction ("company" or "person")
+
+    Returns:
+        Comprehensive location and website data
+    """
+    from app.apollo_location_extractor import (
+        extract_company_location_data,
+        extract_person_location_data
+    )
+
+    try:
+        # Validate input based on extraction type
+        if extract_type == "company":
+            if not company_name and not company_domain:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Either company_name or company_domain must be provided for company extraction"
+                )
+
+            # Extract company location data
+            result = await extract_company_location_data(
+                company_name=company_name,
+                company_domain=company_domain,
+                include_geocoding=include_geocoding,
+                geocoding_api_key=os.getenv("GOOGLE_GEOCODING_API_KEY")
+            )
+
+        elif extract_type == "person":
+            if not email and not person_name:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Either email or person_name must be provided for person extraction"
+                )
+
+            # Extract person location data
+            result = await extract_person_location_data(
+                email=email,
+                name=person_name,
+                include_company_locations=True
+            )
+
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid extract_type: {extract_type}. Must be 'company' or 'person'"
+            )
+
+        # Store extraction results in database for caching
+        if hasattr(app.state, 'postgres_client') and app.state.postgres_client:
+            try:
+                import json
+                cache_key = f"apollo_location_{extract_type}_{company_domain or company_name or email or person_name}"
+                async with app.state.postgres_client.pool.acquire() as conn:
+                    await conn.execute("""
+                        INSERT INTO apollo_location_cache (
+                            cache_key, location_data, created_at
+                        ) VALUES ($1, $2, $3)
+                        ON CONFLICT (cache_key) DO UPDATE
+                        SET location_data = $2, updated_at = $3
+                    """, cache_key, json.dumps(result), datetime.utcnow())
+            except Exception as db_error:
+                logger.warning(f"Failed to cache Apollo location data: {db_error}")
+
+        # Calculate success metrics
+        success_metrics = {
+            "extraction_type": extract_type,
+            "status": "success"
+        }
+
+        if extract_type == "company":
+            success_metrics.update({
+                "locations_found": len(result.get("locations", [])),
+                "websites_found": len(result.get("websites", {}).get("all_urls", [])),
+                "has_multiple_locations": result.get("metadata", {}).get("has_multiple_locations", False),
+                "geographic_coverage": result.get("metadata", {}).get("geographic_coverage", {})
+            })
+        else:
+            success_metrics.update({
+                "person_location_found": bool(result.get("person_location", {}).get("city")),
+                "company_locations_found": len(result.get("company_locations", [])),
+                "company_websites_found": len(result.get("company_websites", {}).get("all_urls", []))
+            })
+
+        return {
+            "status": "success",
+            "metrics": success_metrics,
+            "data": result
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Apollo location extraction failed: {str(e)}")
+        logger.error(traceback.format_exc())
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/extract/batch-locations", dependencies=[Depends(verify_api_key)])
+async def apollo_batch_location_extraction(
+    entities: List[Dict[str, str]],
+    entity_type: str = "company",
+    include_geocoding: bool = False
+):
+    """
+    Batch extract location data for multiple companies or people.
+
+    Args:
+        entities: List of entities with identifiers
+                 For companies: [{"name": "...", "domain": "..."}, ...]
+                 For people: [{"email": "...", "name": "...", "include_company": true}, ...]
+        entity_type: Type of entities ("company" or "person")
+        include_geocoding: Whether to geocode addresses for coordinates
+
+    Returns:
+        List of extraction results for each entity
+    """
+    from app.apollo_location_extractor import batch_extract_locations
+
+    try:
+        if not entities:
+            raise HTTPException(
+                status_code=400,
+                detail="At least one entity must be provided"
+            )
+
+        if len(entities) > 50:
+            raise HTTPException(
+                status_code=400,
+                detail="Maximum 50 entities per batch request"
+            )
+
+        results = await batch_extract_locations(
+            entities=entities,
+            entity_type=entity_type,
+            include_geocoding=include_geocoding,
+            geocoding_api_key=os.getenv("GOOGLE_GEOCODING_API_KEY")
+        )
+
+        # Calculate batch metrics
+        successful = sum(1 for r in results if "error" not in r)
+        failed = len(results) - successful
+
+        return {
+            "status": "success",
+            "batch_metrics": {
+                "total_entities": len(results),
+                "successful": successful,
+                "failed": failed,
+                "entity_type": entity_type,
+                "geocoding_enabled": include_geocoding
+            },
+            "results": results
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Apollo batch location extraction failed: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/apollo/capabilities", dependencies=[Depends(verify_api_key)])
+async def get_apollo_capabilities():
+    """
+    Get a summary of all available Apollo.io capabilities.
+    """
+    return {
+        "status": "active",
+        "api_key_configured": bool(os.getenv("APOLLO_API_KEY")),
+        "endpoints": {
+            "enrichment": {
+                "people": "/api/apollo/test/enrich",
+                "batch": "/api/apollo/test/batch-enrich",
+                "description": "Enrich contact data with comprehensive information"
+            },
+            "search": {
+                "people": "/api/apollo/test/search-people",
+                "organizations": "/api/apollo/test/search-organizations",
+                "companies_production": "/api/apollo/search/companies",
+                "description": "Search with advanced filters - production company endpoint available"
+            },
+            "intelligence": {
+                "decision_makers": "/api/apollo/test/decision-makers/{company_domain}",
+                "similar_companies": "/api/apollo/test/similar-companies/{company_domain}",
+                "recruitment_landscape": "/api/apollo/test/recruitment-landscape",
+                "competitor_analysis": "/api/apollo/test/competitor-analysis/{company_domain}",
+                "description": "Advanced business intelligence features"
+            },
+            "location_extraction": {
+                "extract_location": "/api/apollo/extract/location",
+                "batch_locations": "/api/apollo/extract/batch-locations",
+                "description": "Extract complete addresses, websites, and multi-location data with geocoding"
+            }
+        },
+        "production_endpoints": {
+            "/api/apollo/search/companies": {
+                "method": "POST",
+                "description": "Production-ready unlimited company search with comprehensive data extraction",
+                "features": [
+                    "Full company profiles with all available data",
+                    "Employee lists with LinkedIn and phone numbers",
+                    "Decision makers and C-suite contacts",
+                    "HR and recruiter contacts",
+                    "Technology stack analysis",
+                    "Funding and revenue information",
+                    "Complete address and social profiles"
+                ]
+            }
+        },
+        "current_integration": {
+            "location": "Email processing pipeline",
+            "trigger": "After AI extraction",
+            "fields_mapped": [
+                "candidate_name",
+                "company_name",
+                "job_title",
+                "phone_number",
+                "company_website",
+                "location"
+            ]
+        },
+        "starter_plan_features": [
+            "250 email credits/month",
+            "Unlimited people search",
+            "Unlimited company search",
+            "Basic filters and exports",
+            "API access"
+        ]
+    }
+
+
+# ============================================
+# BULK APOLLO ENRICHMENT ENDPOINTS
+# ============================================
+
+@app.post("/api/apollo/bulk/enrich", dependencies=[Depends(verify_api_key)])
+async def bulk_enrich_records(
+    request: Request,
+    record_ids: Optional[List[str]] = None,
+    emails: Optional[List[str]] = None,
+    filters: Optional[Dict[str, Any]] = None,
+    priority: str = "MEDIUM",
+    batch_size: int = 50,
+    include_company: bool = True,
+    include_employees: bool = False,
+    update_zoho: bool = True,
+    webhook_url: Optional[str] = None
+):
+    """
+    Bulk enrich existing Zoho records with Apollo.io data.
+
+    This endpoint processes existing records from PostgreSQL and enriches them
+    with comprehensive data from Apollo.io including:
+    - LinkedIn profiles
+    - Phone numbers
+    - Company websites
+    - Location data
+    - Key employees (optional)
+
+    Parameters:
+    - record_ids: List of specific record IDs to enrich
+    - emails: List of emails to find and enrich records for
+    - filters: Advanced filters for record selection
+    - priority: Job priority (HIGH, MEDIUM, LOW, BACKGROUND)
+    - batch_size: Number of records per batch (1-100)
+    - include_company: Include company enrichment
+    - include_employees: Include key employees data
+    - update_zoho: Update Zoho CRM records after enrichment
+    - webhook_url: URL for job completion notification
+
+    Returns job ID for tracking progress.
+    """
+    try:
+        from app.bulk_enrichment_service import BulkEnrichmentService, BulkEnrichmentRequest, EnrichmentPriority
+
+        # Initialize bulk enrichment service if not already done
+        if not hasattr(request.app.state, 'bulk_enrichment_service'):
+            db_manager = request.app.state.connection_manager or request.app.state.postgres_client
+            websocket_manager = getattr(request.app.state, 'signalr_manager', None)
+
+            request.app.state.bulk_enrichment_service = BulkEnrichmentService(
+                db_manager=db_manager,
+                websocket_manager=websocket_manager
+            )
+            await request.app.state.bulk_enrichment_service.initialize()
+
+        # Create enrichment request
+        enrichment_request = BulkEnrichmentRequest(
+            record_ids=record_ids,
+            emails=emails,
+            filters=filters,
+            priority=EnrichmentPriority[priority.upper()],
+            batch_size=batch_size,
+            include_company=include_company,
+            include_employees=include_employees,
+            update_zoho=update_zoho,
+            webhook_url=webhook_url
+        )
+
+        # Create job
+        job_id = await request.app.state.bulk_enrichment_service.create_job(enrichment_request)
+
+        return {
+            "status": "accepted",
+            "job_id": job_id,
+            "message": "Bulk enrichment job created successfully",
+            "tracking_url": f"/api/apollo/bulk/status/{job_id}"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create bulk enrichment job: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/apollo/bulk/status/{job_id}", dependencies=[Depends(verify_api_key)])
+async def get_bulk_enrichment_status(request: Request, job_id: str):
+    """
+    Get status of a bulk enrichment job.
+
+    Returns detailed metrics including:
+    - Current processing status
+    - Records processed/enriched/failed
+    - Success rate
+    - Data completeness metrics
+    - LinkedIn/phone/website discovery rates
+    """
+    try:
+        if not hasattr(request.app.state, 'bulk_enrichment_service'):
+            raise HTTPException(status_code=503, detail="Bulk enrichment service not initialized")
+
+        status = await request.app.state.bulk_enrichment_service.get_job_status(job_id)
+
+        if not status:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+        return status
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to get job status: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/apollo/bulk/stats", dependencies=[Depends(verify_api_key)])
+async def get_enrichment_statistics(request: Request, days: int = 7):
+    """
+    Get enrichment statistics for the specified period.
+
+    Returns:
+    - Total enrichments performed
+    - Average data completeness
+    - Success rates
+    - Processing times
+    - Active jobs count
+    """
+    try:
+        if not hasattr(request.app.state, 'bulk_enrichment_service'):
+            raise HTTPException(status_code=503, detail="Bulk enrichment service not initialized")
+
+        stats = await request.app.state.bulk_enrichment_service.get_enrichment_stats(days=days)
+
+        return {
+            "status": "success",
+            "statistics": stats,
+            "period": f"Last {days} days"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to get enrichment statistics: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/apollo/schedule/create", dependencies=[Depends(verify_api_key)])
+async def create_enrichment_schedule(
+    request: Request,
+    name: str,
+    schedule_type: str = "DAILY",
+    filters: Optional[Dict[str, Any]] = None,
+    config: Optional[Dict[str, Any]] = None,
+    custom_cron: Optional[str] = None
+):
+    """
+    Create a scheduled enrichment job.
+
+    Schedule types:
+    - HOURLY: Every hour
+    - DAILY: Daily at midnight
+    - WEEKLY: Weekly on Sunday
+    - MONTHLY: Monthly on the 1st
+    - CUSTOM: Custom cron expression
+
+    Example filters:
+    - {"missing_linkedin": true, "created_after": "30_days_ago"}
+    - {"source": "Referral", "has_email": true}
+
+    Example config:
+    - {"priority": "BACKGROUND", "batch_size": 50, "include_company": true}
+    """
+    try:
+        from app.enrichment_scheduler import EnrichmentScheduler, ScheduleType, create_default_schedules
+
+        # Initialize scheduler if not already done
+        if not hasattr(request.app.state, 'enrichment_scheduler'):
+            db_manager = request.app.state.connection_manager or request.app.state.postgres_client
+
+            if not hasattr(request.app.state, 'bulk_enrichment_service'):
+                from app.bulk_enrichment_service import BulkEnrichmentService
+                websocket_manager = getattr(request.app.state, 'signalr_manager', None)
+                request.app.state.bulk_enrichment_service = BulkEnrichmentService(
+                    db_manager=db_manager,
+                    websocket_manager=websocket_manager
+                )
+                await request.app.state.bulk_enrichment_service.initialize()
+
+            request.app.state.enrichment_scheduler = await create_default_schedules(
+                db_manager=db_manager,
+                enrichment_service=request.app.state.bulk_enrichment_service
+            )
+
+        # Create schedule
+        schedule_id = await request.app.state.enrichment_scheduler.create_schedule(
+            name=name,
+            schedule_type=ScheduleType[schedule_type.upper()],
+            filters=filters,
+            config=config,
+            custom_cron=custom_cron
+        )
+
+        return {
+            "status": "success",
+            "schedule_id": schedule_id,
+            "message": f"Schedule '{name}' created successfully"
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to create enrichment schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/api/apollo/schedule/list", dependencies=[Depends(verify_api_key)])
+async def list_enrichment_schedules(request: Request):
+    """
+    List all enrichment schedules.
+
+    Returns schedule details including:
+    - Schedule ID and name
+    - Cron expression
+    - Filters and configuration
+    - Last run and next run times
+    - Active status
+    """
+    try:
+        if not hasattr(request.app.state, 'enrichment_scheduler'):
+            return {
+                "status": "success",
+                "schedules": [],
+                "message": "No schedules configured"
+            }
+
+        schedules = await request.app.state.enrichment_scheduler.get_schedules()
+
+        return {
+            "status": "success",
+            "schedules": schedules,
+            "count": len(schedules)
+        }
+
+    except Exception as e:
+        logger.error(f"Failed to list enrichment schedules: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/api/apollo/schedule/{schedule_id}", dependencies=[Depends(verify_api_key)])
+async def update_enrichment_schedule(
+    request: Request,
+    schedule_id: str,
+    updates: Dict[str, Any]
+):
+    """
+    Update an existing enrichment schedule.
+
+    Updatable fields:
+    - name: Schedule name
+    - cron_expression: Cron timing
+    - filters: Record selection filters
+    - config: Enrichment configuration
+    - is_active: Enable/disable schedule
+    """
+    try:
+        if not hasattr(request.app.state, 'enrichment_scheduler'):
+            raise HTTPException(status_code=503, detail="Enrichment scheduler not initialized")
+
+        success = await request.app.state.enrichment_scheduler.update_schedule(
+            schedule_id=schedule_id,
+            updates=updates
+        )
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Schedule {schedule_id} not found")
+
+        return {
+            "status": "success",
+            "message": f"Schedule {schedule_id} updated successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to update enrichment schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/api/apollo/schedule/{schedule_id}", dependencies=[Depends(verify_api_key)])
+async def delete_enrichment_schedule(request: Request, schedule_id: str):
+    """Delete an enrichment schedule."""
+    try:
+        if not hasattr(request.app.state, 'enrichment_scheduler'):
+            raise HTTPException(status_code=503, detail="Enrichment scheduler not initialized")
+
+        success = await request.app.state.enrichment_scheduler.delete_schedule(schedule_id)
+
+        if not success:
+            raise HTTPException(status_code=404, detail=f"Schedule {schedule_id} not found")
+
+        return {
+            "status": "success",
+            "message": f"Schedule {schedule_id} deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to delete enrichment schedule: {str(e)}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 if __name__ == "__main__":
     import uvicorn

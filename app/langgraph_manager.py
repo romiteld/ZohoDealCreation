@@ -1438,6 +1438,108 @@ class EmailProcessingWorkflow:
                 result = enhanced_result
             except Exception as e:
                 logger.warning(f"Could not enhance extraction: {e}")
+
+            # Apply Apollo phone discovery if no phone found or to find additional phones
+            try:
+                if not result.get('phone') or True:  # Always try to discover more phones
+                    from app.apollo_enricher import apollo_unlimited_people_search, apollo_unlimited_company_search
+                    from app.phone_utilities import PhoneExtractor
+
+                    logger.info("Starting Apollo phone number discovery...")
+
+                    # Extract any phones from email text first
+                    email_phones = PhoneExtractor.extract_from_text(state.get('email_content', ''))
+                    if email_phones:
+                        logger.info(f"Found {len(email_phones)} phone numbers in email text")
+
+                    # Search Apollo for person's phone numbers
+                    person_phones = []
+                    if result.get('email') or result.get('candidate_name'):
+                        apollo_person = await apollo_unlimited_people_search(
+                            email=result.get('email'),
+                            name=result.get('candidate_name'),
+                            company_domain=sender_domain,
+                            job_title=result.get('job_title')
+                        )
+
+                        if apollo_person:
+                            # Extract all phone numbers
+                            if apollo_person.get('phone'):
+                                person_phones.append({
+                                    'number': apollo_person['phone'],
+                                    'type': 'primary'
+                                })
+                            if apollo_person.get('mobile_phone'):
+                                person_phones.append({
+                                    'number': apollo_person['mobile_phone'],
+                                    'type': 'mobile'
+                                })
+                            if apollo_person.get('work_phone'):
+                                person_phones.append({
+                                    'number': apollo_person['work_phone'],
+                                    'type': 'work'
+                                })
+
+                            # Update result with Apollo data
+                            if not result.get('phone') and person_phones:
+                                result['phone'] = person_phones[0]['number']
+
+                            # Add additional enriched fields
+                            if apollo_person.get('linkedin_url') and not result.get('linkedin_url'):
+                                result['linkedin_url'] = apollo_person['linkedin_url']
+                            if apollo_person.get('firm_company') and not result.get('company_guess'):
+                                result['company_guess'] = apollo_person['firm_company']
+
+                            logger.info(f"Apollo person search found {len(person_phones)} phone numbers")
+
+                    # Search Apollo for company phone numbers
+                    company_phones = []
+                    if result.get('company_guess'):
+                        apollo_company = await apollo_unlimited_company_search(
+                            company_name=result.get('company_guess')
+                        )
+
+                        if apollo_company:
+                            if apollo_company.get('phone'):
+                                company_phones.append({
+                                    'number': apollo_company['phone'],
+                                    'type': 'company_main'
+                                })
+
+                            # Add key employee phones
+                            for employee in apollo_company.get('key_employees', [])[:3]:
+                                if employee.get('phone'):
+                                    company_phones.append({
+                                        'number': employee['phone'],
+                                        'type': 'work',
+                                        'owner': employee.get('name')
+                                    })
+
+                            logger.info(f"Apollo company search found {len(company_phones)} phone numbers")
+
+                    # Combine all discovered phones
+                    all_phones = email_phones + [{'original': p['number'], 'type': p['type']} for p in person_phones + company_phones]
+
+                    if all_phones:
+                        # Add phone discovery metadata to notes
+                        phone_summary = f"Discovered {len(all_phones)} phone numbers: "
+                        phone_types = {}
+                        for p in all_phones:
+                            ptype = p.get('type', 'unknown')
+                            phone_types[ptype] = phone_types.get(ptype, 0) + 1
+
+                        phone_summary += ', '.join([f"{count} {ptype}" for ptype, count in phone_types.items()])
+
+                        existing_notes = result.get('notes', '')
+                        if existing_notes:
+                            result['notes'] = f"{existing_notes}. {phone_summary}"
+                        else:
+                            result['notes'] = phone_summary
+
+                        logger.info(f"Phone discovery complete: {phone_summary}")
+
+            except Exception as e:
+                logger.warning(f"Apollo phone discovery failed: {e}")
             
             return {
                 "extraction_result": result,

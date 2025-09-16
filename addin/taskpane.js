@@ -1060,6 +1060,15 @@ function populateForm(data) {
 
     // Calculate extraction confidence and show Express Send banner if high
     calculateAndShowExtractionConfidence(data);
+
+    // ============ APOLLO ENHANCEMENT ============
+    // Check if we should enhance with Apollo data
+    if (window.apolloWebSocketManager && shouldEnhanceWithApollo(data)) {
+        console.log('🚀 Initiating Apollo enrichment...');
+        enhanceWithApolloData(data);
+    } else {
+        console.log('⚡ Skipping Apollo enrichment - insufficient identifiers or disabled');
+    }
 }
 
 /**
@@ -2916,4 +2925,212 @@ function addConfidenceIndicator(confidence) {
     }
 
     formHeader.appendChild(indicator);
+}/**
+ * Check if we should enhance the current data with Apollo
+ * @param {Object} data - Extracted email data
+ * @returns {boolean} - True if Apollo enhancement should be performed
+ */
+function shouldEnhanceWithApollo(data) {
+    // Check if we have at least one strong identifier for Apollo search
+    const hasEmail = data.candidateEmail || data.candidate_email || data.email;
+    const hasName = data.candidateName || data.candidate_name || 
+                   (data.contactFirstName || data.contactLastName);
+    const hasCompany = data.firmName || data.firm_name || data.company_name;
+    
+    // Need at least email + (name OR company) for effective Apollo search
+    const hasMinimumIdentifiers = hasEmail && (hasName || hasCompany);
+    
+    // Check if Apollo WebSocket is connected
+    const apolloConnected = window.apolloWebSocketManager?.isConnected;
+    
+    console.log('Apollo enhancement check:', {
+        hasEmail: !!hasEmail,
+        hasName: !!hasName, 
+        hasCompany: !!hasCompany,
+        hasMinimumIdentifiers,
+        apolloConnected
+    });
+    
+    return hasMinimumIdentifiers && apolloConnected;
+}
+
+/**
+ * Enhance form data with Apollo intelligence using WebSocket streaming
+ * @param {Object} data - Current extracted data
+ */
+async function enhanceWithApolloData(data) {
+    try {
+        // Show Apollo enrichment progress
+        showApolloEnrichmentProgress();
+        
+        // Prepare Apollo search parameters
+        const apolloSearchParams = {
+            // Primary identifiers
+            email: data.candidateEmail || data.candidate_email || data.email,
+            name: data.candidateName || data.candidate_name || 
+                  `${data.contactFirstName || ''} ${data.contactLastName || ''}`.trim(),
+            
+            // Company information
+            company_domain: extractDomainFromEmail(data.candidateEmail || data.candidate_email || data.email),
+            company_name: data.firmName || data.firm_name || data.company_name,
+            
+            // Professional context
+            job_title: data.jobTitle || data.job_title,
+            location: data.location || data.candidateLocation,
+            
+            // Additional context from email
+            email_subject: currentEmailData?.subject,
+            sender_domain: currentEmailData?.from?.emailAddress?.split('@')[1]
+        };
+
+        console.log('🔍 Apollo search parameters:', apolloSearchParams);
+
+        // Request Apollo enrichment through WebSocket
+        const enrichmentId = await window.apolloWebSocketManager.requestApolloEnrichment(
+            apolloSearchParams,
+            {
+                includePhone: true,
+                includeLinkedIn: true, 
+                includeCompanyIntel: true,
+                includeDeepEnrichment: true,
+                maxResults: 5,
+                confidenceThreshold: 0.7
+            }
+        );
+
+        if (enrichmentId) {
+            console.log('✅ Apollo enrichment initiated:', enrichmentId);
+            // The WebSocket manager will handle streaming responses
+            // and automatically update the form fields
+        } else {
+            console.warn('⚠️ Apollo enrichment failed to start');
+            hideApolloEnrichmentProgress();
+        }
+
+    } catch (error) {
+        console.error('❌ Apollo enrichment error:', error);
+        hideApolloEnrichmentProgress();
+        
+        // Show error message to user
+        window.apolloWebSocketManager?.showEnrichmentStatus(
+            'Apollo enrichment temporarily unavailable', 
+            'warning'
+        );
+    }
+}
+
+/**
+ * Show Apollo enrichment progress indicator
+ */
+function showApolloEnrichmentProgress() {
+    // Check if progress element already exists
+    let progressElement = document.getElementById('apolloEnrichmentProgress');
+    
+    if (!progressElement) {
+        // Create progress element
+        progressElement = document.createElement('div');
+        progressElement.id = 'apolloEnrichmentProgress';
+        progressElement.className = 'apollo-enrichment-progress';
+        progressElement.innerHTML = `
+            <div class="apollo-progress-header">
+                <div class="apollo-progress-title">
+                    <span class="icon">🚀</span> Apollo Enhancement
+                </div>
+                <div class="apollo-progress-percentage">0%</div>
+            </div>
+            <div class="apollo-progress-bar">
+                <div class="apollo-progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="apollo-progress-steps">
+                <div class="apollo-progress-step active">People Search</div>
+                <div class="apollo-progress-step">Company Intel</div>
+                <div class="apollo-progress-step">Phone Discovery</div>
+                <div class="apollo-progress-step">LinkedIn Extract</div>
+                <div class="apollo-progress-step">Quality Score</div>
+            </div>
+        `;
+        
+        // Insert after the Express Send banner or at the top
+        const expressBanner = document.getElementById('expressSendBanner');
+        const previewForm = document.getElementById('previewForm');
+        
+        if (expressBanner && expressBanner.style.display !== 'none') {
+            expressBanner.parentNode.insertBefore(progressElement, expressBanner.nextSibling);
+        } else if (previewForm) {
+            previewForm.insertBefore(progressElement, previewForm.firstChild);
+        }
+    }
+    
+    // Show the progress element
+    progressElement.style.display = 'block';
+    
+    // Start progress animation
+    animateApolloProgress();
+}
+
+/**
+ * Hide Apollo enrichment progress indicator
+ */
+function hideApolloEnrichmentProgress() {
+    const progressElement = document.getElementById('apolloEnrichmentProgress');
+    if (progressElement) {
+        progressElement.style.display = 'none';
+    }
+}
+
+/**
+ * Animate Apollo progress steps
+ */
+function animateApolloProgress() {
+    const steps = ['People Search', 'Company Intel', 'Phone Discovery', 'LinkedIn Extract', 'Quality Score'];
+    let currentStep = 0;
+    
+    const interval = setInterval(() => {
+        // Update progress bar
+        const percentage = ((currentStep + 1) / steps.length) * 100;
+        const progressFill = document.querySelector('.apollo-progress-fill');
+        const progressPercentage = document.querySelector('.apollo-progress-percentage');
+        
+        if (progressFill) {
+            progressFill.style.width = `${percentage}%`;
+        }
+        if (progressPercentage) {
+            progressPercentage.textContent = `${Math.round(percentage)}%`;
+        }
+        
+        // Update step indicators
+        const stepElements = document.querySelectorAll('.apollo-progress-step');
+        stepElements.forEach((step, index) => {
+            if (index < currentStep) {
+                step.className = 'apollo-progress-step completed';
+            } else if (index === currentStep) {
+                step.className = 'apollo-progress-step active';
+            } else {
+                step.className = 'apollo-progress-step';
+            }
+        });
+        
+        currentStep++;
+        
+        // Complete after all steps or when Apollo finishes
+        if (currentStep >= steps.length) {
+            clearInterval(interval);
+            // Hide progress after a brief delay to show completion
+            setTimeout(() => hideApolloEnrichmentProgress(), 2000);
+        }
+    }, 1500); // 1.5 seconds per step
+}
+
+/**
+ * Extract domain from email address
+ * @param {string} email - Email address
+ * @returns {string|null} - Domain or null
+ */
+function extractDomainFromEmail(email) {
+    if (!email || typeof email !== 'string' || !email.includes('@')) {
+        return null;
+    }
+    
+    const parts = email.split('@');
+    return parts.length === 2 ? parts[1].toLowerCase() : null;
 }

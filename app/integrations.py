@@ -297,10 +297,32 @@ class PostgreSQLClient:
             bdat_beta INTEGER NOT NULL,
             created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
         );
-        
+
+        -- Apollo enrichments table for storing LinkedIn and social media URLs
+        CREATE TABLE IF NOT EXISTS apollo_enrichments (
+            email TEXT PRIMARY KEY,
+            linkedin_url TEXT,
+            twitter_url TEXT,
+            facebook_url TEXT,
+            github_url TEXT,
+            company_linkedin_url TEXT,
+            company_twitter_url TEXT,
+            company_facebook_url TEXT,
+            phone TEXT,
+            mobile_phone TEXT,
+            work_phone TEXT,
+            enriched_data JSONB,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+
         -- Create indexes
         CREATE INDEX IF NOT EXISTS idx_email_history_message_id ON email_processing_history(internet_message_id);
         CREATE INDEX IF NOT EXISTS idx_email_history_primary_email ON email_processing_history(primary_email);
+        CREATE INDEX IF NOT EXISTS idx_apollo_enrichments_linkedin
+            ON apollo_enrichments(linkedin_url) WHERE linkedin_url IS NOT NULL;
+        CREATE INDEX IF NOT EXISTS idx_apollo_enrichments_company
+            ON apollo_enrichments((enriched_data->>'firm_company')) WHERE enriched_data IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_email_history_processed_at ON email_processing_history(processed_at);
         CREATE INDEX IF NOT EXISTS idx_company_cache_domain ON company_enrichment_cache(domain);
         CREATE INDEX IF NOT EXISTS idx_zoho_mapping_lookup ON zoho_record_mapping(record_type, lookup_key, lookup_value);
