@@ -74,134 +74,137 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 
 ## 🏗️ System Architecture Overview
 
-### 🌐 Complete System Architecture
+### 🌐 System Context - C4 Level 1
 
 ```mermaid
-graph TB
-    subgraph "📱 Client Layer"
-        OA[["📧 Outlook Add-in<br/>• Client Info Form<br/>• Send to Zoho Button<br/>• Manifest v2.0.0.5"]]
-        API_CLIENT[["🔌 API Clients<br/>• REST Integration<br/>• Webhook Receivers<br/>• Third-party Apps"]]
-        WEB[["🌐 Web Interface<br/>• Admin Dashboard<br/>• Analytics Portal<br/>• Configuration UI"]]
-    end
+C4Context
+    title System Context for Well Intake API
 
-    subgraph "🔐 Security & Gateway Layer"
-        PROXY[["🛡️ OAuth Proxy Service<br/>• Flask/IIS Server<br/>• Token Management<br/>• Rate Limiting: 100/min<br/>• Circuit Breaker"]]
-        FD[["⚡ Azure Front Door<br/>• Global CDN<br/>• DDoS Protection<br/>• WAF Rules<br/>• SSL Termination"]]
-        KV[["🔑 Key Vault<br/>• Secret Rotation<br/>• API Keys<br/>• OAuth Tokens<br/>• Connection Strings"]]
-    end
+    Person(user, "Recruitment Team", "Uses Outlook to process candidate emails and create CRM records")
+    Person(admin, "System Administrator", "Manages system configuration, policies, and monitoring")
 
-    subgraph "🧠 AI Processing Engine"
-        API[["🚀 FastAPI Core<br/>• Container Apps<br/>• Auto-scaling 2-10<br/>• Health Monitoring<br/>• WebSocket Support"]]
+    System(wellIntake, "Well Intake API", "AI-powered email processing system that transforms recruitment emails into structured Zoho CRM records")
 
-        LG[["🔄 LangGraph Pipeline<br/>━━━━━━━━━━━━━━━━<br/>1️⃣ Extract Node<br/>2️⃣ Research Node<br/>3️⃣ Validate Node<br/>━━━━━━━━━━━━━━━━<br/>StateGraph v0.2.74"]]
+    System_Ext(outlook, "Microsoft Outlook", "Email client with custom add-in")
+    System_Ext(zoho, "Zoho CRM", "Customer relationship management system")
+    System_Ext(openai, "OpenAI GPT-5", "Large language model for text extraction and processing")
+    System_Ext(firecrawl, "Firecrawl API", "Web scraping service for company research")
+    System_Ext(apollo, "Apollo.io", "Contact enrichment and data intelligence platform")
 
-        GPT[["🤖 GPT-5 Multi-Tier<br/>• GPT-5-nano: $0.05/1M<br/>• GPT-5-mini: $0.25/1M<br/>• GPT-5-full: $1.25/1M<br/>• Temperature: 1.0"]]
+    Rel(user, outlook, "Reads emails, uses add-in")
+    Rel(outlook, wellIntake, "Sends email data via HTTPS/API")
+    Rel(wellIntake, zoho, "Creates/updates CRM records via REST API")
+    Rel(wellIntake, openai, "Processes text via API calls")
+    Rel(wellIntake, firecrawl, "Researches companies via API")
+    Rel(wellIntake, apollo, "Enriches contact data via API")
+    Rel(admin, wellIntake, "Monitors, configures system")
 
-        VOIT[["🎯 VoIT Orchestrator<br/>• Budget Control<br/>• Model Selection<br/>• Quality Target: 0.9<br/>• Effort Units: 5.0"]]
-    end
+    UpdateElementStyle(wellIntake, $bgColor="#1976D2", $fontColor="#FFFFFF")
+    UpdateElementStyle(user, $bgColor="#2E7D32")
+    UpdateElementStyle(admin, $bgColor="#E65100")
+```
 
-    subgraph "💾 Data & Intelligence Services"
-        CACHE[["💎 Redis Cache<br/>• 90% Cost Reduction<br/>• 92% Hit Rate<br/>• 24hr TTL<br/>• Pattern Recognition"]]
+### 🏗️ Container View - C4 Level 2
 
-        PG[["🗄️ PostgreSQL<br/>• v15 + pgvector<br/>• 400K Context<br/>• Vector Search<br/>• Deduplication"]]
+```mermaid
+C4Container
+    title Container View for Well Intake API
 
-        SEARCH[["🔍 AI Search<br/>• Semantic Index<br/>• Template Learning<br/>• Pattern Storage<br/>• Company Profiles"]]
+    Person(user, "Recruitment Team", "Users processing candidate emails")
 
-        C3[["🔮 C³ Cache<br/>• Conformal Bounds<br/>• Risk: 1% (δ=0.01)<br/>• Edit Distance: 3<br/>• Embeddings"]]
-    end
+    Container_Boundary(c1, "Well Intake System") {
+        Container(outlook_addin, "Outlook Add-in", "JavaScript, HTML", "Provides 'Send to Zoho' functionality within Outlook")
+        Container(oauth_proxy, "OAuth Proxy Service", "Flask, IIS", "Handles authentication, rate limiting, and API routing")
+        Container(api_core, "FastAPI Core", "Python, FastAPI", "Main application with LangGraph workflow engine")
+        Container(webapp, "Web Interface", "React, TypeScript", "Admin dashboard and analytics portal")
+    }
 
-    subgraph "🌐 External Enrichment APIs"
-        FIRE[["🔥 Firecrawl v2<br/>• Company Research<br/>• 30+ Data Fields<br/>• 5s Timeout<br/>• $149-800 Savings"]]
+    ContainerDb(redis, "Redis Cache", "Azure Cache for Redis", "Intelligent caching with 90% cost reduction")
+    ContainerDb(postgres, "PostgreSQL", "Azure Database", "Main data store with pgvector for 400K context")
+    ContainerDb(blob_storage, "Blob Storage", "Azure Storage", "Email attachments and file storage")
+    ContainerDb(search_index, "AI Search", "Azure Search", "Semantic pattern learning and indexing")
 
-        APOLLO[["🚀 Apollo.io<br/>• Contact Enrichment<br/>• People Match API<br/>• Email Validation<br/>• Phone Numbers"]]
+    Container(service_bus, "Service Bus", "Azure Service Bus", "Batch processing and message queuing")
+    Container(signalr, "SignalR Service", "Azure SignalR", "Real-time streaming and WebSocket connections")
 
-        ULTRA[["💫 Ultra Enrichment<br/>• Revenue Data<br/>• Employee Count<br/>• Funding Info<br/>• Tech Stack"]]
-    end
+    System_Ext(zoho, "Zoho CRM", "Customer relationship management")
+    System_Ext(openai, "OpenAI API", "GPT-5 language models")
+    System_Ext(firecrawl, "Firecrawl API", "Web scraping service")
+    System_Ext(apollo, "Apollo.io API", "Contact enrichment")
 
-    subgraph "⚡ Async & Streaming"
-        SB[["📬 Service Bus<br/>• Batch Processing<br/>• 50 emails/context<br/>• Message Queue<br/>• Retry Logic"]]
+    Rel(user, outlook_addin, "Uses add-in features")
+    Rel(outlook_addin, oauth_proxy, "HTTPS API calls")
+    Rel(oauth_proxy, api_core, "Authenticated requests")
+    Rel(user, webapp, "Views dashboards, configures system")
 
-        SR[["📡 SignalR<br/>• WebSocket Server<br/>• Real-time Updates<br/>• <200ms Latency<br/>• Live Streaming"]]
+    Rel(api_core, redis, "Caches patterns and responses")
+    Rel(api_core, postgres, "Stores records and metadata")
+    Rel(api_core, blob_storage, "Uploads attachments")
+    Rel(api_core, search_index, "Indexes semantic patterns")
+    Rel(api_core, service_bus, "Queues batch jobs")
+    Rel(api_core, signalr, "Streams real-time updates")
 
-        BATCH[["📦 Batch Processor<br/>• Parallel Execution<br/>• Queue Management<br/>• Error Handling<br/>• Progress Tracking"]]
-    end
+    Rel(api_core, zoho, "Creates CRM records")
+    Rel(api_core, openai, "Processes with AI")
+    Rel(api_core, firecrawl, "Researches companies")
+    Rel(api_core, apollo, "Enriches contacts")
 
-    subgraph "🔗 Integration Layer"
-        ZOHO[["📊 Zoho CRM v8<br/>• Accounts/Contacts<br/>• Deals Pipeline<br/>• Custom Fields<br/>• Webhook Events"]]
+    UpdateElementStyle(api_core, $bgColor="#1976D2", $fontColor="#FFFFFF")
+    UpdateElementStyle(oauth_proxy, $bgColor="#388E3C", $fontColor="#FFFFFF")
+```
 
-        BLOB[["☁️ Blob Storage<br/>• Attachments<br/>• 25MB Limit<br/>• SAS Tokens<br/>• Private Container"]]
+### 🔧 Component View - C4 Level 3 (FastAPI Core)
 
-        QUEUE[["📋 Storage Queue<br/>• Dead Letter<br/>• Poison Messages<br/>• Retry Queue<br/>• Archive Storage"]]
-    end
+```mermaid
+C4Component
+    title Component View - FastAPI Core Container
 
-    subgraph "📊 Monitoring & Analytics"
-        AI[["📈 App Insights<br/>• Custom Metrics<br/>• Cost Tracking<br/>• Performance KPIs<br/>• Alert Rules"]]
+    Container_Boundary(c1, "FastAPI Core") {
+        Component(main_api, "Main API", "FastAPI Router", "REST endpoints for email processing and management")
+        Component(langgraph_mgr, "LangGraph Manager", "Python Class", "Orchestrates 3-node AI processing pipeline")
+        Component(cache_mgr, "Cache Manager", "Python Class", "Manages Redis caching with C³ algorithm")
+        Component(db_enhancer, "Database Enhancer", "Python Class", "Handles PostgreSQL operations with pgvector")
+        Component(batch_processor, "Batch Processor", "Python Class", "Processes multiple emails in single context")
+        Component(streaming_endpoints, "Streaming Endpoints", "WebSocket Handler", "Real-time processing updates")
+        Component(security_config, "Security Config", "Python Module", "API keys, authentication, rate limiting")
+        Component(business_rules, "Business Rules", "Python Module", "Deal formatting, source determination logic")
+        Component(integrations, "Integrations", "Python Module", "External API clients (Zoho, OpenAI, etc.)")
+        Component(monitoring, "Monitoring", "Python Module", "Application Insights telemetry and metrics")
+    }
 
-        DASH[["📊 Dashboards<br/>• Real-time Metrics<br/>• Business KPIs<br/>• Error Tracking<br/>• Usage Analytics"]]
+    ContainerDb(redis, "Redis Cache", "Key-value store")
+    ContainerDb(postgres, "PostgreSQL", "Relational database")
+    ContainerDb(blob_storage, "Blob Storage", "File storage")
 
-        LOG[["📝 Log Analytics<br/>• Query Engine<br/>• Alert Manager<br/>• Retention: 30d<br/>• Export to SIEM"]]
-    end
+    System_Ext(zoho_api, "Zoho CRM API", "External CRM system")
+    System_Ext(openai_api, "OpenAI API", "AI processing service")
+    System_Ext(firecrawl_api, "Firecrawl API", "Web scraping service")
+    System_Ext(apollo_api, "Apollo.io API", "Contact enrichment")
 
-    %% Client Connections
-    OA -.->|HTTPS| PROXY
-    API_CLIENT -.->|REST| PROXY
-    WEB -.->|HTTPS| FD
+    Rel(main_api, langgraph_mgr, "Initiates processing workflow")
+    Rel(main_api, cache_mgr, "Checks/stores cache entries")
+    Rel(main_api, batch_processor, "Handles batch requests")
+    Rel(main_api, streaming_endpoints, "Manages WebSocket connections")
+    Rel(main_api, security_config, "Validates authentication")
 
-    %% Gateway Routing
-    FD ==>|Cache/CDN| PROXY
-    PROXY ==>|Auth| KV
-    PROXY ==>|Forward| API
+    Rel(langgraph_mgr, business_rules, "Applies formatting rules")
+    Rel(langgraph_mgr, integrations, "Calls external APIs")
+    Rel(langgraph_mgr, db_enhancer, "Stores processing results")
 
-    %% Core Processing Flow
-    API ==>|Workflow| LG
-    LG ==>|Extract| GPT
-    LG ==>|Optimize| VOIT
-    VOIT ==>|Select Model| GPT
+    Rel(cache_mgr, redis, "Cache operations")
+    Rel(db_enhancer, postgres, "Database operations")
+    Rel(integrations, blob_storage, "File uploads")
 
-    %% Data Layer
-    LG ==>|Check Cache| C3
-    C3 ==>|Miss| CACHE
-    LG ==>|Store| PG
-    LG ==>|Index| SEARCH
+    Rel(integrations, zoho_api, "CRM record creation")
+    Rel(integrations, openai_api, "AI text processing")
+    Rel(integrations, firecrawl_api, "Company research")
+    Rel(integrations, apollo_api, "Contact enrichment")
 
-    %% Enrichment Flow
-    LG -.->|Research| FIRE
-    FIRE -.->|Enhance| APOLLO
-    APOLLO -.->|Enrich| ULTRA
+    Rel(monitoring, main_api, "Collects metrics")
 
-    %% Async Operations
-    API ==>|Queue| SB
-    SB ==>|Process| BATCH
-    API ==>|Stream| SR
-
-    %% Integration Points
-    API ==>|Create Records| ZOHO
-    API ==>|Upload| BLOB
-    API -.->|Dead Letter| QUEUE
-
-    %% Monitoring
-    API -.->|Telemetry| AI
-    AI -.->|Visualize| DASH
-    AI -.->|Analyze| LOG
-
-    %% Styling
-    classDef client fill:#E3F2FD,stroke:#1976D2,stroke-width:2px
-    classDef security fill:#E8F5E9,stroke:#388E3C,stroke-width:2px
-    classDef ai fill:#FFF3E0,stroke:#F57C00,stroke-width:2px
-    classDef data fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px
-    classDef external fill:#E0F2F1,stroke:#00796B,stroke-width:2px
-    classDef async fill:#FFEBEE,stroke:#C62828,stroke-width:2px
-    classDef integration fill:#F1F8E9,stroke:#558B2F,stroke-width:2px
-    classDef monitoring fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px
-
-    class OA,API_CLIENT,WEB client
-    class PROXY,FD,KV security
-    class API,LG,GPT,VOIT ai
-    class CACHE,PG,SEARCH,C3 data
-    class FIRE,APOLLO,ULTRA external
-    class SB,SR,BATCH async
-    class ZOHO,BLOB,QUEUE integration
-    class AI,DASH,LOG monitoring
+    UpdateElementStyle(langgraph_mgr, $bgColor="#F57C00", $fontColor="#FFFFFF")
+    UpdateElementStyle(cache_mgr, $bgColor="#7B1FA2", $fontColor="#FFFFFF")
+    UpdateElementStyle(integrations, $bgColor="#00796B", $fontColor="#FFFFFF")
 ```
 
 ### 🔄 Enhanced LangGraph Processing Pipeline with Firecrawl v2 Supercharged
