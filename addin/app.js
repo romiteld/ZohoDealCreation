@@ -1,6 +1,6 @@
 // Configuration
 const API_BASE_URL = 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
-const API_KEY = localStorage.getItem('apiKey') || 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
+const API_KEY = localStorage.getItem('apiKey') || '';
 
 // Global variables
 let extractedData = null;

@@ -67,8 +67,8 @@ class ApolloWebSocketManager {
             }
 
             const script = document.createElement('script');
-            // Load SignalR from Azure Front Door CDN (already allowed in CSP)
-            script.src = 'https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/signalr.min.js';
+            // Load SignalR from local file to avoid CSP issues
+            script.src = './signalr.min.js';
             script.onload = () => resolve(window.signalR);
             script.onerror = () => reject(new Error('Failed to load SignalR client'));
             document.head.appendChild(script);

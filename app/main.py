@@ -816,10 +816,27 @@ async def get_learning_insights(domain: Optional[str] = None, days_back: int = 3
         
         if not search_manager:
             # Fallback to creating a new instance
-            from app.azure_ai_search_manager import AzureAISearchManager
-            search_manager = AzureAISearchManager()
-        
-        insights = await search_manager.get_learning_insights(
+            try:
+                from app.azure_ai_search_manager import AzureAISearchManager
+                search_manager = AzureAISearchManager()
+            except Exception as e:
+                logger.warning(f"Could not initialize Azure AI Search: {e}")
+                # Return default insights when search is not available
+                return {
+                    "total_patterns": 0,
+                    "confidence_improvement": 0,
+                    "most_common_corrections": [],
+                    "learning_rate": 0,
+                    "company_templates": 0,
+                    "patterns_used_for_enhancement": 0,
+                    "successful_pattern_matches": 0,
+                    "average_pattern_confidence": 0,
+                    "most_effective_domains": [],
+                    "message": "Learning insights temporarily unavailable"
+                }
+
+        try:
+            insights = await search_manager.get_learning_insights(
             email_domain=domain,
             days_back=days_back
         )

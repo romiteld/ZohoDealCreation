@@ -106,6 +106,14 @@ class PostgreSQLClient:
         await self.init_pool()
         async with self.pool.acquire() as conn:
             await conn.fetchval('SELECT 1')
+
+    async def close(self):
+        """Close the connection pool."""
+        if self.pool:
+            await self.pool.close()
+            self.pool = None
+        if self.enhanced_client and hasattr(self.enhanced_client, 'close'):
+            await self.enhanced_client.close()
     
     async def ensure_tables(self):
         """Create tables if they don't exist."""
@@ -1154,9 +1162,13 @@ class ZohoClient:
 # Legacy compatibility
 class ZohoApiClient(ZohoClient):
     """Legacy compatibility wrapper."""
-    
+
     def __init__(self, oauth_service_url: str = None):
         super().__init__()
+
+    def get_access_token(self) -> str:
+        """Public method for health checks."""
+        return self._get_access_token()
     
     async def create_or_update_records(self, extracted_data, sender_email: str, attachment_urls: list = None, is_duplicate: bool = False) -> dict:
         """
