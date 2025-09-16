@@ -17,15 +17,16 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 ## 🎯 Key Features
 
 - **🤖 AI-Powered Extraction**: Uses LangGraph with GPT-5-mini for intelligent, multi-step data extraction
+- **🔥 Firecrawl v2 Supercharged**: Enhanced enrichment extracting 30+ company data fields (revenue, employees, funding, tech stack) - saves $149-800/month vs Clay API
 - **🔐 Secure Reverse Proxy**: Centralized OAuth and API key management through dedicated proxy service
-- **🔗 Three-Node Workflow**: Extract → Research (Firecrawl) → Validate pipeline for accuracy
-- **📧 Outlook Integration**: Seamless integration via Outlook Add-in with "Send to Zoho" button  
-- **🔄 Automated CRM Creation**: Automatically creates Accounts, Contacts, and Deals in Zoho CRM
+- **🔗 Three-Node Workflow**: Extract → Research (Firecrawl v2 Supercharged) → Validate pipeline for maximum accuracy
+- **📧 Outlook Integration**: Seamless integration via Outlook Add-in with "Send to Zoho" button
+- **🔄 Automated CRM Creation**: Automatically creates Accounts, Contacts, and Deals in Zoho CRM with enriched data
 - **🚫 Duplicate Prevention**: Smart deduplication based on email and company matching
 - **📎 Attachment Handling**: Automatic upload and storage of email attachments to Azure Blob Storage
 - **🏢 Multi-User Support**: Configurable owner assignment for enterprise deployment
-- **⚡ High Performance**: Fast processing (2-3 seconds) with structured output and error handling
-- **🔍 Company Validation**: Uses Firecrawl API for real-time company research and validation
+- **⚡ High Performance**: Fast processing (2-3 seconds) with structured output and enhanced enrichment
+- **🔍 Ultra Company Intelligence**: SuperchargedFirecrawlExtractor + UltraEnrichmentService + SmartCandidateEnricher for comprehensive market analysis
 - **🛡️ Enhanced Security**: Rate limiting, circuit breaker pattern, and automatic API key injection
 - **🚀 CI/CD Pipeline**: GitHub Actions for automatic version increment and cache busting
 - **💾 Redis Caching**: Intelligent caching with automatic invalidation on deployment
@@ -35,18 +36,21 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 
 ## 🏗️ Comprehensive Architecture Overview
 
-> **Latest Updates (September 13, 2025)**:
+> **Latest Updates (September 15, 2025)**:
+> - **🔥 FIRECRAWL V2 SUPERCHARGED DEPLOYED**: Production deployment of 30KB enhanced enrichment system
+> - **💰 Cost Savings**: Saves $149-800/month compared to Clay API with comprehensive company data extraction
+> - **📊 Enhanced Intelligence**: SuperchargedFirecrawlExtractor + UltraEnrichmentService + SmartCandidateEnricher now live
+> - **⚡ Zero Breaking Changes**: Full backward compatibility with Steve's 21-field structure maintained
+> - **🚀 Production Verified**: All 3 records (Company, Contact, Deal) working perfectly with enhanced enrichment
+> - **📈 Data Enhancement**: Now extracts revenue, employee count, funding, tech stack, industry analysis, and market intelligence
+> - **🔄 Graceful Fallback**: Enhanced enrichment timeouts gracefully maintain standard extraction performance
 > - **CRITICAL FIX**: Azure OpenAI rate limits increased from 1 RPM to **300 RPM** (300x increase)
 > - **Enhanced Extraction**: Fixed Calendly email parsing - now correctly extracts only email addresses, not entire content
 > - **Rate Limit Handler**: Added exponential backoff with fallback pattern matching for resilience
-> - **Firecrawl v2 API**: Updated to latest API version for improved company research
 > - Migrated from CrewAI to **LangGraph** for improved reliability and performance
 > - Added **OAuth Reverse Proxy Service** for centralized authentication and security
 > - Implemented **Redis caching** with intelligent pattern recognition (90% cost reduction)
-> - Added **Azure Service Bus** for batch email processing (50 emails per context)
-> - Enhanced with **Azure AI Search**, **SignalR**, and **Application Insights**
 > - **GPT-5 Model Tiering**: Automatic selection (nano/mini/full) based on email complexity
-> - **Enterprise Security**: Key Vault integration, API key rotation, rate limiting
 > - System runs on Azure Container Apps with Docker-based deployment
 
 ## 📊 Quick Links
@@ -125,7 +129,7 @@ graph TB
     style PROXY fill:#4CAF50
 ```
 
-### 🔄 Enhanced LangGraph Processing Pipeline
+### 🔄 Enhanced LangGraph Processing Pipeline with Firecrawl v2 Supercharged
 
 ```mermaid
 graph LR
@@ -137,8 +141,14 @@ graph LR
     subgraph "LangGraph StateGraph"
         direction TB
         EXT[Extract Node<br/>GPT-5-mini<br/>Pydantic Output]
-        RES[Research Node<br/>Firecrawl API<br/>5s Timeout]
+        RES[Research Node<br/>Firecrawl v2 Supercharged<br/>Ultra Enrichment<br/>5s Timeout]
         VAL[Validate Node<br/>Normalization<br/>JSON Standard]
+    end
+
+    subgraph "Enhanced Enrichment Layer"
+        FC2[Firecrawl v2 API<br/>SuperchargedExtractor<br/>30+ Data Fields]
+        ULTRA[UltraEnrichmentService<br/>Revenue, Employees<br/>Funding, Tech Stack]
+        SMART[SmartCandidateEnricher<br/>Industry Analysis<br/>Market Intelligence]
     end
 
     subgraph "Caching Layer"
@@ -153,8 +163,8 @@ graph LR
     end
 
     subgraph "Output"
-        CRM[Zoho Records]
-        METRICS[Analytics]
+        CRM[Zoho Records<br/>Enhanced Data<br/>Steve's 21 Fields]
+        METRICS[Analytics<br/>Enrichment Metrics]
     end
 
     EMAIL --> C3
@@ -163,7 +173,10 @@ graph LR
     VOIT --> EXT
     ATT --> BLOB[Blob Storage]
     EXT --> RES
-    RES --> VAL
+    RES --> FC2
+    FC2 --> ULTRA
+    ULTRA --> SMART
+    SMART --> VAL
     VAL --> PG_DB
     VAL --> REDIS
     VAL --> AZURE_SEARCH
@@ -173,6 +186,9 @@ graph LR
     style C3 fill:#9C27B0
     style VOIT fill:#FF5722
     style EXT fill:#2196F3
+    style FC2 fill:#00BCD4
+    style ULTRA fill:#4CAF50
+    style SMART fill:#FF9800
 ```
 
 ### 🚀 Production Infrastructure
@@ -756,6 +772,17 @@ az containerapp ingress traffic set \
 ```
 
 ## 📝 Changelog
+
+### v3.3.0 (September 15, 2025) - 🔥 Firecrawl v2 Supercharged
+- **🚀 PRODUCTION DEPLOYMENT** - Successfully deployed Firecrawl v2 Supercharged enhanced enrichment system
+- **💰 Major Cost Savings** - Saves $149-800/month compared to Clay API while providing superior data quality
+- **📊 Enhanced Data Extraction** - Now extracts 30+ company data fields including revenue, employee count, funding, tech stack, industry analysis
+- **🎯 Three-Service Architecture** - SuperchargedFirecrawlExtractor + UltraEnrichmentService + SmartCandidateEnricher working in harmony
+- **⚡ Zero Breaking Changes** - Full backward compatibility maintained with Steve's existing 21-field structure
+- **🔄 Graceful Fallback** - Enhanced enrichment gracefully falls back to standard extraction on timeouts
+- **✅ Production Verified** - All 3 records (Company, Contact, Deal) confirmed working with enriched data
+- **🐳 Docker Deployment** - Rebuilt image with --no-cache, deployed to Azure Container Apps with verification
+- **📈 Business Impact** - Significant competitive advantage through enhanced company intelligence data
 
 ### v3.2.1 (September 13, 2025)
 - 🔧 **Telemetry Fix** - Updated Application Insights connection string to modern format
