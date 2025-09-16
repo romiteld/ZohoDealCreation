@@ -36,7 +36,13 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 
 ## 🏗️ Comprehensive Architecture Overview
 
-> **Latest Updates (September 15, 2025)**:
+> **Latest Updates (September 16, 2025)**:
+> - **🔧 Duplicate Prevention Enhancement**: Refined to 5-minute window for same candidate to prevent rapid resubmissions
+> - **📧 Brandon's Vault System**: Added candidate email generation capability for streamlined outreach
+> - **✅ Extraction Fix**: Corrected client info extraction to properly isolate referrer details
+> - **📊 Manifest v2.0.0.5**: Auto-incremented version with latest fixes and features
+>
+> **Production Features (September 15, 2025)**:
 > - **🔥 FIRECRAWL V2 SUPERCHARGED DEPLOYED**: Production deployment of 30KB enhanced enrichment system
 > - **💰 Cost Savings**: Saves $149-800/month compared to Clay API with comprehensive company data extraction
 > - **📊 Enhanced Intelligence**: SuperchargedFirecrawlExtractor + UltraEnrichmentService + SmartCandidateEnricher now live
@@ -772,6 +778,13 @@ az containerapp ingress traffic set \
 ```
 
 ## 📝 Changelog
+
+### v3.4.0 (September 16, 2025) - 📊 Documentation & Architecture Updates
+- **📐 Architecture Documentation** - Updated comprehensive C4 model diagrams with latest infrastructure
+- **📋 README Updates** - Synchronized documentation with production features and deployment status
+- **🔧 Enhanced Duplicate Prevention** - Tightened to 5-minute window for same candidate submissions
+- **✅ Client Info Extraction Fix** - Corrected extraction to stop pulling referrer location/company incorrectly
+- **📧 Brandon's Vault Generator** - Added new candidate email generation capability for Vault system
 
 ### v3.3.0 (September 15, 2025) - 🔥 Firecrawl v2 Supercharged
 - **🚀 PRODUCTION DEPLOYMENT** - Successfully deployed Firecrawl v2 Supercharged enhanced enrichment system
