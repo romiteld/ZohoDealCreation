@@ -6,7 +6,7 @@
 
 // SignalR Configuration
 const SIGNALR_ENDPOINT = 'https://wellintakesignalr0903.service.signalr.net';
-const APOLLO_HUB_NAME = 'ApolloEnrichmentHub';
+const APOLLO_HUB_NAME = 'apollohub';
 
 // Apollo Enrichment WebSocket Manager
 class ApolloWebSocketManager {

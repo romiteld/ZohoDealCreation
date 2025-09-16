@@ -1889,7 +1889,7 @@ function handleCancel() {
         'candidatePhone', 'linkedinUrl', 'jobTitle',
         'location', 'firmName', 'referrerName',
         'referrerEmail', 'notes', 'calendlyUrl',
-        'contactCity', 'contactState'
+        'contactCity', 'contactState', 'companyPhone', 'companyWebsite'
     ];
 
     fieldsToClear.forEach(fieldId => {
