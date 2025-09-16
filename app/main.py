@@ -495,10 +495,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             # More permissive CSP for add-in pages
             response.headers["Content-Security-Policy"] = (
                 "default-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com https://ajax.aspnetcdn.com; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com https://ajax.aspnetcdn.com https://cdnjs.cloudflare.com; "
                 "style-src 'self' 'unsafe-inline' https://*.office.com; "
                 "img-src 'self' data: https://*.office.com https://*.microsoft.com https://*.azurecontainerapps.io; "
-                "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com; "
+                "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com https://*.service.signalr.net wss://*.service.signalr.net https://cdnjs.cloudflare.com; "
                 "frame-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com https://telemetryservice.firstpartyapps.oaspapps.com; "
                 "frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com https://outlook.officeppe.com https://*.microsoft.com https://*.office.com;"
             )
