@@ -95,6 +95,9 @@ class ExtractionConfig:
     azure_openai_api_version: str = "2024-08-01-preview"
     azure_openai_deployment: Optional[str] = None
 
+    # Apollo enrichment configuration
+    apollo_api_key: Optional[str] = None
+
 @dataclass
 class SecurityConfig:
     """Security and authentication configuration"""
@@ -275,7 +278,9 @@ class ConfigManager:
             azure_openai_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT"),
             azure_openai_api_key=self._get_secret("azure-openai-key", "AZURE_OPENAI_KEY"),
             azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
-            azure_openai_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini")
+            azure_openai_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini"),
+            # Apollo enrichment configuration
+            apollo_api_key=self._get_secret("apollo-api-key", "APOLLO_API_KEY")
         )
         
         logger.info(f"Extraction configuration loaded - LangExtract: {self.extraction.use_langextract}, A/B Testing: {self.extraction.a_b_testing_enabled}")

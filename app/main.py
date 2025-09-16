@@ -35,6 +35,7 @@ from app.microsoft_graph_client import MicrosoftGraphClient
 from app.azure_ad_auth import get_auth_service
 from app.realtime_queue_manager import get_queue_manager, websocket_endpoint, EmailStatus
 from app.manifest_cache_service import get_manifest_cache_service
+from app.duplicate_checker import DuplicateChecker
 
 # Import Vault Agent routes
 from app.api.vault_agent.routes import router as vault_agent_router
@@ -42,6 +43,9 @@ from app.api.vault_agent.routes import router as vault_agent_router
 # Import Admin routes
 from app.admin import policies_router
 from app.admin.import_exports_v2 import router as import_v2_router
+
+# Import Apollo enrichment
+from app.apollo_enricher import enrich_contact_with_apollo
 
 # API Key Authentication with secure comparison and rate limiting
 import hmac
@@ -258,7 +262,13 @@ async def lifespan(app: FastAPI):
     if hasattr(app.state, 'postgres_client') and app.state.postgres_client:
         app.state.zoho_integration.pg_client = app.state.postgres_client
         logger.info("Zoho integration initialized with PostgreSQL caching")
-    
+
+    # Initialize duplicate checker with PostgreSQL client
+    app.state.duplicate_checker = DuplicateChecker()
+    if hasattr(app.state, 'postgres_client') and app.state.postgres_client:
+        app.state.duplicate_checker.postgres_client = app.state.postgres_client
+        logger.info("Duplicate checker initialized with PostgreSQL support")
+
     # Initialize Service Bus manager if connection string is available
     service_bus_conn = os.getenv("SERVICE_BUS_CONNECTION_STRING") or os.getenv("AZURE_SERVICE_BUS_CONNECTION_STRING")
     if service_bus_conn:
@@ -1500,7 +1510,7 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
             for attachment in request.attachments:
                 url = await blob_storage.upload_attachment(
                     attachment.filename,
-                    attachment.content,
+                    attachment.content_base64,
                     attachment.content_type
                 )
                 if url:
@@ -1596,12 +1606,122 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                         logger.info(f"Enhanced extraction with {len(hints)} pattern insights")
                 
                 extracted_data = await workflow.process_email(
-                    request.body, 
-                    sender_domain, 
+                    request.body,
+                    sender_domain,
                     learning_hints=learning_hints
                 )
                 logger.info(f"Extracted data with LangGraph: {extracted_data}")
-                
+
+                # CLIENT EXTRACTION: If user context is provided, use AI to extract true client details
+                if request.user_context:
+                    try:
+                        from app.client_extractor import extract_client_details_with_ai
+
+                        full_email_content = f"Subject: {request.subject}\n\nBody: {request.body}"
+                        client_details = await extract_client_details_with_ai(
+                            full_email_content,
+                            request.user_context
+                        )
+
+                        if client_details:
+                            logger.info(f"AI client extraction successful: {client_details}")
+
+                            # Override sender fields if client email/name were extracted
+                            if client_details.get('client_email'):
+                                request.sender_email = client_details['client_email']
+                                logger.info(f"Overrode sender_email with client email: {client_details['client_email']}")
+
+                            if client_details.get('client_name'):
+                                request.sender_name = client_details['client_name']
+                                logger.info(f"Overrode sender_name with client name: {client_details['client_name']}")
+
+                            # Store additional AI extraction details for downstream use
+                            if not request.ai_extraction:
+                                request.ai_extraction = {}
+                            request.ai_extraction.update(client_details)
+
+                        else:
+                            logger.info("AI client extraction found no distinct client information")
+
+                    except Exception as e:
+                        logger.error(f"Client extraction error: {str(e)}")
+                        # Don't fail the entire processing - this is an enhancement feature
+
+                # APOLLO ENRICHMENT: Enrich contact information after successful AI extraction
+                try:
+                    apollo_data = await enrich_contact_with_apollo(request.sender_email)
+                    if apollo_data:
+                        logger.info(f"Apollo enrichment successful for {request.sender_email}")
+
+                        # Map Apollo response fields to internal schema if no user corrections exist
+                        if not request.user_corrections:
+                            apollo_mapped = {}
+
+                            # Map Apollo fields to our internal schema
+                            if apollo_data.get('client_name'):
+                                apollo_mapped['candidate_name'] = apollo_data['client_name']
+                            if apollo_data.get('firm_company'):
+                                apollo_mapped['company_name'] = apollo_data['firm_company']
+                            if apollo_data.get('job_title'):
+                                apollo_mapped['job_title'] = apollo_data['job_title']
+                            if apollo_data.get('phone'):
+                                apollo_mapped['phone_number'] = apollo_data['phone']
+                            if apollo_data.get('website'):
+                                apollo_mapped['company_website'] = apollo_data['website']
+                            if apollo_data.get('location'):
+                                apollo_mapped['location'] = apollo_data['location']
+
+                            # Store enriched data in user_corrections if we have mapped data
+                            if apollo_mapped:
+                                # Preserve any existing AI extraction notes
+                                if hasattr(extracted_data, 'notes') and extracted_data.notes:
+                                    apollo_mapped['notes'] = extracted_data.notes
+                                elif hasattr(extracted_data, 'model_dump'):
+                                    extracted_dict = extracted_data.model_dump()
+                                    if extracted_dict.get('notes'):
+                                        apollo_mapped['notes'] = extracted_dict['notes']
+
+                                # Store Apollo enrichment as user corrections for consistent processing
+                                request.user_corrections = apollo_mapped
+                                logger.info(f"Applied Apollo enrichment: {list(apollo_mapped.keys())}")
+
+                                # Update sender name and email from enriched data if available
+                                if apollo_data.get('client_name') and not request.sender_name:
+                                    request.sender_name = apollo_data['client_name']
+                                if apollo_data.get('email') and apollo_data['email'] != request.sender_email:
+                                    # Keep original sender_email but log the enriched one
+                                    logger.info(f"Apollo provided alternative email: {apollo_data['email']}")
+                            else:
+                                logger.info("Apollo data received but no mappable fields found")
+                        else:
+                            logger.info("User corrections already exist, skipping Apollo mapping")
+                    else:
+                        logger.info(f"No Apollo enrichment data found for {request.sender_email}")
+                except Exception as e:
+                    logger.warning(f"Apollo enrichment failed for {request.sender_email}: {str(e)}")
+                    # Continue processing without Apollo enrichment
+
+                # Apply historical corrections to the extracted data
+                if hasattr(req.app.state, 'correction_service') and req.app.state.correction_service:
+                    try:
+                        # Convert ExtractedData to dict if needed
+                        extracted_dict = extracted_data.model_dump() if hasattr(extracted_data, 'model_dump') else extracted_data.__dict__
+
+                        # Apply learned corrections
+                        corrected_data, corrections_applied = await req.app.state.correction_service.apply_historical_corrections(
+                            extracted_dict,
+                            sender_domain,
+                            request.body
+                        )
+
+                        if corrections_applied:
+                            logger.info(f"Applied {len(corrections_applied)} historical corrections: {list(corrections_applied.keys())}")
+                            # Update the extracted_data with corrections
+                            from app.models import ExtractedData
+                            extracted_data = ExtractedData(**corrected_data)
+                    except Exception as e:
+                        logger.warning(f"Could not apply historical corrections: {e}")
+
                 # PHASE 2: Track pattern matching metrics in learning analytics
                 if hasattr(req.app.state, 'learning_analytics') and req.app.state.learning_analytics:
                     try:
@@ -1658,7 +1778,61 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                 logger.warning(f"LangGraph processing failed: {e}, using fallback extractor")
                 from app.langgraph_manager import SimplifiedEmailExtractor
                 extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
-        
+
+                # APOLLO ENRICHMENT: Also apply Apollo enrichment for fallback extraction
+                try:
+                    apollo_data = await enrich_contact_with_apollo(request.sender_email)
+                    if apollo_data:
+                        logger.info(f"Apollo enrichment successful for {request.sender_email} (fallback case)")
+
+                        # Map Apollo response fields to internal schema if no user corrections exist
+                        if not request.user_corrections:
+                            apollo_mapped = {}
+
+                            # Map Apollo fields to our internal schema
+                            if apollo_data.get('client_name'):
+                                apollo_mapped['candidate_name'] = apollo_data['client_name']
+                            if apollo_data.get('firm_company'):
+                                apollo_mapped['company_name'] = apollo_data['firm_company']
+                            if apollo_data.get('job_title'):
+                                apollo_mapped['job_title'] = apollo_data['job_title']
+                            if apollo_data.get('phone'):
+                                apollo_mapped['phone_number'] = apollo_data['phone']
+                            if apollo_data.get('website'):
+                                apollo_mapped['company_website'] = apollo_data['website']
+                            if apollo_data.get('location'):
+                                apollo_mapped['location'] = apollo_data['location']
+
+                            # Store enriched data in user_corrections if we have mapped data
+                            if apollo_mapped:
+                                # Preserve any existing AI extraction notes
+                                if hasattr(extracted_data, 'notes') and extracted_data.notes:
+                                    apollo_mapped['notes'] = extracted_data.notes
+                                elif hasattr(extracted_data, 'model_dump'):
+                                    extracted_dict = extracted_data.model_dump()
+                                    if extracted_dict.get('notes'):
+                                        apollo_mapped['notes'] = extracted_dict['notes']
+
+                                # Store Apollo enrichment as user corrections for consistent processing
+                                request.user_corrections = apollo_mapped
+                                logger.info(f"Applied Apollo enrichment (fallback): {list(apollo_mapped.keys())}")
+
+                                # Update sender name and email from enriched data if available
+                                if apollo_data.get('client_name') and not request.sender_name:
+                                    request.sender_name = apollo_data['client_name']
+                                if apollo_data.get('email') and apollo_data['email'] != request.sender_email:
+                                    # Keep original sender_email but log the enriched one
+                                    logger.info(f"Apollo provided alternative email: {apollo_data['email']}")
+                            else:
+                                logger.info("Apollo data received but no mappable fields found (fallback)")
+                        else:
+                            logger.info("User corrections already exist, skipping Apollo mapping (fallback)")
+                    else:
+                        logger.info(f"No Apollo enrichment data found for {request.sender_email} (fallback case)")
+                except Exception as apollo_e:
+                    logger.warning(f"Apollo enrichment failed for {request.sender_email} (fallback case): {str(apollo_e)}")
+                    # Continue processing without Apollo enrichment
+
         # Apply business rules
         processed_data = business_rules.process_data(
             extracted_data.model_dump() if hasattr(extracted_data, 'model_dump') else extracted_data,
@@ -1719,18 +1893,59 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         
         if hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
             await req.app.state.postgres_client.init_pool()
-            
+
+            # Check for duplicates BEFORE starting transaction
+            if hasattr(req.app.state, 'duplicate_checker') and req.app.state.duplicate_checker:
+                duplicate_data = {
+                    'candidate_name': enhanced_data.candidate_name,
+                    'company_name': enhanced_data.company_name or account_name,
+                    'email': enhanced_data.email,
+                    'job_title': enhanced_data.job_title
+                }
+
+                existing_record = await req.app.state.duplicate_checker.check_database_duplicate(duplicate_data)
+
+                if existing_record and req.app.state.duplicate_checker.should_block_duplicate(existing_record):
+                    # Duplicate found within time window - block creation
+                    time_since = existing_record.get('time_since_creation', 0)
+                    logger.warning(
+                        f"Blocking duplicate: {enhanced_data.candidate_name} at {account_name} "
+                        f"(created {time_since:.0f} seconds ago)"
+                    )
+
+                    # Return duplicate response
+                    return ZohoResponse(
+                        status="duplicate_blocked",
+                        deal_id=existing_record.get('zoho_deal_id'),
+                        account_id=existing_record.get('zoho_account_id'),
+                        contact_id=existing_record.get('zoho_contact_id'),
+                        deal_name=deal_name,
+                        primary_email=enhanced_data.email or request.sender_email,
+                        message=f"Duplicate record detected - {enhanced_data.candidate_name} at {account_name} was already processed {time_since:.0f} seconds ago",
+                        extracted=enhanced_data,
+                        saved_to_db=False,
+                        saved_to_zoho=False,
+                        correlation_id=correlation_id,
+                        duplicate_info={
+                            "is_duplicate": True,
+                            "time_since_creation": time_since,
+                            "existing_deal_id": existing_record.get('deal_id'),
+                            "existing_zoho_deal_id": existing_record.get('zoho_deal_id')
+                        }
+                    )
+
             # Start transaction
             async with req.app.state.postgres_client.pool.acquire() as conn:
                 async with conn.transaction():
                     try:
-                        # Step 1: Upsert into deals table
+                        # Step 1: Upsert into deals table with candidate details
                         upsert_query = """
                         INSERT INTO deals (
                             id, deal_id, deal_name, owner_email, owner_name, stage,
                             contact_name, contact_email, account_name,
-                            source, source_detail, created_at, metadata
-                        ) VALUES ($1::VARCHAR, $1::VARCHAR, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+                            source, source_detail, created_at, metadata,
+                            candidate_name, company_name, email, job_title
+                        ) VALUES ($1::VARCHAR, $1::VARCHAR, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
                         ON CONFLICT (id) DO UPDATE SET
                             deal_id = EXCLUDED.deal_id,
                             deal_name = EXCLUDED.deal_name,
@@ -1738,7 +1953,7 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                             metadata = EXCLUDED.metadata
                         RETURNING deal_id;
                         """
-                        
+
                         await conn.fetchrow(
                             upsert_query,
                             deal_id,
@@ -1752,16 +1967,20 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                             enhanced_data.source or "Email Inbound",
                             enhanced_data.source_detail,
                             datetime.utcnow(),
-                            json.dumps(raw_json)
+                            json.dumps(raw_json),
+                            enhanced_data.candidate_name,  # For duplicate detection
+                            enhanced_data.company_name or account_name,  # For duplicate detection
+                            enhanced_data.email,  # For duplicate detection
+                            enhanced_data.job_title  # For duplicate detection
                         )
-                        
+
                         saved_to_db = True
                         logger.info(f"Saved deal to database: {deal_id}")
-                        
+
                         # Step 2: Call Zoho CRM API with retry logic
                         max_retries = 3
                         retry_delays = [1, 2, 4]  # Exponential backoff
-                        
+
                         for attempt in range(max_retries):
                             try:
                                 zoho_result = await req.app.state.zoho_integration.create_or_update_records(
@@ -1773,6 +1992,22 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                                 
                                 saved_to_zoho = True
                                 zoho_id = zoho_result.get("deal_id")
+
+                                # Update deals table with Zoho IDs
+                                update_query = """
+                                UPDATE deals
+                                SET zoho_deal_id = $2,
+                                    zoho_contact_id = $3,
+                                    zoho_account_id = $4
+                                WHERE deal_id = $1
+                                """
+                                await conn.execute(
+                                    update_query,
+                                    deal_id,
+                                    zoho_result.get("deal_id"),
+                                    zoho_result.get("contact_id"),
+                                    zoho_result.get("account_id")
+                                )
 
                                 # Check if this was a duplicate
                                 if zoho_result.get('was_duplicate'):
