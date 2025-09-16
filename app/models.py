@@ -22,26 +22,64 @@ class EmailPayload(BaseModel):
     user_corrections: Optional[Dict[str, Any]] = Field(None, description="User corrections to AI extraction")
     ai_extraction: Optional[Dict[str, Any]] = Field(None, description="Original AI extraction for learning")
     dry_run: Optional[bool] = Field(False, description="If true, run extraction only and return preview without creating Zoho records")
+    user_context: Optional[Dict[str, str]] = Field(None, description="Current Outlook user context (name, email) to ignore in extraction")
     # Optional Graph enrichment fields (Chrome extension thin client)
     graph_access_token: Optional[str] = Field(None, description="Bearer token for Microsoft Graph to fetch the message")
     graph_message_id: Optional[str] = Field(None, description="Microsoft Graph message id (me/messages/{id})")
     graph_conversation_id: Optional[str] = Field(None, description="Graph conversationId for context")
 
+# Steve's Template Structure Models
+class CompanyRecord(BaseModel):
+    """Company Record fields matching Steve's template"""
+    company_name: Optional[str] = Field(None, description="Official company name")
+    phone: Optional[str] = Field(None, description="Company phone number")
+    website: Optional[str] = Field(None, description="Company website URL")
+    company_source: Optional[str] = Field(None, description="How company was sourced (e.g., Conference/Trade Show)")
+    source_detail: Optional[str] = Field(None, description="Specific source detail (e.g., FutureProof 2026)")
+    who_gets_credit: Optional[str] = Field(None, description="BD Rep, Affiliate, or Both")
+    detail: Optional[str] = Field(None, description="Person name who gets credit (e.g., Steve Perry)")
+
+class ContactRecord(BaseModel):
+    """Contact Record fields matching Steve's template"""
+    first_name: Optional[str] = Field(None, description="Contact's first name")
+    last_name: Optional[str] = Field(None, description="Contact's last name")
+    company_name: Optional[str] = Field(None, description="Contact's company name")
+    email: Optional[str] = Field(None, description="Contact's email address")
+    phone: Optional[str] = Field(None, description="Contact's phone number")
+    city: Optional[str] = Field(None, description="Contact's city")
+    state: Optional[str] = Field(None, description="Contact's state")
+    source: Optional[str] = Field(None, description="Contact source (e.g., Conference/Trade Show)")
+
+class DealRecord(BaseModel):
+    """Deal Record fields matching Steve's template"""
+    source: Optional[str] = Field(None, description="Deal source (e.g., Conference/Trade Show)")
+    deal_name: Optional[str] = Field(None, description="Formatted deal name (e.g., Advisors (Nationwide) Capital Investment Advisors)")
+    pipeline: Optional[str] = Field(None, description="Pipeline name (e.g., Sales Pipeline)")
+    closing_date: Optional[str] = Field(None, description="Estimated closing date (YYYY-MM-DD)")
+    source_detail: Optional[str] = Field(None, description="Source detail (e.g., FutureProof 2026)")
+    description_of_reqs: Optional[str] = Field(None, description="Description of requirements/needs")
+
 class ExtractedData(BaseModel):
-    candidate_name: Optional[str] = Field(None, description="The full name of the candidate.")
-    job_title: Optional[str] = Field(None, description="The job title being discussed (e.g., Advisor).")
-    location: Optional[str] = Field(None, description="The location for the role (e.g., Fort Wayne, Indiana).")
-    company_name: Optional[str] = Field(None, description="The official name of the candidate's firm.")
-    referrer_name: Optional[str] = Field(None, description="The full name of the person who made the referral.")
-    referrer_email: Optional[str] = Field(None, description="Email address of the referrer.")
-    email: Optional[str] = Field(None, description="Email address of the candidate.")
-    website: Optional[str] = Field(None, description="Company website URL.")
-    phone: Optional[str] = Field(None, description="Contact phone number.")
-    linkedin_url: Optional[str] = Field(None, description="LinkedIn profile URL.")
-    notes: Optional[str] = Field(None, description="Additional notes or context from the email.")
-    industry: Optional[str] = Field(None, description="Company industry or sector.")
-    source: Optional[str] = Field(None, description="Lead source (e.g., Referral, Email Inbound).")
-    source_detail: Optional[str] = Field(None, description="Additional source details (e.g., referrer name for Source field).")
+    """Main extracted data structure with Steve's 3-record format"""
+    company_record: Optional[CompanyRecord] = Field(None, description="Company information")
+    contact_record: Optional[ContactRecord] = Field(None, description="Contact information")
+    deal_record: Optional[DealRecord] = Field(None, description="Deal information")
+
+    # Legacy fields for backward compatibility - will be deprecated
+    candidate_name: Optional[str] = Field(None, description="DEPRECATED: Use contact_record.first_name + last_name")
+    job_title: Optional[str] = Field(None, description="DEPRECATED: Use deal_record.deal_name")
+    location: Optional[str] = Field(None, description="DEPRECATED: Use contact_record.city + state")
+    company_name: Optional[str] = Field(None, description="DEPRECATED: Use company_record.company_name")
+    referrer_name: Optional[str] = Field(None, description="DEPRECATED: Use company_record.detail")
+    referrer_email: Optional[str] = Field(None, description="DEPRECATED: Not in Steve's template")
+    email: Optional[str] = Field(None, description="DEPRECATED: Use contact_record.email")
+    website: Optional[str] = Field(None, description="DEPRECATED: Use company_record.website")
+    phone: Optional[str] = Field(None, description="DEPRECATED: Use contact_record.phone")
+    linkedin_url: Optional[str] = Field(None, description="DEPRECATED: Not in Steve's template")
+    notes: Optional[str] = Field(None, description="DEPRECATED: Use deal_record.description_of_reqs")
+    industry: Optional[str] = Field(None, description="DEPRECATED: Not in Steve's template")
+    source: Optional[str] = Field(None, description="DEPRECATED: Use deal_record.source")
+    source_detail: Optional[str] = Field(None, description="DEPRECATED: Use deal_record.source_detail")
 
 class ProcessingResult(BaseModel):
     status: str

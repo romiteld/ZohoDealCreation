@@ -14,6 +14,25 @@ let extractedData = null;
 let originalExtractedData = null;
 let currentExtractedData = null;  // Store current extracted data for learning
 
+/**
+ * Get current Outlook user context for client extraction
+ * @returns {Object|null} User context with name and email, or null if unavailable
+ */
+function getUserContext() {
+    try {
+        if (Office?.context?.mailbox?.userProfile) {
+            const userProfile = Office.context.mailbox.userProfile;
+            return {
+                name: userProfile.displayName || '',
+                email: userProfile.emailAddress || ''
+            };
+        }
+    } catch (error) {
+        console.log('Could not get user context from Office:', error);
+    }
+    return null;
+}
+
 // Initialize when Office is ready
 // IMPORTANT: Office.initialize is required for Outlook desktop clients
 // It must be defined even if using Office.onReady
@@ -70,6 +89,68 @@ window.testInitialization = function() {
     document.getElementById('footer').style.display = 'flex';
 
     console.log('Test complete - check if form is visible now');
+};
+
+// Test function to validate Express Send banner functionality
+window.testExpressSendBanner = function() {
+    console.log('=== TEST EXPRESS SEND BANNER ===');
+
+    // Test with high confidence data (should show banner)
+    const highConfidenceData = {
+        contactFirstName: 'John',
+        contactLastName: 'Doe',
+        candidateEmail: 'john.doe@example.com',
+        jobTitle: 'Senior Software Engineer',
+        firmName: 'Tech Company Inc',
+        location: 'San Francisco, CA',
+        candidatePhone: '555-123-4567',
+        notes: 'Excellent candidate with strong technical background'
+    };
+
+    console.log('Testing with high confidence data...');
+
+    // Manually populate form fields
+    Object.keys(highConfidenceData).forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            field.value = highConfidenceData[fieldId];
+        }
+    });
+
+    // Show the form
+    document.getElementById('loadingState').style.display = 'none';
+    document.getElementById('previewForm').style.display = 'block';
+    document.getElementById('footer').style.display = 'flex';
+
+    // Test the confidence calculation
+    calculateAndShowExtractionConfidence(highConfidenceData);
+
+    console.log('High confidence test complete - Express Send banner should be visible');
+
+    // Test with low confidence data after 3 seconds
+    setTimeout(() => {
+        console.log('Testing with low confidence data...');
+
+        const lowConfidenceData = {
+            contactFirstName: 'Jane',
+            candidateEmail: '',
+            jobTitle: '',
+            firmName: '',
+            location: ''
+        };
+
+        // Clear and populate with low confidence data
+        Object.keys(lowConfidenceData).forEach(fieldId => {
+            const field = document.getElementById(fieldId);
+            if (field) {
+                field.value = lowConfidenceData[fieldId];
+            }
+        });
+
+        calculateAndShowExtractionConfidence(lowConfidenceData);
+
+        console.log('Low confidence test complete - Express Send banner should be hidden');
+    }, 3000);
 };
 
 // Test function to validate field population with various data types
@@ -190,7 +271,7 @@ async function initializeTaskpane() {
     
     try {
         // Verify critical DOM elements exist
-        const criticalElements = ['previewForm', 'loadingState', 'footer', 'candidateName', 'jobTitle'];
+        const criticalElements = ['previewForm', 'loadingState', 'footer', 'contactFirstName', 'contactLastName', 'jobTitle'];
         const missingElements = [];
         for (const id of criticalElements) {
             if (!document.getElementById(id)) {
@@ -241,7 +322,7 @@ async function initializeTaskpane() {
         
         // Track field changes to show edited indicator
         setupFieldTracking();
-        
+
         // Start extraction process
         console.log('About to call extractAndPreview');
         await extractAndPreview();
@@ -269,46 +350,93 @@ function showError(message) {
 }
 
 /**
+ * Auto-generate Deal Name based on Steve's format
+ */
+function updateDealName() {
+    const jobTitle = document.getElementById('jobTitle')?.value?.trim() || 'Unknown';
+    const location = document.getElementById('location')?.value?.trim() || 'Unknown';
+    const firmName = document.getElementById('firmName')?.value?.trim() || 'Unknown';
+    const dealNameField = document.getElementById('dealName');
+
+    if (dealNameField) {
+        // Always generate a deal name using Steve's format: "[Job Title] ([Location]) - [Firm Name]"
+        if (jobTitle !== 'Unknown' || location !== 'Unknown' || firmName !== 'Unknown') {
+            dealNameField.value = `${jobTitle} (${location}) - ${firmName}`;
+        } else {
+            dealNameField.value = 'New Candidate - Unknown Details';
+        }
+    }
+}
+
+/**
  * Set up field tracking to show when user edits AI-extracted values
  */
 function setupFieldTracking() {
     const trackedFields = [
-        'candidateName', 'candidateEmail', 'candidatePhone', 'linkedinUrl',
-        'jobTitle', 'location', 'firmName', 'referrerName',
-        'notes', 'calendlyUrl'
+        'contactFirstName', 'contactLastName', 'candidateEmail', 'candidatePhone',
+        'contactCity', 'contactState', 'firmName', 'companyPhone', 'companyWebsite',
+        'jobTitle', 'location', 'dealName', 'pipeline', 'closingDate',
+        'whoGetsCredit', 'creditDetail', 'sourceDetail', 'companySource',
+        'notes'
     ];
-    
+
     trackedFields.forEach(fieldId => {
         const field = document.getElementById(fieldId);
         if (field) {
             field.addEventListener('input', function() {
                 updateFieldIndicator(fieldId);
+
+                // Auto-update deal name when key fields change
+                if (['jobTitle', 'location', 'firmName'].includes(fieldId)) {
+                    updateDealName();
+                }
+            });
+
+            // Also listen for change events (for select dropdowns)
+            field.addEventListener('change', function() {
+                updateFieldIndicator(fieldId);
+
+                if (['jobTitle', 'location', 'firmName'].includes(fieldId)) {
+                    updateDealName();
+                }
             });
         }
     });
 }
 
 /**
- * Update field indicator based on changes
+ * Update field indicator based on changes (enhanced for confidence system)
  */
 function updateFieldIndicator(fieldId) {
     const field = document.getElementById(fieldId);
     const indicator = document.getElementById(fieldId + 'Indicator');
-    
-    if (!indicator) return;
-    
+
+    if (!indicator || !field) return;
+
     const originalValue = originalExtractedData?.[fieldId] || '';
     const currentValue = field.value || '';
-    
+
     if (originalValue && currentValue !== originalValue) {
+        // User has edited the value
         indicator.textContent = 'Edited';
         indicator.className = 'edited-indicator';
+        indicator.style.background = '#ffc107';
+        indicator.style.color = '#212529';
         indicator.style.display = 'inline-block';
-    } else if (originalValue) {
-        indicator.textContent = 'AI Extracted';
-        indicator.className = 'extracted-indicator';
+    } else if (originalValue && currentValue === originalValue) {
+        // Value came from AI extraction and hasn't been changed
+        // Calculate confidence for the current value
+        const confidence = calculateFieldConfidence(fieldId, currentValue, originalExtractedData);
+        updateFieldConfidenceIndicator(fieldId, currentValue, confidence);
+    } else if (currentValue && !originalValue) {
+        // User added a value where AI didn't extract anything
+        indicator.textContent = 'User Added';
+        indicator.className = 'edited-indicator';
+        indicator.style.background = '#6f42c1';
+        indicator.style.color = 'white';
         indicator.style.display = 'inline-block';
     } else {
+        // No value
         indicator.style.display = 'none';
     }
 }
@@ -370,7 +498,8 @@ async function extractAndPreview() {
                     sender_name: currentEmailData.from?.displayName || '',
                     subject: currentEmailData.subject || '',
                     body: currentEmailData.body || '',
-                    dry_run: true  // Don't create Zoho records during preview
+                    dry_run: false,  // Create Zoho records when extracting
+                    user_context: getUserContext()  // Include current Outlook user context
                 })
             };
             
@@ -463,20 +592,55 @@ async function extractAndPreview() {
                     return '';
                 };
 
+                // Check for contact_record structure first (Steve's 3-record structure)
+                const contact = extracted?.contact_record || {};
+                const company = extracted?.company_record || {};
+                const deal = extracted?.deal_record || {};
+
+                // DEBUG: Log the company record structure
+                console.log('DEBUG - Company record:', company);
+                console.log('DEBUG - Company.company_name:', company.company_name);
+                console.log('DEBUG - extracted.company_name:', extracted?.company_name);
+                console.log('DEBUG - extracted.firmName:', extracted?.firmName);
+                console.log('DEBUG - extracted.firm_name:', extracted?.firm_name);
+
+                // Build candidateName from contact_record if available
+                let candidateName = '';
+                if (contact.first_name || contact.last_name) {
+                    candidateName = `${getString(contact.first_name)} ${getString(contact.last_name)}`.trim();
+                } else {
+                    candidateName = getString(extracted?.candidate_name || extracted?.candidateName);
+                }
+
+                // DEBUG: Test each part of the firmName mapping
+                const companyNameFromRecord = company.company_name;
+                const companyNameDirect = extracted?.company_name;
+                const firmNameField = extracted?.firmName;
+                const firmNameUnder = extracted?.firm_name;
+
+                console.log('DEBUG - firmName mapping values:');
+                console.log('  company.company_name:', companyNameFromRecord);
+                console.log('  extracted.company_name:', companyNameDirect);
+                console.log('  extracted.firmName:', firmNameField);
+                console.log('  extracted.firm_name:', firmNameUnder);
+
+                const finalFirmName = getString(companyNameFromRecord || companyNameDirect || firmNameField || firmNameUnder);
+                console.log('DEBUG - Final firmName result:', finalFirmName);
+
                 extractedData = {
-                    candidateName: getString(extracted?.candidate_name || extracted?.candidateName),
-                    candidateEmail: getString(extracted?.candidate_email || extracted?.candidateEmail || extracted?.email),
-                    candidatePhone: getString(extracted?.candidate_phone || extracted?.candidatePhone || extracted?.phone),
+                    candidateName: candidateName,
+                    candidateEmail: getString(contact.email || extracted?.candidate_email || extracted?.candidateEmail || extracted?.email),
+                    candidatePhone: getString(contact.phone || extracted?.candidate_phone || extracted?.candidatePhone || extracted?.phone),
                     linkedinUrl: getString(extracted?.linkedin_url || extracted?.linkedinUrl),
                     jobTitle: getString(extracted?.job_title || extracted?.jobTitle),
                     location: getString(extracted?.location || extracted?.candidateLocation),
-                    firmName: getString(extracted?.company_name || extracted?.firmName || extracted?.firm_name),
+                    firmName: getString(company.company_name) || getString(extracted?.company_name) || getString(extracted?.firmName) || getString(extracted?.firm_name) || '', // CACHE_BUST_V2
                     referrerName: getString(extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName),
                     referrerEmail: getString(extracted?.referrer_email || extracted?.referrerEmail || currentEmailData?.from?.emailAddress),
-                    notes: getString(extracted?.notes),
+                    notes: getString(extracted?.notes || deal.description_of_reqs),
                     calendlyUrl: getString(extracted?.calendly_url || extracted?.calendlyUrl),
-                    source: getString(extracted?.source || extracted?.Source) || 'Email Inbound',
-                    sourceDetail: getString(extracted?.source_detail)
+                    source: getString(deal.source || extracted?.source || extracted?.Source) || 'Email Inbound',
+                    sourceDetail: getString(deal.source_detail || extracted?.source_detail)
                 };
                 
                 console.log('Mapped extractedData:', extractedData);
@@ -800,20 +964,20 @@ async function getAttachments(item) {
  */
 function populateForm(data) {
     console.log('populateForm called with data:', data);
-    
+
     // Defensive: ensure data exists
     if (!data) {
         console.error('No data provided to populateForm!');
         data = {};
     }
-    
+
     // Store the current extracted data for learning
     currentExtractedData = data;
-    
+
     // First, check if the form elements exist
-    const candidateNameField = document.getElementById('candidateName');
-    if (!candidateNameField) {
-        console.error('CRITICAL: candidateName field not found! Form may not be loaded.');
+    const contactFirstNameField = document.getElementById('contactFirstName');
+    if (!contactFirstNameField) {
+        console.error('CRITICAL: contactFirstName field not found! Form may not be loaded.');
         console.error('Document body:', document.body);
         console.error('All element IDs:', Array.from(document.querySelectorAll('[id]')).map(el => el.id));
         // Try to wait and retry
@@ -823,50 +987,452 @@ function populateForm(data) {
         }, 500);
         return;
     }
-    
-    // Candidate Information - try multiple field name formats
-    setValue('candidateName', data.candidateName || data.candidate_name || '');
-    setValue('candidateEmail', data.candidateEmail || data.candidate_email || data.email || '');
-    setValue('candidatePhone', data.candidatePhone || data.candidate_phone || data.phone || '');
-    setValue('linkedinUrl', data.linkedinUrl || data.linkedin_url || '');
-    
-    // Log what was actually set
-    console.log('Form values set:', {
-        candidateName: document.getElementById('candidateName')?.value,
-        candidateEmail: document.getElementById('candidateEmail')?.value,
-        candidatePhone: document.getElementById('candidatePhone')?.value,
-        linkedinUrl: document.getElementById('linkedinUrl')?.value
-    });
-    
-    // Job Details
-    setValue('jobTitle', data.jobTitle || data.job_title || '');
-    setValue('location', data.location || data.candidateLocation || '');
-    setValue('firmName', data.firmName || data.firm_name || data.company_name || '');
-    setValue('source', data.source || data.Source || 'Email Inbound');
-    
-    // Referrer Information
-    setValue('referrerName', data.referrerName || data.referrer_name || currentEmailData?.from?.displayName || '');
-    setValue('referrerEmail', data.referrerEmail || data.referrer_email || currentEmailData?.from?.emailAddress || '');
-    
+
+    // Parse candidate name into first and last
+    const fullName = data.candidateName || data.candidate_name || '';
+    const nameParts = fullName.trim().split(/\s+/);
+    const firstName = nameParts[0] || '';
+    const lastName = nameParts.slice(1).join(' ') || '';
+
+    // Contact Information - Steve's structure
+    setValueWithConfidence('contactFirstName', firstName, data);
+    setValueWithConfidence('contactLastName', lastName, data);
+    setValueWithConfidence('candidateEmail', data.candidateEmail || data.candidate_email || data.email || '', data);
+    setValueWithConfidence('candidatePhone', data.candidatePhone || data.candidate_phone || data.phone || '', data);
+
+    // Parse location into city and state
+    const locationParts = (data.location || '').split(',');
+    const city = locationParts[0]?.trim() || '';
+    const state = locationParts[1]?.trim() || locationParts.length === 1 ? locationParts[0]?.trim() : '';
+
+    setValueWithConfidence('contactCity', city, data);
+    setValueWithConfidence('contactState', state, data);
+
+    // Company Information
+    setValueWithConfidence('firmName', data.firmName || data.firm_name || data.company_name || '', data);
+    setValueWithConfidence('companyPhone', data.companyPhone || data.company_phone || '', data);
+    setValueWithConfidence('companyWebsite', data.companyWebsite || data.company_website || '', data);
+
+    // Set company source based on extracted data
+    const source = data.source || data.Source || 'Email Inbound';
+    setValue('companySource', source);
+
+    // Deal Information
+    setValueWithConfidence('jobTitle', data.jobTitle || data.job_title || '', data);
+    setValueWithConfidence('location', data.location || data.candidateLocation || '', data);
+
+    // Auto-generate deal name when all required fields are filled
+    updateDealName();
+
+    // Smart defaults for Pipeline and Closing Date
+    setValue('pipeline', 'Recruitment'); // Default pipeline - matches Steve's template
+
+    // Set closing date to today + 60 days
+    const closingDate = new Date();
+    closingDate.setDate(closingDate.getDate() + 60);
+    setValue('closingDate', closingDate.toISOString().split('T')[0]);
+
+    // Who Gets Credit - Pre-fill with logged-in user as BD Rep
+    setValue('whoGetsCredit', 'BD Rep');
+    setValue('creditDetail', getCurrentUserName()); // Will implement this function
+
+    // Set source detail based on extracted data
+    const sourceDetail = data.referrerName || data.referrer_name ||
+                        (data.source === 'Referral' ? 'Referral Contact' : '') ||
+                        currentEmailData?.from?.displayName || '';
+    setValueWithConfidence('sourceDetail', sourceDetail, data);
+
     // Additional Information
-    setValue('notes', data.notes || '');
-    setValue('calendlyUrl', data.calendlyUrl || data.calendly_url || '');
-    
-    console.log('Form population complete');
-    
+    setValueWithConfidence('notes', data.notes || '', data);
+
+    // Build comprehensive notes from extracted data
+    buildComprehensiveNotes(data);
+
+    console.log('Form population complete with all fields filled');
+
     // Show attachments if any
     if (currentEmailData?.attachments?.length > 0) {
         showAttachments(currentEmailData.attachments);
     }
-    
-    // Update indicators
-    ['candidateName', 'jobTitle'].forEach(fieldId => {
-        const value = document.getElementById(fieldId).value;
-        const indicator = document.getElementById(fieldId + 'Indicator');
-        if (indicator && value) {
-            indicator.style.display = 'inline-block';
+
+    // Update all confidence indicators
+    updateAllConfidenceIndicators(data);
+
+    // Calculate extraction confidence and show Express Send banner if high
+    calculateAndShowExtractionConfidence(data);
+}
+
+/**
+ * Calculate extraction confidence based on populated fields and show Express Send banner if high
+ */
+function calculateAndShowExtractionConfidence(data) {
+    console.log('Calculating extraction confidence for data:', data);
+
+    // Define critical fields and their weights
+    const criticalFields = [
+        { key: 'contactFirstName', weight: 15, value: document.getElementById('contactFirstName')?.value },
+        { key: 'contactLastName', weight: 15, value: document.getElementById('contactLastName')?.value },
+        { key: 'candidateEmail', weight: 20, value: document.getElementById('candidateEmail')?.value },
+        { key: 'jobTitle', weight: 20, value: document.getElementById('jobTitle')?.value },
+        { key: 'firmName', weight: 20, value: document.getElementById('firmName')?.value },
+        { key: 'location', weight: 10, value: document.getElementById('location')?.value }
+    ];
+
+    let totalPossibleScore = 0;
+    let actualScore = 0;
+    let filledCriticalFields = 0;
+
+    criticalFields.forEach(field => {
+        totalPossibleScore += field.weight;
+        if (field.value && field.value.trim() !== '') {
+            actualScore += field.weight;
+            filledCriticalFields++;
+
+            // Bonus points for well-formatted data
+            if (field.key === 'candidateEmail' && field.value.includes('@') && field.value.includes('.')) {
+                actualScore += 5; // Email format bonus
+            }
+            if (field.key === 'jobTitle' && field.value.length > 5) {
+                actualScore += 5; // Detailed job title bonus
+            }
+            if (field.key === 'firmName' && field.value.length > 3) {
+                actualScore += 5; // Company name bonus
+            }
         }
     });
+
+    // Additional confidence factors
+    const hasPhone = document.getElementById('candidatePhone')?.value?.trim() !== '';
+    const hasLocation = document.getElementById('location')?.value?.trim() !== '';
+    const hasNotes = document.getElementById('notes')?.value?.trim() !== '';
+
+    if (hasPhone) actualScore += 5;
+    if (hasLocation) actualScore += 5;
+    if (hasNotes) actualScore += 3;
+
+    // Calculate confidence percentage
+    const maxPossibleScore = totalPossibleScore + 15 + 5 + 3; // Include bonus points
+    const confidencePercentage = Math.min(100, Math.round((actualScore / maxPossibleScore) * 100));
+
+    console.log('Extraction confidence calculation:', {
+        filledCriticalFields,
+        totalCriticalFields: criticalFields.length,
+        actualScore,
+        maxPossibleScore,
+        confidencePercentage,
+        hasPhone,
+        hasLocation,
+        hasNotes
+    });
+
+    // Show Express Send banner if confidence is high (80% or above with at least 4 critical fields)
+    const expressSendBanner = document.getElementById('expressSendBanner');
+    const confidenceBadge = document.getElementById('confidenceBadge');
+
+    if (confidencePercentage >= 80 && filledCriticalFields >= 4) {
+        console.log('High confidence extraction detected - showing Express Send banner');
+
+        if (expressSendBanner) {
+            expressSendBanner.style.display = 'block';
+        }
+
+        if (confidenceBadge) {
+            confidenceBadge.textContent = `${confidencePercentage}%`;
+        }
+
+        // Optionally highlight the Send button for one-click workflow
+        const sendButton = document.getElementById('btnSend');
+        if (sendButton) {
+            sendButton.style.background = 'linear-gradient(135deg, #28a745 0%, #20c997 100%)';
+            sendButton.style.boxShadow = '0 4px 12px rgba(40, 167, 69, 0.3)';
+        }
+    } else {
+        console.log('Confidence below threshold or insufficient critical fields - hiding Express Send banner');
+
+        if (expressSendBanner) {
+            expressSendBanner.style.display = 'none';
+        }
+
+        // Reset send button styling
+        const sendButton = document.getElementById('btnSend');
+        if (sendButton) {
+            sendButton.style.background = 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)';
+            sendButton.style.boxShadow = '';
+        }
+    }
+}
+
+/**
+ * Set form field value with confidence indicator
+ */
+function setValueWithConfidence(fieldId, value, extractedData, confidenceScore = null) {
+    const field = document.getElementById(fieldId);
+    if (field) {
+        // Ensure value is a string and not an object or array
+        let safeValue = '';
+        if (typeof value === 'string') {
+            safeValue = value.trim();
+        } else if (value !== null && value !== undefined) {
+            console.warn(`WARNING: Non-string value for ${fieldId}:`, typeof value, value);
+            // If it's an object, don't try to convert it - just use empty string
+            if (typeof value === 'object') {
+                console.error(`ERROR: Object passed to field ${fieldId}:`, value);
+                safeValue = '';
+            } else {
+                safeValue = String(value);
+            }
+        }
+
+        field.value = safeValue;
+
+        // Calculate confidence based on extraction quality
+        const confidence = calculateFieldConfidence(fieldId, safeValue, extractedData, confidenceScore);
+        updateFieldConfidenceIndicator(fieldId, safeValue, confidence);
+
+        console.log(`Set ${fieldId} to: "${safeValue}" (confidence: ${confidence})`);
+    } else {
+        console.error(`ERROR: Element with ID '${fieldId}' not found in DOM!`);
+    }
+}
+
+/**
+ * Calculate confidence score for a field based on extraction quality
+ */
+function calculateFieldConfidence(fieldId, value, extractedData, explicitScore = null) {
+    if (explicitScore !== null) return explicitScore;
+
+    // If no value extracted, confidence is 0
+    if (!value || value.trim() === '') return 0;
+
+    // Base confidence scoring
+    let confidence = 0.5; // Base score for having any value
+
+    // Higher confidence for structured data patterns
+    switch (fieldId) {
+        case 'candidateEmail':
+            // Email pattern validation
+            if (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value)) {
+                confidence = 0.9;
+            } else {
+                confidence = 0.3;
+            }
+            break;
+
+        case 'candidatePhone':
+            // Phone pattern validation
+            if (/^\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/.test(value)) {
+                confidence = 0.8;
+            } else if (/\d{10,}/.test(value.replace(/\D/g, ''))) {
+                confidence = 0.6;
+            } else {
+                confidence = 0.3;
+            }
+            break;
+
+        case 'contactFirstName':
+        case 'contactLastName':
+            // Name validation - proper case, reasonable length
+            if (value.length >= 2 && /^[A-Z][a-z]+$/.test(value)) {
+                confidence = 0.8;
+            } else if (value.length >= 2) {
+                confidence = 0.6;
+            } else {
+                confidence = 0.3;
+            }
+            break;
+
+        case 'firmName':
+            // Company name validation
+            if (value.length >= 3 && !value.toLowerCase().includes('unknown')) {
+                confidence = 0.7;
+            } else {
+                confidence = 0.4;
+            }
+            break;
+
+        case 'jobTitle':
+            // Job title validation
+            if (value.length >= 5 && /[a-zA-Z]/.test(value)) {
+                confidence = 0.7;
+            } else {
+                confidence = 0.4;
+            }
+            break;
+
+        case 'location':
+            // Location validation
+            if (value.includes(',') || value.length >= 3) {
+                confidence = 0.6;
+            } else {
+                confidence = 0.4;
+            }
+            break;
+
+        case 'contactCity':
+            // City validation
+            if (value.length >= 2 && /^[A-Za-z\s]+$/.test(value)) {
+                confidence = 0.7;
+            } else if (value.length >= 2) {
+                confidence = 0.5;
+            } else {
+                confidence = 0.3;
+            }
+            break;
+
+        case 'contactState':
+            // State validation - 2-letter code or full name
+            if (/^[A-Z]{2}$/.test(value) || (value.length >= 4 && /^[A-Za-z\s]+$/.test(value))) {
+                confidence = 0.8;
+            } else if (value.length >= 2) {
+                confidence = 0.5;
+            } else {
+                confidence = 0.3;
+            }
+            break;
+
+        default:
+            // Default confidence for other fields
+            confidence = value.length >= 3 ? 0.6 : 0.4;
+    }
+
+    // Boost confidence if we found this data via specific patterns
+    if (extractedData && extractedData._confidence && extractedData._confidence[fieldId]) {
+        confidence = Math.max(confidence, extractedData._confidence[fieldId]);
+    }
+
+    return Math.min(1.0, confidence);
+}
+
+/**
+ * Update confidence indicator for a field
+ */
+function updateFieldConfidenceIndicator(fieldId, value, confidence) {
+    const indicator = document.getElementById(fieldId + 'Indicator');
+    const field = document.getElementById(fieldId);
+
+    if (!indicator) return;
+
+    if (!value || value.trim() === '') {
+        indicator.style.display = 'none';
+        // Remove confidence classes from field
+        if (field) {
+            field.classList.remove('low-confidence', 'very-low-confidence');
+        }
+        return;
+    }
+
+    // Show indicator with confidence-based styling
+    indicator.style.display = 'inline-block';
+
+    // Remove existing confidence classes
+    indicator.classList.remove('confidence-high', 'confidence-medium', 'confidence-low', 'confidence-very-low');
+
+    if (confidence >= 0.8) {
+        indicator.textContent = 'High Confidence';
+        indicator.className = 'extracted-indicator confidence-high';
+        // Remove any field highlighting
+        if (field) {
+            field.classList.remove('low-confidence', 'very-low-confidence');
+        }
+    } else if (confidence >= 0.6) {
+        indicator.textContent = 'Medium Confidence';
+        indicator.className = 'extracted-indicator confidence-medium';
+        // Remove any field highlighting
+        if (field) {
+            field.classList.remove('low-confidence', 'very-low-confidence');
+        }
+    } else if (confidence >= 0.3) {
+        indicator.textContent = 'Low Confidence';
+        indicator.className = 'extracted-indicator confidence-low';
+        // Add field highlighting for user attention
+        if (field) {
+            field.classList.remove('very-low-confidence');
+            field.classList.add('low-confidence');
+        }
+    } else {
+        indicator.textContent = 'Please Review';
+        indicator.className = 'extracted-indicator confidence-very-low';
+        // Add stronger field highlighting for user attention
+        if (field) {
+            field.classList.remove('low-confidence');
+            field.classList.add('very-low-confidence');
+        }
+    }
+}
+
+/**
+ * Update all confidence indicators after form population
+ */
+function updateAllConfidenceIndicators(extractedData) {
+    const fieldsToUpdate = [
+        'contactFirstName', 'contactLastName', 'candidateEmail', 'candidatePhone',
+        'contactCity', 'contactState', 'firmName', 'companyPhone', 'companyWebsite',
+        'jobTitle', 'location', 'sourceDetail'
+    ];
+
+    fieldsToUpdate.forEach(fieldId => {
+        const field = document.getElementById(fieldId);
+        if (field) {
+            // Always update indicator, even for empty fields - this will hide indicators for empty fields
+            const confidence = calculateFieldConfidence(fieldId, field.value, extractedData);
+            updateFieldConfidenceIndicator(fieldId, field.value, confidence);
+        }
+    });
+
+    // Initialize Steve's confidence-based workflow UI
+    initializeConfidenceUI(extractedData);
+}
+
+/**
+ * Get current user name (placeholder - should be implemented based on Office context)
+ */
+function getCurrentUserName() {
+    // Try to get from Office context if available
+    try {
+        if (Office?.context?.mailbox?.userProfile?.displayName) {
+            return Office.context.mailbox.userProfile.displayName;
+        }
+    } catch (error) {
+        console.log('Could not get user profile from Office context');
+    }
+
+    // Default fallback
+    return 'Current User';
+}
+
+/**
+ * Build comprehensive notes from all extracted data
+ */
+function buildComprehensiveNotes(data) {
+    const notesField = document.getElementById('notes');
+    if (!notesField) return;
+
+    let comprehensiveNotes = data.notes || '';
+
+    // Add email context
+    if (currentEmailData?.subject) {
+        comprehensiveNotes += `\n\nEmail Subject: ${currentEmailData.subject}`;
+    }
+
+    // Add sender information
+    if (currentEmailData?.from?.displayName && currentEmailData?.from?.emailAddress) {
+        comprehensiveNotes += `\nFrom: ${currentEmailData.from.displayName} <${currentEmailData.from.emailAddress}>`;
+    }
+
+    // Add any LinkedIn URL if found
+    if (data.linkedinUrl || data.linkedin_url) {
+        comprehensiveNotes += `\nLinkedIn: ${data.linkedinUrl || data.linkedin_url}`;
+    }
+
+    // Add Calendly URL if found
+    if (data.calendlyUrl || data.calendly_url) {
+        comprehensiveNotes += `\nCalendly: ${data.calendlyUrl || data.calendly_url}`;
+    }
+
+    // Add extraction timestamp
+    comprehensiveNotes += `\n\nProcessed: ${new Date().toLocaleString()}`;
+
+    notesField.value = comprehensiveNotes.trim();
 }
 
 /**
@@ -1004,8 +1570,8 @@ async function handleSendToZoho() {
                 ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
             },
             body: JSON.stringify({
-                sender_email: formData.referrerEmail,
-                sender_name: formData.referrerName,
+                sender_email: 'steve@emailthewell.com',  // Always use Steve's email
+                sender_name: 'Steve Perry',  // Always use Steve Perry
                 subject: currentEmailData.subject || '',
                 body: currentEmailData.body || '',
                 attachments: attachmentData,
@@ -1020,7 +1586,9 @@ async function handleSendToZoho() {
                     location: formData.location,
                     company_name: formData.firmName,
                     referrer_name: formData.referrerName
-                }
+                },
+                // Include current Outlook user context for client extraction
+                user_context: getUserContext()
             })
         });
         
@@ -1141,21 +1709,35 @@ function showNotification(message, type = 'warning') {
  * Validate form
  */
 function validateForm() {
-    const candidateName = document.getElementById('candidateName').value.trim();
+    const firstName = document.getElementById('contactFirstName').value.trim();
+    const lastName = document.getElementById('contactLastName').value.trim();
     const jobTitle = document.getElementById('jobTitle').value.trim();
-    
-    if (!candidateName) {
-        showNotification('Please enter the candidate name', 'warning');
-        document.getElementById('candidateName').focus();
+    const firmName = document.getElementById('firmName').value.trim();
+
+    if (!firstName) {
+        showNotification('Please enter the candidate\'s first name', 'warning');
+        document.getElementById('contactFirstName').focus();
         return false;
     }
-    
+
+    if (!lastName) {
+        showNotification('Please enter the candidate\'s last name', 'warning');
+        document.getElementById('contactLastName').focus();
+        return false;
+    }
+
     if (!jobTitle) {
         showNotification('Please enter the job title', 'warning');
         document.getElementById('jobTitle').focus();
         return false;
     }
-    
+
+    if (!firmName) {
+        showNotification('Please enter the company name', 'warning');
+        document.getElementById('firmName').focus();
+        return false;
+    }
+
     return true;
 }
 
@@ -1163,19 +1745,45 @@ function validateForm() {
  * Get form data
  */
 function getFormData() {
+    const firstName = document.getElementById('contactFirstName').value.trim();
+    const lastName = document.getElementById('contactLastName').value.trim();
+    const candidateName = `${firstName} ${lastName}`.trim();
+
     return {
-        candidateName: document.getElementById('candidateName').value.trim(),
+        // Contact Information
+        candidateName: candidateName,
+        contactFirstName: firstName,
+        contactLastName: lastName,
         candidateEmail: document.getElementById('candidateEmail').value.trim(),
         candidatePhone: document.getElementById('candidatePhone').value.trim(),
-        linkedinUrl: document.getElementById('linkedinUrl').value.trim(),
+        contactCity: document.getElementById('contactCity').value.trim(),
+        contactState: document.getElementById('contactState').value.trim(),
+
+        // Company Information
+        firmName: document.getElementById('firmName').value.trim(),
+        companyPhone: document.getElementById('companyPhone').value.trim(),
+        companyWebsite: document.getElementById('companyWebsite').value.trim(),
+        companySource: document.getElementById('companySource').value,
+
+        // Deal Information
         jobTitle: document.getElementById('jobTitle').value.trim(),
         location: document.getElementById('location').value.trim(),
-        firmName: document.getElementById('firmName').value.trim(),
-        source: document.getElementById('source').value,
-        referrerName: document.getElementById('referrerName').value.trim(),
-        referrerEmail: document.getElementById('referrerEmail').value.trim(),
+        dealName: document.getElementById('dealName').value.trim(),
+        pipeline: document.getElementById('pipeline').value,
+        closingDate: document.getElementById('closingDate').value,
+
+        // Who Gets Credit
+        whoGetsCredit: document.getElementById('whoGetsCredit').value,
+        creditDetail: document.getElementById('creditDetail').value.trim(),
+        sourceDetail: document.getElementById('sourceDetail').value.trim(),
+
+        // Additional Information
         notes: document.getElementById('notes').value.trim(),
-        calendlyUrl: document.getElementById('calendlyUrl').value.trim()
+
+        // Legacy fields for backward compatibility
+        source: document.getElementById('companySource').value,
+        referrerName: document.getElementById('sourceDetail').value.trim() || 'Steve Perry',
+        referrerEmail: 'steve@emailthewell.com'  // Always use Steve's email
     };
 }
 
@@ -1266,35 +1874,115 @@ function showError(message) {
  * Handle Cancel button
  */
 function handleCancel() {
-    // Reset the form and go back to loading state
-    showNotification('Canceling...', 'info');
+    // Clear all form fields - use safe clearing with null checks
+    const fieldsToClear = [
+        'contactFirstName', 'contactLastName', 'candidateEmail',
+        'candidatePhone', 'linkedinUrl', 'jobTitle',
+        'location', 'firmName', 'referrerName',
+        'referrerEmail', 'notes', 'calendlyUrl',
+        'contactCity', 'contactState'
+    ];
 
-    // Reset all form fields
-    document.getElementById('candidateName').value = '';
-    document.getElementById('candidateEmail').value = '';
-    document.getElementById('candidatePhone').value = '';
-    document.getElementById('linkedinUrl').value = '';
-    document.getElementById('jobTitle').value = '';
-    document.getElementById('location').value = '';
-    document.getElementById('firmName').value = '';
-    document.getElementById('referrerName').value = '';
-    document.getElementById('referrerEmail').value = '';
-    document.getElementById('notes').value = '';
-    document.getElementById('calendlyUrl').value = '';
+    fieldsToClear.forEach(fieldId => {
+        const element = document.getElementById(fieldId);
+        if (element) {
+            element.value = '';
+        }
+    });
 
-    // Hide the form and show loading state
-    document.getElementById('previewForm').style.display = 'none';
-    document.getElementById('footer').style.display = 'none';
-    document.getElementById('loadingState').style.display = 'block';
+    // Reset source dropdown to default
+    document.getElementById('source').value = 'Email Inbound';
 
-    // Update loading message
-    updateLoadingMessage('Add-in ready. Select an email and try again.');
+    // Clear correction prompt
+    document.getElementById('correctionPrompt').value = '';
+
+    // Hide quick fixes if shown
+    const quickFixes = document.getElementById('quickFixes');
+    if (quickFixes) {
+        quickFixes.style.display = 'none';
+    }
+
+    // Clear any custom fields
+    const customFieldsContainer = document.getElementById('customFieldsContainer');
+    if (customFieldsContainer) {
+        customFieldsContainer.innerHTML = '';
+    }
+
+    // Clear attachments list
+    const attachmentsList = document.getElementById('attachmentsList');
+    if (attachmentsList) {
+        attachmentsList.innerHTML = '';
+    }
+    const attachmentsSection = document.getElementById('attachmentsSection');
+    if (attachmentsSection) {
+        attachmentsSection.style.display = 'none';
+    }
+
+    // Hide all indicators
+    const indicators = document.querySelectorAll('.extracted-indicator, .edited-indicator');
+    indicators.forEach(indicator => {
+        indicator.style.display = 'none';
+    });
+
+    // Hide any error or success messages
+    const errorMessage = document.getElementById('errorMessage');
+    const successMessage = document.getElementById('successMessage');
+    if (errorMessage) {
+        errorMessage.style.display = 'none';
+        errorMessage.textContent = '';
+    }
+    if (successMessage) {
+        successMessage.style.display = 'none';
+        successMessage.textContent = '';
+    }
+
+    // Clear any progress section
+    const progressSection = document.getElementById('progressSection');
+    if (progressSection) {
+        progressSection.style.display = 'none';
+    }
+
+    // Reset progress bar if exists
+    const progressBar = document.getElementById('progressBar');
+    if (progressBar) {
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+    }
+
+    // Reset step items
+    const stepItems = document.querySelectorAll('.step-item');
+    stepItems.forEach(item => {
+        item.classList.remove('active', 'completed');
+    });
 
     // Clear any extracted data
     currentEmailData = null;
     extractedData = null;
     originalExtractedData = null;
     currentExtractedData = null;
+
+    // Keep the form visible but in blank state - don't go back to loading
+    // This allows user to continue entering data manually if they want
+    document.getElementById('previewForm').style.display = 'block';
+    document.getElementById('footer').style.display = 'flex';
+
+    // Reset button states
+    const btnSend = document.getElementById('btnSend');
+    const btnClose = document.getElementById('btnClose');
+    const btnCancel = document.getElementById('btnCancel');
+    if (btnSend) {
+        btnSend.style.display = 'block';
+        btnSend.disabled = false;
+    }
+    if (btnClose) {
+        btnClose.style.display = 'none';
+    }
+    if (btnCancel) {
+        btnCancel.style.display = 'block';
+    }
+
+    // Show a brief notification that form was cleared
+    showNotification('Form cleared', 'info', 2000);
 }
 
 /**
@@ -1350,42 +2038,54 @@ async function applyNaturalLanguageCorrections() {
 function parseCorrections(prompt) {
     const corrections = [];
     const lowerPrompt = prompt.toLowerCase();
-    
-    // Pattern matching for common correction phrases
+
+    // Enhanced pattern matching for common correction phrases
     const patterns = [
-        // Name corrections
+        // Full name corrections
         {
-            regex: /(?:candidate|name|person) (?:is|should be) ([^,]+?)(?:,|not|$)/i,
+            regex: /(?:change |update |set |make )?(?:candidate|name|person)(?: name)? (?:to |is |should be |= )([^,\.]+?)(?:[,\.]|$)/i,
             field: 'candidateName',
+            extractor: (match) => match[1].trim()
+        },
+        // First name specific
+        {
+            regex: /(?:change |update |set |make )?(?:first name|firstname) (?:to |is |should be |= )([^,\.]+?)(?:[,\.]|$)/i,
+            field: 'contactFirstName',
+            extractor: (match) => match[1].trim()
+        },
+        // Last name specific
+        {
+            regex: /(?:change |update |set |make )?(?:last name|lastname) (?:to |is |should be |= )([^,\.]+?)(?:[,\.]|$)/i,
+            field: 'contactLastName',
             extractor: (match) => match[1].trim()
         },
         // Phone corrections
         {
-            regex: /(?:phone|number|cell) (?:is|should be|:) ([\d\s\-\(\)\+]+)/i,
+            regex: /(?:change |update |set |make )?(?:phone|number|cell)(?: number)? (?:to |is |should be |: |= )([\d\s\-\(\)\+]+)/i,
             field: 'candidatePhone',
             extractor: (match) => match[1].trim()
         },
         // Email corrections
         {
-            regex: /(?:email) (?:is|should be|:) ([^\s,]+@[^\s,]+)/i,
+            regex: /(?:change |update |set |make )?email(?: address)? (?:to |is |should be |: |= )([^\s,]+@[^\s,]+)/i,
             field: 'candidateEmail',
             extractor: (match) => match[1].trim()
         },
         // Location corrections
         {
-            regex: /(?:location|city|place) (?:is|should be) ([^,]+?)(?:,|$)/i,
+            regex: /(?:change |update |set |make )?(?:location|city|place) (?:to |is |should be |= )([^,\.]+?)(?:[,\.]|$)/i,
             field: 'location',
             extractor: (match) => match[1].trim()
         },
         // Job title corrections
         {
-            regex: /(?:job|title|position|role) (?:is|should be) ([^,]+?)(?:,|$)/i,
+            regex: /(?:change |update |set |make )?(?:job|title|position|role)(?: title)? (?:to |is |should be |= )([^,\.]+?)(?:[,\.]|$)/i,
             field: 'jobTitle',
             extractor: (match) => match[1].trim()
         },
         // Company corrections
         {
-            regex: /(?:company|firm|organization) (?:is|should be|name) ([^,]+?)(?:,|$)/i,
+            regex: /(?:change |update |set |make )?(?:company|firm|organization)(?: name)? (?:to |is |should be |name |= )([^,\.]+?)(?:[,\.]|$)/i,
             field: 'firmName',
             extractor: (match) => match[1].trim()
         }
@@ -1445,45 +2145,234 @@ function parseCorrections(prompt) {
  * Apply a single correction to the form
  */
 function applyCorrection(correction) {
-    const field = document.getElementById(correction.field);
+    // Map field names to actual form field IDs
+    const fieldMap = {
+        'candidateName': 'candidateName',
+        'contactFirstName': 'contactFirstName',
+        'contactLastName': 'contactLastName',
+        'candidateEmail': 'candidateEmail',
+        'candidatePhone': 'candidatePhone',
+        'location': 'location',
+        'jobTitle': 'jobTitle',
+        'firmName': 'firmName'
+    };
+
+    const fieldId = fieldMap[correction.field] || correction.field;
+    const field = document.getElementById(fieldId);
+
     if (field) {
         const oldValue = field.value;
-        field.value = correction.value;
-        
-        // Trigger change event to update indicators
-        field.dispatchEvent(new Event('input'));
-        
+
+        // Handle special cases for full name
+        if (correction.field === 'candidateName') {
+            // Split into first and last name if there's a space
+            const names = correction.value.trim().split(/\s+/);
+            const firstNameField = document.getElementById('contactFirstName');
+            const lastNameField = document.getElementById('contactLastName');
+
+            if (names.length >= 2 && firstNameField && lastNameField) {
+                firstNameField.value = names[0];
+                lastNameField.value = names.slice(1).join(' ');
+                firstNameField.dispatchEvent(new Event('input'));
+                lastNameField.dispatchEvent(new Event('input'));
+                console.log(`Split name into: First="${names[0]}", Last="${names.slice(1).join(' ')}"`);
+            } else {
+                field.value = correction.value;
+                field.dispatchEvent(new Event('input'));
+            }
+        } else {
+            field.value = correction.value;
+            field.dispatchEvent(new Event('input'));
+        }
+
+        // Update Deal Name if any relevant fields changed
+        if (['contactFirstName', 'contactLastName', 'jobTitle', 'location', 'firmName'].includes(fieldId)) {
+            updateDealName();
+        }
+
         // Log the correction for learning
         console.log(`Corrected ${correction.field}: "${oldValue}" → "${correction.value}"`);
+    } else {
+        console.warn(`Field not found: ${correction.field}`);
     }
 }
 
 /**
- * Show suggested fixes based on common corrections
+ * Show suggested fixes based on AI analysis and common corrections
  */
 async function showSuggestedFixes() {
     const fixesDiv = document.getElementById('quickFixes');
     const suggestionsDiv = document.getElementById('fixSuggestions');
-    
-    // Get domain from email
-    const domain = currentEmailData?.from?.emailAddress?.split('@')[1] || '';
-    
-    // Mock suggestions - in production, these would come from the learning system
-    const suggestions = [
-        { text: 'Change Sr. to Senior in job title', correction: 'job title should be Senior Financial Advisor' },
-        { text: 'Add location as Remote', correction: 'location is Remote' },
-        { text: 'Fix company name capitalization', correction: 'company is The Well Partners' }
-    ];
-    
+
+    // Get current form values
+    const formData = {
+        firstName: document.getElementById('contactFirstName')?.value || '',
+        lastName: document.getElementById('contactLastName')?.value || '',
+        email: document.getElementById('candidateEmail')?.value || '',
+        phone: document.getElementById('candidatePhone')?.value || '',
+        location: document.getElementById('location')?.value || '',
+        jobTitle: document.getElementById('jobTitle')?.value || '',
+        firmName: document.getElementById('firmName')?.value || ''
+    };
+
+    // Initialize suggestions array
+    let suggestions = [];
+
+    try {
+        // Call API to get AI-powered suggestions
+        if (API_BASE_URL && API_KEY) {
+            const response = await fetch(`${API_BASE_URL}/intake/suggestions`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-API-Key': API_KEY
+                },
+                body: JSON.stringify({
+                    email_body: currentEmailData?.body || '',
+                    extracted_data: formData,
+                    sender_email: currentEmailData?.from?.emailAddress || '',
+                    user_context: getUserContext()
+                })
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                suggestions = result.suggestions || [];
+            }
+        }
+    } catch (error) {
+        console.log('Could not get AI suggestions, using smart defaults');
+    }
+
+    // If no AI suggestions, use smart local analysis
+    if (!suggestions || suggestions.length === 0) {
+        suggestions = analyzeForSuggestions(formData, currentEmailData);
+    }
+
     // Display suggestions as clickable buttons
-    suggestionsDiv.innerHTML = suggestions.map((sug, idx) => `
-        <button class="btn btn-sm btn-outline-info me-1 mb-1" 
-                onclick="applySuggestion('${sug.correction.replace(/'/g, "\\'")}')">
-            ${sug.text}
-        </button>
-    `).join('');
-    
-    fixesDiv.style.display = 'block';
+    if (suggestions.length > 0) {
+        suggestionsDiv.innerHTML = suggestions.slice(0, 5).map((sug, idx) => `
+            <button class="btn btn-sm btn-outline-info me-1 mb-1"
+                    onclick="applySuggestion('${sug.correction.replace(/'/g, "\\'")}')">
+                <i class="bi ${sug.icon || 'bi-lightbulb'}"></i> ${sug.text}
+            </button>
+        `).join('');
+
+        fixesDiv.style.display = 'block';
+    } else {
+        // Hide if no suggestions
+        fixesDiv.style.display = 'none';
+    }
+}
+
+/**
+ * Analyze form data for smart suggestions
+ */
+function analyzeForSuggestions(formData, emailData) {
+    const suggestions = [];
+    const emailBody = (emailData?.body || '').toLowerCase();
+
+    // Check for missing critical fields
+    if (!formData.lastName && formData.firstName) {
+        suggestions.push({
+            text: 'Add missing last name',
+            correction: 'last name is [Enter Last Name]',
+            icon: 'bi-person-fill'
+        });
+    }
+
+    // Check for phone number in email body but not in form
+    const phoneRegex = /(\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4})/g;
+    const phonesInEmail = emailBody.match(phoneRegex);
+    if (phonesInEmail && !formData.phone) {
+        suggestions.push({
+            text: `Add phone number: ${phonesInEmail[0]}`,
+            correction: `phone is ${phonesInEmail[0]}`,
+            icon: 'bi-telephone'
+        });
+    }
+
+    // Check for email address format issues
+    if (formData.email && !formData.email.includes('@')) {
+        suggestions.push({
+            text: 'Fix email format',
+            correction: 'email needs @ symbol',
+            icon: 'bi-envelope'
+        });
+    }
+
+    // Check for location in subject/body but not in form
+    const locationRegex = /([A-Z][a-z]+(?:\s[A-Z][a-z]+)*),?\s*([A-Z]{2})\b/g;
+    const locationsInEmail = emailBody.match(locationRegex);
+    if (locationsInEmail && !formData.location) {
+        suggestions.push({
+            text: `Add location: ${locationsInEmail[0]}`,
+            correction: `location is ${locationsInEmail[0]}`,
+            icon: 'bi-geo-alt'
+        });
+    }
+
+    // Check for abbreviated titles
+    if (formData.jobTitle) {
+        const abbreviations = {
+            'Sr': 'Senior',
+            'Jr': 'Junior',
+            'Mgr': 'Manager',
+            'Dir': 'Director',
+            'VP': 'Vice President',
+            'Exec': 'Executive'
+        };
+
+        for (const [abbr, full] of Object.entries(abbreviations)) {
+            if (formData.jobTitle.includes(abbr) && !formData.jobTitle.includes(full)) {
+                suggestions.push({
+                    text: `Expand ${abbr} to ${full}`,
+                    correction: `job title is ${formData.jobTitle.replace(abbr, full)}`,
+                    icon: 'bi-briefcase'
+                });
+                break;
+            }
+        }
+    }
+
+    // Check for missing company when there's a domain in email
+    const senderDomain = emailData?.from?.emailAddress?.split('@')[1];
+    if (senderDomain && !formData.firmName) {
+        const companyName = senderDomain.split('.')[0];
+        if (companyName && companyName !== 'gmail' && companyName !== 'yahoo' && companyName !== 'outlook') {
+            suggestions.push({
+                text: `Add company from email domain: ${companyName}`,
+                correction: `company is ${companyName.charAt(0).toUpperCase() + companyName.slice(1)}`,
+                icon: 'bi-building'
+            });
+        }
+    }
+
+    // Check for website URL in email body
+    const urlRegex = /(?:www\.)?([a-zA-Z0-9-]+)\.(?:com|org|net)/g;
+    const urlsInEmail = emailBody.match(urlRegex);
+    if (urlsInEmail && !formData.firmName) {
+        const domain = urlsInEmail[0].replace('www.', '').split('.')[0];
+        suggestions.push({
+            text: `Extract company from website: ${domain}`,
+            correction: `company is ${domain.charAt(0).toUpperCase() + domain.slice(1)}`,
+            icon: 'bi-globe'
+        });
+    }
+
+    // Sort suggestions by importance
+    return suggestions.sort((a, b) => {
+        const priority = {
+            'bi-person-fill': 1,
+            'bi-telephone': 2,
+            'bi-envelope': 3,
+            'bi-geo-alt': 4,
+            'bi-briefcase': 5,
+            'bi-building': 6,
+            'bi-globe': 7
+        };
+        return (priority[a.icon] || 99) - (priority[b.icon] || 99);
+    });
 }
 
 /**
@@ -1493,6 +2382,11 @@ window.applySuggestion = function(correction) {
     document.getElementById('correctionPrompt').value = correction;
     applyNaturalLanguageCorrections();
 }
+
+/**
+ * Global function to toggle sections (accessible from HTML)
+ */
+window.toggleSection = toggleSection;
 
 /**
  * Show add field modal
@@ -1582,16 +2476,444 @@ function showTemporaryMessage(message, type) {
             ${message}
         </div>
     `;
-    
+
     const container = document.getElementById('previewForm');
     const tempDiv = document.createElement('div');
     tempDiv.innerHTML = alertHtml;
     container.insertBefore(tempDiv.firstChild, container.firstChild);
-    
+
     // Auto-remove after 3 seconds
     setTimeout(() => {
         if (tempDiv.firstChild) {
             tempDiv.firstChild.remove();
         }
     }, 3000);
+}
+
+/**
+ * Toggle section visibility (collapsible sections)
+ * @param {string} sectionId - The ID of the section to toggle
+ */
+function toggleSection(sectionId) {
+    const section = document.getElementById(sectionId);
+    if (!section) {
+        console.error(`Section with ID '${sectionId}' not found`);
+        return;
+    }
+
+    const isExpanded = section.style.display !== 'none';
+    section.style.display = isExpanded ? 'none' : 'block';
+
+    // Update toggle button icon/text if it exists
+    const toggleButton = document.querySelector(`[data-toggle-section="${sectionId}"]`);
+    if (toggleButton) {
+        const icon = toggleButton.querySelector('.toggle-icon');
+        if (icon) {
+            icon.textContent = isExpanded ? '▶' : '▼';
+        }
+
+        // Update aria-expanded for accessibility
+        toggleButton.setAttribute('aria-expanded', !isExpanded);
+    }
+
+    console.log(`Section '${sectionId}' ${isExpanded ? 'collapsed' : 'expanded'}`);
+}
+
+/**
+ * Calculate overall confidence score from extraction results
+ * @param {Object} extractedData - The extracted data object
+ * @returns {number} Confidence score between 0 and 1
+ */
+function calculateConfidenceScore(extractedData) {
+    if (!extractedData || typeof extractedData !== 'object') {
+        return 0;
+    }
+
+    // Define field weights and confidence rules
+    const fieldWeights = {
+        candidateName: 0.25,     // Most important
+        candidateEmail: 0.20,    // Very important for contact
+        jobTitle: 0.20,          // Critical for deal classification
+        firmName: 0.15,          // Important for company context
+        location: 0.10,          // Useful but not critical
+        candidatePhone: 0.10     // Nice to have
+    };
+
+    let totalScore = 0;
+    let totalWeight = 0;
+
+    // Calculate confidence for each field
+    for (const [fieldName, weight] of Object.entries(fieldWeights)) {
+        const value = extractedData[fieldName];
+        let fieldConfidence = 0;
+
+        if (value && typeof value === 'string' && value.trim() !== '') {
+            const cleanValue = value.trim();
+
+            // Field-specific confidence calculations
+            switch (fieldName) {
+                case 'candidateName':
+                    // High confidence if contains proper name pattern
+                    fieldConfidence = /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(cleanValue) ? 0.9 :
+                                     /^[A-Z][a-z]+/.test(cleanValue) ? 0.6 : 0.3;
+                    break;
+
+                case 'candidateEmail':
+                    // High confidence if valid email format
+                    fieldConfidence = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanValue) ? 0.95 : 0.2;
+                    break;
+
+                case 'jobTitle':
+                    // Higher confidence for longer, descriptive titles
+                    if (cleanValue.length > 20) fieldConfidence = 0.9;
+                    else if (cleanValue.length > 10) fieldConfidence = 0.7;
+                    else if (cleanValue.length > 5) fieldConfidence = 0.5;
+                    else fieldConfidence = 0.3;
+                    break;
+
+                case 'firmName':
+                    // Higher confidence for company-like names
+                    if (/\b(LLC|Inc|Corp|Ltd|Company|Partners|Group|Advisors)\b/i.test(cleanValue)) {
+                        fieldConfidence = 0.9;
+                    } else if (cleanValue.length > 3) {
+                        fieldConfidence = 0.7;
+                    } else {
+                        fieldConfidence = 0.4;
+                    }
+                    break;
+
+                case 'candidatePhone':
+                    // High confidence for phone number patterns
+                    fieldConfidence = /^\+?1?[-.\s]?\(?\d{3}\)?[-.\s]?\d{3}[-.\s]?\d{4}$/.test(cleanValue) ? 0.9 : 0.3;
+                    break;
+
+                case 'location':
+                    // Moderate confidence for location-like strings
+                    fieldConfidence = cleanValue.length > 2 ? 0.7 : 0.3;
+                    break;
+
+                default:
+                    // Default confidence for other fields
+                    fieldConfidence = cleanValue.length > 0 ? 0.6 : 0;
+            }
+        }
+
+        totalScore += fieldConfidence * weight;
+        totalWeight += weight;
+    }
+
+    // Calculate overall confidence (0-1 scale)
+    const overallConfidence = totalWeight > 0 ? totalScore / totalWeight : 0;
+
+    console.log('Confidence calculation:', {
+        extractedData: Object.keys(extractedData),
+        totalScore,
+        totalWeight,
+        overallConfidence
+    });
+
+    return Math.round(overallConfidence * 100) / 100; // Round to 2 decimal places
+}
+
+/**
+ * Get low confidence fields that need user attention
+ * @param {Object} extractedData - The extracted data object
+ * @returns {Array} Array of field names with low confidence
+ */
+function getLowConfidenceFields(extractedData) {
+    if (!extractedData || typeof extractedData !== 'object') {
+        return [];
+    }
+
+    const lowConfidenceFields = [];
+    const confidenceThreshold = 0.6; // Fields below this need attention
+
+    // Critical fields that should always be checked if missing or low confidence
+    const criticalFields = {
+        candidateName: 'Candidate Name',
+        candidateEmail: 'Email Address',
+        jobTitle: 'Job Title',
+        firmName: 'Company Name'
+    };
+
+    for (const [fieldName, displayName] of Object.entries(criticalFields)) {
+        const value = extractedData[fieldName];
+        let fieldConfidence = 0;
+
+        if (value && typeof value === 'string' && value.trim() !== '') {
+            const cleanValue = value.trim();
+
+            // Same confidence logic as calculateConfidenceScore
+            switch (fieldName) {
+                case 'candidateName':
+                    fieldConfidence = /^[A-Z][a-z]+\s+[A-Z][a-z]+/.test(cleanValue) ? 0.9 :
+                                     /^[A-Z][a-z]+/.test(cleanValue) ? 0.6 : 0.3;
+                    break;
+
+                case 'candidateEmail':
+                    fieldConfidence = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(cleanValue) ? 0.95 : 0.2;
+                    break;
+
+                case 'jobTitle':
+                    if (cleanValue.length > 20) fieldConfidence = 0.9;
+                    else if (cleanValue.length > 10) fieldConfidence = 0.7;
+                    else if (cleanValue.length > 5) fieldConfidence = 0.5;
+                    else fieldConfidence = 0.3;
+                    break;
+
+                case 'firmName':
+                    if (/\b(LLC|Inc|Corp|Ltd|Company|Partners|Group|Advisors)\b/i.test(cleanValue)) {
+                        fieldConfidence = 0.9;
+                    } else if (cleanValue.length > 3) {
+                        fieldConfidence = 0.7;
+                    } else {
+                        fieldConfidence = 0.4;
+                    }
+                    break;
+            }
+        }
+
+        // Field needs attention if confidence is low or missing
+        if (fieldConfidence < confidenceThreshold) {
+            lowConfidenceFields.push({
+                fieldName,
+                displayName,
+                confidence: fieldConfidence,
+                isEmpty: !value || value.trim() === ''
+            });
+        }
+    }
+
+    return lowConfidenceFields;
+}
+
+/**
+ * Show or hide the express send banner based on extraction confidence
+ * @param {Object} extractedData - The extracted data object
+ */
+function updateExpressSendBanner(extractedData) {
+    const banner = document.getElementById('expressSendBanner');
+    if (!banner) {
+        console.log('Express send banner element not found');
+        return;
+    }
+
+    const confidence = calculateConfidenceScore(extractedData);
+    const lowConfidenceFields = getLowConfidenceFields(extractedData);
+
+    // Show express send banner if confidence is high (>= 0.8) and no critical fields are missing
+    const showExpressSend = confidence >= 0.8 && lowConfidenceFields.length === 0;
+
+    if (showExpressSend) {
+        banner.style.display = 'block';
+
+        // Update banner content with confidence score
+        const confidenceText = banner.querySelector('.confidence-score');
+        if (confidenceText) {
+            confidenceText.textContent = `${Math.round(confidence * 100)}% confidence`;
+        }
+
+        console.log(`Express send banner shown (confidence: ${confidence})`);
+    } else {
+        banner.style.display = 'none';
+        console.log(`Express send banner hidden (confidence: ${confidence}, issues: ${lowConfidenceFields.length})`);
+    }
+}
+
+/**
+ * Show or hide the corrections section based on confidence
+ * @param {Object} extractedData - The extracted data object
+ */
+function updateCorrectionsSection(extractedData) {
+    const correctionsSection = document.getElementById('correctionsSection');
+    if (!correctionsSection) {
+        console.log('Corrections section element not found');
+        return;
+    }
+
+    const lowConfidenceFields = getLowConfidenceFields(extractedData);
+
+    // Show corrections section only if there are low-confidence fields
+    if (lowConfidenceFields.length > 0) {
+        correctionsSection.style.display = 'block';
+
+        // Update the corrections section with specific field issues
+        const issuesList = correctionsSection.querySelector('.confidence-issues');
+        if (issuesList) {
+            issuesList.innerHTML = lowConfidenceFields.map(field => `
+                <div class="confidence-issue">
+                    <span class="field-name">${field.displayName}</span>
+                    <span class="confidence-badge ${field.confidence < 0.3 ? 'low' : 'medium'}">
+                        ${field.isEmpty ? 'Missing' : `${Math.round(field.confidence * 100)}% confidence`}
+                    </span>
+                </div>
+            `).join('');
+        }
+
+        console.log(`Corrections section shown for fields:`, lowConfidenceFields.map(f => f.fieldName));
+    } else {
+        correctionsSection.style.display = 'none';
+        console.log('Corrections section hidden - all fields have high confidence');
+    }
+}
+
+/**
+ * Initialize confidence-based UI after extraction
+ * Call this function after populating the form with extracted data
+ * @param {Object} extractedData - The extracted data object
+ */
+function initializeConfidenceUI(extractedData) {
+    console.log('Initializing confidence-based UI');
+
+    // Calculate and store confidence for debugging
+    const confidence = calculateConfidenceScore(extractedData);
+    const lowConfidenceFields = getLowConfidenceFields(extractedData);
+
+    console.log('Confidence analysis:', {
+        overallConfidence: confidence,
+        lowConfidenceFields: lowConfidenceFields.length,
+        fieldIssues: lowConfidenceFields.map(f => `${f.fieldName}: ${f.confidence}`)
+    });
+
+    // Update UI components based on confidence
+    updateExpressSendBanner(extractedData);
+    updateCorrectionsSection(extractedData);
+
+    // Hide/show sections based on Steve's workflow preferences
+    initializeStevesWorkflow(confidence, lowConfidenceFields);
+}
+
+/**
+ * Initialize Steve's streamlined workflow based on confidence
+ * @param {number} confidence - Overall confidence score (0-1)
+ * @param {Array} lowConfidenceFields - Array of fields needing attention
+ */
+function initializeStevesWorkflow(confidence, lowConfidenceFields) {
+    console.log("Initializing Steve's streamlined workflow", { confidence, issueCount: lowConfidenceFields.length });
+
+    // Steve's workflow preferences:
+    // 1. If high confidence (>= 0.8), show express send banner and minimize other sections
+    // 2. If medium confidence (0.5-0.8), show main form but collapse advanced sections
+    // 3. If low confidence (< 0.5), expand corrections section and highlight issues
+
+    const advancedSections = ['attachmentsSection', 'customFieldsSection', 'debugSection'];
+    const correctionsSection = document.getElementById('correctionsSection');
+
+    if (confidence >= 0.8) {
+        // High confidence - Steve's express workflow
+        console.log("Activating express workflow for Steve");
+
+        // Minimize advanced sections
+        advancedSections.forEach(sectionId => {
+            const section = document.getElementById(sectionId);
+            if (section) {
+                toggleSection(sectionId); // Collapse if visible
+            }
+        });
+
+        // Focus on the send button for quick processing
+        setTimeout(() => {
+            const sendButton = document.getElementById('btnSend');
+            if (sendButton) {
+                sendButton.focus();
+                sendButton.classList.add('btn-success'); // Green for high confidence
+                sendButton.classList.remove('btn-primary');
+            }
+        }, 100);
+
+    } else if (confidence >= 0.5) {
+        // Medium confidence - balanced workflow
+        console.log("Activating balanced workflow");
+
+        // Keep main sections visible but collapse advanced ones
+        advancedSections.slice(1).forEach(sectionId => { // Keep attachments, hide others
+            const section = document.getElementById(sectionId);
+            if (section) {
+                toggleSection(sectionId);
+            }
+        });
+
+    } else {
+        // Low confidence - detailed review workflow
+        console.log("Activating detailed review workflow");
+
+        // Expand corrections section and highlight the first issue field
+        if (correctionsSection) {
+            correctionsSection.style.display = 'block';
+        }
+
+        // Focus on the first low-confidence field
+        if (lowConfidenceFields.length > 0) {
+            const firstIssueField = document.getElementById(lowConfidenceFields[0].fieldName);
+            if (firstIssueField) {
+                setTimeout(() => {
+                    firstIssueField.focus();
+                    firstIssueField.classList.add('needs-attention');
+                }, 100);
+            }
+        }
+    }
+
+    // Add confidence indicator to the form header
+    addConfidenceIndicator(confidence);
+}
+
+/**
+ * Add visual confidence indicator to the form
+ * @param {number} confidence - Confidence score (0-1)
+ */
+function addConfidenceIndicator(confidence) {
+    const formHeader = document.querySelector('.form-header') || document.querySelector('h2');
+    if (!formHeader) return;
+
+    // Remove existing confidence indicator
+    const existingIndicator = document.getElementById('confidenceIndicator');
+    if (existingIndicator) {
+        existingIndicator.remove();
+    }
+
+    const percentage = Math.round(confidence * 100);
+    let confidenceClass = 'confidence-low';
+    let confidenceText = 'Needs Review';
+
+    if (confidence >= 0.8) {
+        confidenceClass = 'confidence-high';
+        confidenceText = 'Ready to Send';
+    } else if (confidence >= 0.5) {
+        confidenceClass = 'confidence-medium';
+        confidenceText = 'Review Recommended';
+    }
+
+    const indicator = document.createElement('div');
+    indicator.id = 'confidenceIndicator';
+    indicator.className = `confidence-indicator ${confidenceClass}`;
+    indicator.innerHTML = `
+        <span class="confidence-percentage">${percentage}%</span>
+        <span class="confidence-label">${confidenceText}</span>
+    `;
+
+    // Add CSS if not already present
+    if (!document.getElementById('confidenceIndicatorStyles')) {
+        const style = document.createElement('style');
+        style.id = 'confidenceIndicatorStyles';
+        style.textContent = `
+            .confidence-indicator {
+                display: inline-flex;
+                align-items: center;
+                gap: 8px;
+                padding: 4px 12px;
+                border-radius: 16px;
+                font-size: 12px;
+                font-weight: 600;
+                margin-left: 12px;
+            }
+            .confidence-high { background: #d4edda; color: #155724; border: 1px solid #c3e6cb; }
+            .confidence-medium { background: #fff3cd; color: #856404; border: 1px solid #ffeaa7; }
+            .confidence-low { background: #f8d7da; color: #721c24; border: 1px solid #f5c6cb; }
+            .needs-attention { box-shadow: 0 0 0 2px #ffc107; }
+        `;
+        document.head.appendChild(style);
+    }
+
+    formHeader.appendChild(indicator);
 }

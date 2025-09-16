@@ -1,156 +1,130 @@
 #!/usr/bin/env python3
-"""Test script for Calendly email extraction"""
-
-import asyncio
+"""Test Calendly event extraction to understand missing fields"""
+import requests
 import json
-from app.langgraph_manager import EmailProcessingWorkflow
+import os
+from dotenv import load_dotenv
 
-# Sample Calendly email content from the PDF
-CALENDLY_EMAIL_CONTENT = """
-Invitee: Roy Janse
-Invitee Email: roy.janse@mariner.com
-Event Date/Time: 11:30am - Thursday, September 11, 2025 (Central Time - US & Canada)
-Description: Who We Are: The Well Recruiting Solutions—your partner in finding and hiring top-tier talent.
-What We'll Do: Discuss your specific recruiting goals, share proven strategies, and map out a plan to build your ideal team.
-Our Approach: A refreshing, personalized experience focused on understanding your unique needs and setting you up for long-term hiring success.
-Next Steps: Book a time that works for you, and we'll tackle your recruiting challenges together.
-Location: This is a Zoom web conference. Attendees can join this meeting from a computer, tablet or smartphone.
-https://us02web.zoom.us/j/8065004359?omn=89172961675
-One tap mobile:
-+1 646 931 3860,,8065004359#
-+1 301 715 8592,,8065004359#
-They can also dial in using a phone.
-US: +1 646 931 3860, +1 301 715 8592, +1 305 224 1968, +1 309 205 3325, +1 312 626 6799, +1 646 558 8656, +1 564 217 2000, +1 669 444 9171, +1 669 900 9128, +16892781000, +1 719 359 4580, +1 253 205 0468, +1 253 215 8782, +1 346 248 7799, +1 360 209 5623, +1 386 347 5053, +1 507 473 4847
-Meeting ID: 806-500-4359
-Invitee Time Zone: Eastern Time - US & Canada
-Questions:
-Phone +1 864-430-5074
-What recruiting goals or ideas would you like to discuss?
-Mid-career advisors to our Greenville team.
-Your confirmation email might land in spam/junk. Got it- I'll check my spam/junk
-View event in Calendly
-Pro Tip!
-Take Calendly anywhere you work Use Calendly anywhere on the web, without switching tabs!
-Access your event types, share your Calendly link, and create meetings right from your Gmail or Outlook.
-Get Calendly for Chrome, Firefox, or Outlook. See all apps
-Sent from Calendly Report this event
-"""
+load_dotenv('.env.local')
+api_key = os.getenv("API_KEY", "test-api-key-2024")
 
-async def test_extraction():
-    """Test the email extraction with Calendly content"""
-    print("=" * 80)
-    print("Testing Calendly Email Extraction")
-    print("=" * 80)
+# This is the actual Calendly event content from the browser logs
+test_payload = {
+    "sender_name": "Steve Perry",
+    "sender_email": "steve@thewellrecruiting.com", 
+    "subject": "New Event Request: Kevin Sullivan", 
+    "body": """
+Hi Daniel,
 
-    # Initialize the workflow
-    workflow = EmailProcessingWorkflow()
+A new Calendly event has been scheduled.
 
-    # Test with Calendly email
-    sender_domain = "calendly.com"
+Event Type:
+Introductory Meeting - RIA & Wirehouse Clients Only
 
-    print("\n📧 Processing Calendly email...")
-    print("-" * 40)
+Invitee:
+Kevin Sullivan
 
-    try:
-        # Process the email
-        result = await workflow.process_email(
-            email_body=CALENDLY_EMAIL_CONTENT,
-            sender_domain=sender_domain
-        )
+Invitee Email:
+donna@infinitewealthadvisors.com
 
-        print("\n✅ Extraction Results:")
-        print("-" * 40)
+Event Date/Time:
+Thursday, December 19, 2024
+10:00am - 10:30am (America/New_York)
 
-        # Display extracted fields
-        fields_to_check = [
-            ('candidate_name', 'Roy Janse'),
-            ('email', 'roy.janse@mariner.com'),
-            ('phone', '+1 864-430-5074'),
-            ('job_title', None),
-            ('location', 'Greenville'),
-            ('company_name', 'Mariner'),
-            ('notes', 'Mid-career advisors to our Greenville team')
-        ]
+Invitee Time Zone:
+America/New_York
 
-        for field_name, expected in fields_to_check:
-            actual = getattr(result, field_name, None)
-            status = "✅" if actual else "❌"
-            print(f"{status} {field_name}: {actual}")
-            if expected and actual != expected:
-                print(f"   ⚠️  Expected: {expected}")
+Guest Emails (Optional):
+scott@emailthewell.com
 
-        # Check for common issues
-        print("\n🔍 Quality Checks:")
-        print("-" * 40)
+Location:
+This is a Zoom meeting.
+The meeting details will be sent in a confirmation email.
 
-        # Check if email field contains only the email address
-        if result.email and len(result.email) > 100:
-            print("❌ Email field too long - may contain extra content")
-        else:
-            print("✅ Email field contains only email address")
+Invitee Questions:
+Phone Number:
++1 (336) 882-8800
 
-        # Check if phone was extracted
-        if result.phone:
-            print(f"✅ Phone extracted: {result.phone}")
-        else:
-            print("❌ Phone number not extracted")
+How did you hear about us?:
+Scott Leak
 
-        # Check if notes contain recruiting goals
-        if result.notes and "advisor" in result.notes.lower():
-            print("✅ Recruiting goals captured in notes")
-        else:
-            print("❌ Recruiting goals not captured in notes")
+Additional Information:
+Questions? Contact support@thewellrecruiting.com or call +1 704-905-8002
 
-        # Display full result for debugging
-        print("\n📋 Full Extraction Result (JSON):")
-        print("-" * 40)
-        result_dict = {
-            'candidate_name': result.candidate_name,
-            'email': result.email,
-            'phone': result.phone,
-            'job_title': result.job_title,
-            'location': result.location,
-            'company_name': result.company_name,
-            'referrer_name': result.referrer_name,
-            'referrer_email': result.referrer_email,
-            'notes': result.notes,
-            'linkedin_url': result.linkedin_url,
-            'website': result.website,
-            'source': result.source,
-            'source_detail': result.source_detail
-        }
-        print(json.dumps(result_dict, indent=2))
+---
+Powered by Calendly.com
+""",
+    "attachments": [],
+    "dry_run": True
+}
 
-        # Test edge cases
-        print("\n🧪 Testing Edge Cases:")
-        print("-" * 40)
+print("Testing Calendly Event Extraction...")
+print("=" * 70)
 
-        # Test with the problematic format mentioned by user
-        edge_case_email = """
-        Roy Janse Invitee Email: roy.janse@mariner.com Event Date/Time: 11:30am - Thursday, September 11, 2025
-        Phone +1 864-430-5074
-        What recruiting goals or ideas would you like to discuss? Mid-career advisors to our Greenville team.
-        """
+response = requests.post(
+    "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/intake/email",
+    json=test_payload,
+    headers={"X-API-Key": api_key, "Content-Type": "application/json"}
+)
 
-        print("Testing with condensed format...")
-        edge_result = await workflow.process_email(
-            email_body=edge_case_email,
-            sender_domain="calendly.com"
-        )
+if response.status_code == 200:
+    result = response.json()
+    extracted = result.get("extracted", {})
+    
+    print("\nRaw API Response:")
+    print(json.dumps(result, indent=2))
+    
+    print("\n\n🔍 FIELD ANALYSIS:")
+    print("-" * 70)
+    
+    # Check key fields
+    fields_to_check = {
+        "candidate_name": extracted.get("candidate_name"),
+        "job_title": extracted.get("job_title"),
+        "email": extracted.get("email"),
+        "phone": extracted.get("phone"),
+        "linkedin_url": extracted.get("linkedin_url"),
+        "company_name": extracted.get("company_name"),
+        "referrer_email": extracted.get("referrer_email"),
+        "website": extracted.get("website")
+    }
+    
+    print("\nDirect Fields:")
+    for field, value in fields_to_check.items():
+        status = "✅" if value else "❌"
+        print(f"  {status} {field:20s}: {value or 'NOT EXTRACTED'}")
+    
+    # Check contact record
+    if extracted.get("contact_record"):
+        contact = extracted["contact_record"]
+        print("\nContact Record:")
+        print(f"  Email:     {contact.get('email') or 'NOT FOUND'}")
+        print(f"  Phone:     {contact.get('phone') or 'NOT FOUND'}")
+        print(f"  Company:   {contact.get('company_name') or 'NOT FOUND'}")
+        
+    # Check company record
+    if extracted.get("company_record"):
+        company = extracted["company_record"]
+        print("\nCompany Record:")
+        print(f"  Name:      {company.get('company_name') or 'NOT FOUND'}")
+        print(f"  Phone:     {company.get('phone') or 'NOT FOUND'}")
+        print(f"  Website:   {company.get('website') or 'NOT FOUND'}")
+        
+    print("\n\n🎯 KEY FINDINGS:")
+    print("-" * 70)
+    
+    # The email donna@infinitewealthadvisors.com should have been extracted
+    if "donna@infinitewealthadvisors.com" in test_payload["body"]:
+        print("✅ Email 'donna@infinitewealthadvisors.com' is in the body text")
+        if not extracted.get("email") and not (extracted.get("contact_record", {}).get("email")):
+            print("❌ BUT it was NOT extracted into any email field!")
+            print("   This is the issue - the extraction logic is missing this email")
+    
+    # LinkedIn is not in Calendly events typically
+    print("\n📝 Note: LinkedIn URLs are not typically in Calendly events")
+    print("   This is expected behavior, not a bug")
+    
+else:
+    print(f"❌ API request failed: {response.status_code}")
+    print(response.text)
 
-        print(f"  Candidate: {edge_result.candidate_name}")
-        print(f"  Email: {edge_result.email}")
-        print(f"  Phone: {edge_result.phone}")
-        print(f"  Notes: {edge_result.notes}")
-
-    except Exception as e:
-        print(f"\n❌ Error during extraction: {e}")
-        import traceback
-        traceback.print_exc()
-
-    print("\n" + "=" * 80)
-    print("Test Complete")
-    print("=" * 80)
-
-if __name__ == "__main__":
-    asyncio.run(test_extraction())

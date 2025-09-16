@@ -11,7 +11,7 @@ from typing import Dict, Optional, Any, List, TypedDict, Annotated
 import operator
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
-from app.models import ExtractedData
+from app.models import ExtractedData, CompanyRecord, ContactRecord, DealRecord
 from dotenv import load_dotenv
 
 # LangGraph imports
@@ -22,6 +22,7 @@ from langgraph.types import Send
 # Cache imports
 from app.redis_cache_manager import get_cache_manager
 from app.cache_strategies import get_strategy_manager
+from app.business_rules import filter_well_info
 
 # C³ and VoIT imports
 from app.cache.c3 import (
@@ -90,17 +91,46 @@ class EmailProcessingState(TypedDict):
 
 
 class ExtractionOutput(BaseModel):
-    """Structured output for extraction step"""
-    candidate_name: Optional[str] = Field(default=None, description="Full name of the job candidate ONLY - not the entire email content")
-    job_title: Optional[str] = Field(default=None, description="Specific job title or role ONLY - not description or full text")
-    location: Optional[str] = Field(default=None, description="City and/or state location ONLY - not full address")
-    company_guess: Optional[str] = Field(default=None, description="Company name ONLY - just the organization name")
-    referrer_name: Optional[str] = Field(default=None, description="Name of referrer ONLY - just first and last name")
-    referrer_email: Optional[str] = Field(default=None, description="Email address ONLY - in format user@domain.com")
-    phone: Optional[str] = Field(default=None, description="Phone number ONLY - just the digits and formatting")
-    email: Optional[str] = Field(default=None, description="Candidate email address ONLY - in format user@domain.com")
-    linkedin_url: Optional[str] = Field(default=None, description="LinkedIn URL ONLY - just the URL string")
-    notes: Optional[str] = Field(default=None, description="Brief summary or key points - max 200 characters")
+    """Structured output for extraction step - Steve's 3-record template"""
+
+    # Company Record fields
+    company_name: Optional[str] = Field(default=None, description="Official company name ONLY")
+    company_phone: Optional[str] = Field(default=None, description="Company phone number ONLY")
+    company_website: Optional[str] = Field(default=None, description="Company website URL ONLY")
+    company_source: Optional[str] = Field(default=None, description="How company was sourced (e.g., Conference/Trade Show, Referral)")
+    source_detail: Optional[str] = Field(default=None, description="Specific source detail (e.g., FutureProof 2026, referrer name)")
+    who_gets_credit: Optional[str] = Field(default=None, description="BD Rep, Affiliate, or Both")
+    credit_person_name: Optional[str] = Field(default=None, description="Name of person who gets credit (e.g., Steve Perry)")
+
+    # Contact Record fields
+    first_name: Optional[str] = Field(default=None, description="Contact's first name ONLY")
+    last_name: Optional[str] = Field(default=None, description="Contact's last name ONLY")
+    contact_company_name: Optional[str] = Field(default=None, description="Contact's company name (should match company_name)")
+    contact_email: Optional[str] = Field(default=None, description="Contact's email address ONLY")
+    contact_phone: Optional[str] = Field(default=None, description="Contact's phone number ONLY")
+    contact_city: Optional[str] = Field(default=None, description="Contact's city ONLY")
+    contact_state: Optional[str] = Field(default=None, description="Contact's state ONLY")
+    contact_source: Optional[str] = Field(default=None, description="Contact source (should match company_source)")
+
+    # Deal Record fields
+    deal_source: Optional[str] = Field(default=None, description="Deal source (should match company_source)")
+    position_title: Optional[str] = Field(default=None, description="Position they're looking for (job title)")
+    position_location: Optional[str] = Field(default=None, description="Location for the position (city, state, or Nationwide)")
+    pipeline: Optional[str] = Field(default="Sales Pipeline", description="Pipeline name (default: Sales Pipeline)")
+    estimated_closing_date: Optional[str] = Field(default=None, description="Estimated closing date (YYYY-MM-DD format, typically 2-4 months out)")
+    description_of_requirements: Optional[str] = Field(default=None, description="Description of requirements/needs")
+
+    # Legacy fields for backward compatibility
+    candidate_name: Optional[str] = Field(default=None, description="DEPRECATED: Use first_name + last_name")
+    job_title: Optional[str] = Field(default=None, description="DEPRECATED: Use position_title")
+    location: Optional[str] = Field(default=None, description="DEPRECATED: Use contact_city + contact_state")
+    company_guess: Optional[str] = Field(default=None, description="DEPRECATED: Use company_name")
+    referrer_name: Optional[str] = Field(default=None, description="DEPRECATED: Use credit_person_name")
+    referrer_email: Optional[str] = Field(default=None, description="DEPRECATED: Not in Steve's template")
+    phone: Optional[str] = Field(default=None, description="DEPRECATED: Use contact_phone")
+    email: Optional[str] = Field(default=None, description="DEPRECATED: Use contact_email")
+    linkedin_url: Optional[str] = Field(default=None, description="DEPRECATED: Not in Steve's template")
+    notes: Optional[str] = Field(default=None, description="DEPRECATED: Use description_of_requirements")
 
 
 class CompanyResearch(BaseModel):
@@ -1043,59 +1073,68 @@ class EmailProcessingWorkflow:
         else:
             # Default system prompt
             system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis.
-            Extract key recruitment details from the email with high accuracy.
-            
-            CRITICAL: EXTRACT ONLY THE SPECIFIC VALUE FOR EACH FIELD:
-            - candidate_name: ONLY the person's name (e.g., "John Smith") - NOT the entire email
-            - job_title: ONLY the job title (e.g., "Senior Developer") - NOT job descriptions
-            - location: Leave BLANK/null - do NOT extract from email, only from research
-            - company_guess: ONLY the company name (e.g., "Microsoft") - NOT descriptions
-            - phone: ONLY the phone number (e.g., "555-123-4567") - NOT other text
-            - email: ONLY the email address (e.g., "john@example.com") - NOT other text
-            - notes: Brief summary, max 200 characters
-            
-            CALENDLY EMAIL SPECIAL RULES:
-            - For Calendly scheduling emails, look for:
-              * "Invitee:" followed by the person's name - this is the CANDIDATE NAME
-              * "Invitee Email:" followed by email - extract ONLY the email address (e.g., roy.janse@mariner.com)
-              * Job title may be in the meeting title (e.g., "Recruiting Consultant Interview")
-              * "Phone" or "Phone:" followed by number - extract ONLY the phone number to phone field
-              * "Questions:" section - look for phone numbers and recruiting goals
-              * "What recruiting goals" question - extract the answer to notes field
-              * The person/company organizing the meeting is usually the REFERRER
-            - Example: "Invitee: Roy Janse" → candidate_name = "Roy Janse"
-            - Example: "Invitee Email: roy.janse@mariner.com Event Date/Time..." → email = "roy.janse@mariner.com" (ONLY the email, not the rest)
-            - Example: "Phone +1 864-430-5074" → phone = "+1 864-430-5074"
-            - Example: "What recruiting goals or ideas would you like to discuss? Mid-career advisors to our Greenville team." → notes = "Recruiting goals: Mid-career advisors to our Greenville team"
-            
-            CRITICAL RULES FOR FORWARDED EMAILS:
-            - Check if this is a forwarded email (look for "-----Original Message-----", "From:", "Date:", "Subject:", "Begin forwarded message:", etc.)
-            - For FORWARDED emails:
-              * The person who forwarded the email (top of email) is typically the REFERRER
-              * The CANDIDATE information is in the FORWARDED PORTION (the original message)
-              * Look for who is being discussed as a potential hire/candidate in the forwarded content
-              * The sender of the ORIGINAL forwarded message may be introducing a candidate
-            
-            IMPORTANT DISTINCTIONS:
-            - REFERRER: The person who forwarded/sent you this opportunity (often Steve, Daniel, etc.)
-            - CANDIDATE: The actual person being considered for a position (the subject of the discussion)
-            - Do NOT confuse the person sending the referral with the candidate being referred
-            
-            DATA EXTRACTION RULES:
-            - Extract ONLY the specific value for each field
-            - NEVER extract the entire email content into a field
-            - If information is unclear, return "Unknown" rather than null
-            - candidate_name: ONLY the name (e.g., "Roy Janse" not "Roy Janse Invitee Email: roy.janse@...")
-            - job_title: ONLY the title (e.g., "Recruiting Consultant" not "Recruiting Consult Invitee: Roy...")
-            - referrer_name: ONLY the name (e.g., "Daniel" not the whole email)
-            - email: ONLY email address in format user@domain.com
-            - phone: ONLY the phone number with standard formatting
-            - location: Leave BLANK/null - location is determined later from research, NOT from email text
+            Extract key recruitment details into THREE SEPARATE RECORD TYPES following Steve's template structure.
 
-            EXAMPLES OF CORRECT EXTRACTION:
-            - Calendly: "Invitee: Roy Janse" → candidate_name = "Roy Janse"
-            - Calendly: "Recruiting Consultant Interview" → job_title = "Recruiting Consultant"
-            - Regular: "Jerry Fetta mentioned" → candidate_name = "Jerry Fetta", location = null (DO NOT extract location from email)
+            YOUR TASK: Extract data into Company Record, Contact Record, and Deal Record fields:
+
+            === COMPANY RECORD FIELDS ===
+            - company_name: Official company name ONLY (e.g., "Capital Investment Advisors, LLC")
+            - company_phone: Company phone number if mentioned
+            - company_website: Company website URL if mentioned (e.g., "www.yourwealth.com")
+            - company_source: How sourced (e.g., "Conference/Trade Show", "Referral", "Email Inbound")
+            - source_detail: Specific detail (e.g., "FutureProof 2026", referrer name)
+            - who_gets_credit: "BD Rep", "Affiliate", or "Both"
+            - credit_person_name: Name of person who gets credit (e.g., "Steve Perry")
+
+            === CONTACT RECORD FIELDS ===
+            - first_name: Contact's first name ONLY (e.g., "Troy")
+            - last_name: Contact's last name ONLY (e.g., "Tomczak")
+            - contact_company_name: Same as company_name
+            - contact_email: Contact's email address ONLY
+            - contact_phone: Contact's phone number ONLY
+            - contact_city: Contact's city ONLY (e.g., "Atlanta")
+            - contact_state: Contact's state ONLY (e.g., "GA")
+            - contact_source: Same as company_source
+
+            === DEAL RECORD FIELDS ===
+            - deal_source: Same as company_source
+            - position_title: Job position sought (e.g., "Advisors", "Sales Leader")
+            - position_location: Position location (e.g., "Nationwide", "Newport Beach, CA")
+            - pipeline: Always "Sales Pipeline" unless specified otherwise
+            - estimated_closing_date: Estimate 2-4 months out (YYYY-MM-DD format)
+            - description_of_requirements: Brief description of needs
+
+            SOURCE DETERMINATION RULES:
+            - If email mentions referrer/forwarded → "Referral" + referrer name in source_detail
+            - If from conference/event → "Conference/Trade Show" + event name in source_detail
+            - If direct inquiry → "Email Inbound" + "Direct email contact" in source_detail
+            - If Calendly meeting → "Website Inbound" + "Calendly scheduling" in source_detail
+
+            DEAL NAME FORMATTING (for validation):
+            Format should be: "[Position] ([Location]) - [Company]"
+            Examples:
+            - "Advisors (Nationwide) - Capital Investment Advisors"
+            - "Sales Leader (US Remote) - Hoxton Wealth USA"
+            - "Assistant (Nashville) - AJ Advisors"
+
+            CALENDLY EMAIL SPECIAL RULES:
+            - "Invitee:" → first_name + last_name
+            - "Invitee Email:" → contact_email
+            - Meeting title → position_title
+            - Questions about recruiting goals → description_of_requirements
+            - Meeting organizer → credit_person_name
+
+            FORWARDED EMAIL RULES:
+            - Forwarder = referrer (credit_person_name)
+            - Original message = candidate info
+            - Source = "Referral"
+
+            CRITICAL EXTRACTION RULES:
+            - Extract ONLY specific values, NOT entire sentences
+            - If unclear, use "Unknown" rather than null
+            - Separate names into first_name and last_name properly
+            - Ensure consistency across all three record types (same company_name, source, etc.)
+            - Location fields: extract city and state separately when possible
             
             {learning_hints}
             
@@ -1427,7 +1466,18 @@ class EmailProcessingWorkflow:
         try:
             from app.firecrawl_research import CompanyResearchService
             from app.redis_cache_manager import RedisCacheManager
-            
+
+            # Import the supercharged extractor for enhanced enrichment
+            try:
+                from app.firecrawl_v2_supercharged import UltraEnrichmentService
+                ultra_service = UltraEnrichmentService()
+                use_ultra_enrichment = True
+                logger.info("✅ Using Firecrawl v2 Supercharged for enhanced enrichment")
+            except ImportError:
+                ultra_service = None
+                use_ultra_enrichment = False
+                logger.info("⚠️ Firecrawl v2 Supercharged not available, using standard service")
+
             research_service = CompanyResearchService()
             cache_manager = RedisCacheManager()
             await cache_manager.connect()
@@ -1515,9 +1565,133 @@ class EmailProcessingWorkflow:
             
             # Merge candidate info into research result
             research_result.update(candidate_info)
-            
+
+            # 🚀 NEW: Apollo.io enrichment for accurate company phone/website
+            if candidate_email:
+                try:
+                    from app.apollo_enricher import enrich_contact_with_apollo
+                    apollo_data = await enrich_contact_with_apollo(candidate_email)
+
+                    if apollo_data:
+                        logger.info(f"🎯 Apollo.io enrichment successful for {candidate_email}")
+
+                        # Apollo data provides accurate company info - prioritize it
+                        if apollo_data.get('website'):
+                            research_result['website'] = apollo_data['website']
+                            logger.info(f"📱 Updated website from Apollo: {apollo_data['website']}")
+
+                        # Apollo often has better company phone than web scraping
+                        if apollo_data.get('phone'):
+                            research_result['phone'] = apollo_data['phone']
+                            logger.info(f"☎️ Updated phone from Apollo: {apollo_data['phone']}")
+
+                        # Company name from Apollo is usually more accurate
+                        if apollo_data.get('firm_company'):
+                            research_result['company_name'] = apollo_data['firm_company']
+                            logger.info(f"🏢 Updated company name from Apollo: {apollo_data['firm_company']}")
+
+                        # Job title and location
+                        if apollo_data.get('job_title'):
+                            research_result['job_title'] = apollo_data['job_title']
+                        if apollo_data.get('location'):
+                            research_result['location'] = apollo_data['location']
+
+                        # Mark as Apollo-enhanced
+                        research_result['apollo_enriched'] = True
+                        research_result['confidence'] = min(research_result.get('confidence', 0.5) + 0.3, 1.0)
+
+                    else:
+                        logger.info(f"🔍 No Apollo data found for {candidate_email}")
+
+                except Exception as e:
+                    logger.error(f"❌ Apollo enrichment failed for {candidate_email}: {str(e)}")
+
+            # Apply ultra enrichment if available
+            if use_ultra_enrichment and ultra_service and research_domain:
+                try:
+                    logger.info(f"🚀 Applying Firecrawl v2 Supercharged enrichment for: {research_domain}")
+
+                    # Prepare email data for enrichment
+                    email_data = {
+                        "sender_email": state.get("sender_email", ""),
+                        "sender_name": candidate_name or "",
+                        "body": state.get("email_content", "")
+                    }
+
+                    # Prepare extracted data
+                    extracted_data = state.get("extraction_result", {})
+                    if extracted_data and 'company_record' in extracted_data:
+                        extracted_data['company_record']['company_domain'] = research_domain
+
+                    # Get enriched data
+                    enriched = await ultra_service.enrich_email_data(
+                        email_data=email_data,
+                        extracted_data=extracted_data
+                    )
+
+                    # Update research result with enriched data
+                    if enriched and enriched.get("enrichments"):
+                        enrichments = enriched["enrichments"]
+
+                        # Add company enrichment data
+                        if enrichments.get("company"):
+                            company_data = enrichments["company"]
+                            logger.info(f"✅ Enriched company data: revenue={company_data.get('revenue')}, "
+                                      f"employees={company_data.get('employee_count')}, "
+                                      f"funding={company_data.get('funding_total')}")
+
+                            # Add to research result
+                            research_result.update({
+                                "revenue": company_data.get("revenue"),
+                                "employee_count": company_data.get("employee_count"),
+                                "employee_range": company_data.get("employee_range"),
+                                "funding_total": company_data.get("funding_total"),
+                                "latest_funding": company_data.get("latest_funding_round"),
+                                "valuation": company_data.get("valuation"),
+                                "tech_stack": company_data.get("tech_stack", []),
+                                "founders": company_data.get("founders", []),
+                                "executives": company_data.get("key_executives", []),
+                                "headquarters": company_data.get("headquarters"),
+                                "industry": company_data.get("industry"),
+                                "products": company_data.get("products", []),
+                                "enrichment_source": "firecrawl_v2_supercharged"
+                            })
+
+                            # Update extraction result if it exists
+                            if state.get("extraction_result") and state["extraction_result"].get("company_record"):
+                                state["extraction_result"]["company_record"].update({
+                                    "revenue": company_data.get("revenue"),
+                                    "employee_count": company_data.get("employee_count"),
+                                    "funding": company_data.get("funding_total"),
+                                    "tech_stack": ", ".join(company_data.get("tech_stack", []))[:255] if company_data.get("tech_stack") else None,
+                                    "enrichment_data": json.dumps({
+                                        "revenue": company_data.get("revenue"),
+                                        "employees": company_data.get("employee_count"),
+                                        "funding": company_data.get("funding_total"),
+                                        "valuation": company_data.get("valuation"),
+                                        "tech_stack": company_data.get("tech_stack", []),
+                                        "industry": company_data.get("industry"),
+                                        "products": company_data.get("products", [])
+                                    })
+                                })
+
+                        # Add candidate enrichment data
+                        if enrichments.get("candidate"):
+                            candidate_data = enrichments["candidate"]
+                            research_result.update({
+                                "candidate_linkedin": candidate_data.get("linkedin_url"),
+                                "candidate_personal_site": candidate_data.get("personal_website"),
+                                "candidate_github": candidate_data.get("github"),
+                                "candidate_skills": candidate_data.get("skills", [])
+                            })
+
+                    logger.info(f"✅ Ultra enrichment completed successfully")
+
+                except Exception as e:
+                    logger.warning(f"Ultra enrichment failed: {e}, continuing with standard data")
+
             logger.info(f"Research completed with Firecrawl: {research_result}")
-            
+
             return {
                 "company_research": research_result,
                 "messages": [{"role": "assistant", "content": f"Researched: {research_result}"}]
@@ -1642,7 +1816,7 @@ class EmailProcessingWorkflow:
             "location": extracted.get('location'),
             # Don't use research company if it's generic like "Example" or domain-based guesses
             "company_name": (
-                extracted.get('company_guess') or 
+                extracted.get('company_guess') or
                 (research.get('company_name') if research.get('confidence', 0) > 0.7 else None)
             ),
             "referrer_name": extracted.get('referrer_name'),
@@ -1660,6 +1834,9 @@ class EmailProcessingWorkflow:
             "source": source,
             "source_detail": source_detail
         }
+
+        # Filter out The Well's information from client/candidate data
+        validated_data = filter_well_info(validated_data)
         
         # Clean and standardize
         for key, value in validated_data.items():
@@ -1676,13 +1853,101 @@ class EmailProcessingWorkflow:
                         validated_data[key] = f"https://{value}"
         
         logger.info(f"Validation completed: {validated_data}")
-        
-        # Convert to ExtractedData model
+
+        # Create Steve's 3-record structure from extracted data
+        from app.models import CompanyRecord, ContactRecord, DealRecord
+        from app.business_rules import format_deal_name
+
+        # Parse name into first and last
+        full_name = extracted.get('first_name', '') + ' ' + extracted.get('last_name', '')
+        if not full_name.strip() and extracted.get('candidate_name'):
+            # Fallback to legacy candidate_name field
+            full_name = extracted.get('candidate_name', '')
+            name_parts = full_name.strip().split(' ', 1) if full_name else ['', '']
+            first_name = name_parts[0] if name_parts else ''
+            last_name = name_parts[1] if len(name_parts) > 1 else ''
+        else:
+            first_name = extracted.get('first_name', '')
+            last_name = extracted.get('last_name', '')
+
+        # Create Company Record - prioritize Apollo.io research data
+        company_record = CompanyRecord(
+            company_name=extracted.get('company_name') or extracted.get('company_guess') or validated_data.get('company_name'),
+            phone=research.get('phone') or extracted.get('company_phone') or extracted.get('phone'),  # Apollo phone first
+            website=research.get('website') or extracted.get('company_website') or extracted.get('website') or validated_data.get('website'),  # Apollo website first
+            company_source=extracted.get('company_source') or source,
+            source_detail=extracted.get('source_detail') or source_detail,
+            who_gets_credit=extracted.get('who_gets_credit'),
+            detail=extracted.get('credit_person_name') or extracted.get('referrer_name')
+        )
+
+        # Create Contact Record
+        contact_record = ContactRecord(
+            first_name=first_name,
+            last_name=last_name,
+            company_name=extracted.get('contact_company_name') or company_record.company_name,
+            email=extracted.get('contact_email') or extracted.get('email') or validated_data.get('email'),
+            phone=extracted.get('contact_phone') or extracted.get('phone') or validated_data.get('phone'),
+            city=extracted.get('contact_city'),
+            state=extracted.get('contact_state'),
+            source=extracted.get('contact_source') or source
+        )
+
+        # Parse location for city/state if not already set
+        if not contact_record.city and extracted.get('location'):
+            location_parts = extracted.get('location', '').split(',')
+            if location_parts:
+                contact_record.city = location_parts[0].strip()
+                if len(location_parts) > 1:
+                    contact_record.state = location_parts[1].strip()
+
+        # Create Deal Record with Steve's format
+        job_title = extracted.get('position_title') or extracted.get('job_title') or validated_data.get('job_title')
+        location = extracted.get('position_location') or extracted.get('location') or validated_data.get('location')
+
+        # Format deal name using Steve's format
+        deal_name = format_deal_name(
+            job_title=job_title,
+            location=location,
+            company_name=company_record.company_name,
+            use_steve_format=True
+        )
+
+        deal_record = DealRecord(
+            source=extracted.get('deal_source') or source,
+            deal_name=deal_name,
+            pipeline=extracted.get('pipeline') or "Sales Pipeline",
+            closing_date=extracted.get('estimated_closing_date'),
+            source_detail=extracted.get('source_detail') or source_detail,
+            description_of_reqs=extracted.get('description_of_requirements') or extracted.get('notes')
+        )
+
+        # Convert to ExtractedData model with Steve's structure
         try:
-            final_output = ExtractedData(**validated_data)
+            final_output = ExtractedData(
+                company_record=company_record,
+                contact_record=contact_record,
+                deal_record=deal_record,
+                # Keep legacy fields for backward compatibility
+                candidate_name=full_name.strip() or validated_data.get('candidate_name'),
+                job_title=job_title or validated_data.get('job_title'),
+                location=location or validated_data.get('location'),
+                company_name=company_record.company_name or validated_data.get('company_name'),
+                referrer_name=validated_data.get('referrer_name'),
+                referrer_email=validated_data.get('referrer_email'),
+                email=contact_record.email or validated_data.get('email'),
+                phone=contact_record.phone or validated_data.get('phone'),
+                linkedin_url=validated_data.get('linkedin_url'),
+                notes=deal_record.description_of_reqs or validated_data.get('notes'),
+                website=company_record.website or validated_data.get('website'),
+                industry=validated_data.get('industry'),
+                source=source,
+                source_detail=source_detail
+            )
         except Exception as e:
-            logger.error(f"Failed to create ExtractedData: {e}")
-            final_output = ExtractedData()
+            logger.error(f"Failed to create ExtractedData with 3-record structure: {e}")
+            # Fallback to legacy structure
+            final_output = ExtractedData(**validated_data)
         
         return {
             "validation_result": validated_data,

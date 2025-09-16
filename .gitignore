@@ -216,6 +216,12 @@ voice-ui/*.log
 brandon_*.html
 brandon_*.pdf
 
+# Vault candidate reports (generated files)
+vault_candidates*.html
+vault_candidates*.pdf
+brandon_vault*.html
+brandon_vault*.pdf
+
 # Debug files
 debug_*.py
 test_candidates_*.py

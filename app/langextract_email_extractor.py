@@ -299,21 +299,26 @@ class LangExtractEmailExtractor:
         """Build enhanced extraction prompt with domain context."""
         base_prompt = """
         Extract recruitment information from this email with high precision.
-        
+
         Focus on identifying:
         1. The candidate (person seeking employment or being referred)
         2. Their professional details (title, company, location)
         3. Contact information (email, phone, LinkedIn)
         4. Any referrer information
         5. Additional context or notes
-        
+
         CRITICAL RULES:
         - Extract ONLY specific values, not descriptions
         - For candidate_name: Extract the person's full name only
         - For job_title: Extract the specific role/title only
-        - For location: Extract city, state format only
-        - For company_name: Extract official company name only
+        - For location: Extract the CANDIDATE'S location (city, state format) - NOT the referrer's location
+        - For company_name: Extract the CANDIDATE'S current company only - NOT the referrer's company
+        - For referrer_name: Extract the REFERRER'S name (person making the introduction)
+        - For referrer_email: Extract the REFERRER'S email address
         - Be precise and avoid extracting surrounding text
+        - IMPORTANT: Do not confuse the referrer's information with the candidate's information
+        - The candidate is the person being recommended for a job
+        - The referrer is the person making the recommendation
         """
         
         # Add domain-specific context if available

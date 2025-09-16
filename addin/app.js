@@ -127,7 +127,7 @@ async function handleFile(file) {
                 sender_email: senderEmail,
                 subject: subject,
                 body: bodyContent,
-                dry_run: true // Important: preview only, don't create in Zoho yet
+                dry_run: false // Create Zoho records when extracting
             })
         });
 

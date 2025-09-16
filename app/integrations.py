@@ -735,10 +735,18 @@ class AzureBlobStorageClient:
         """Uploads a base64 encoded file to Azure Blob Storage."""
         file_content = base64.b64decode(content_base64)
         unique_filename = f"{uuid.uuid4()}-{filename}"
-        
+
         blob_client = self.blob_service_client.get_blob_client(container=self.container_name, blob=unique_filename)
         blob_client.upload_blob(file_content, overwrite=True)
         return blob_client.url
+
+    async def upload_attachment(self, filename: str, content_base64: str, content_type: str = None) -> str:
+        """Uploads an attachment to Azure Blob Storage (async wrapper for compatibility)."""
+        try:
+            return self.upload_file(filename, content_base64)
+        except Exception as e:
+            logger.error(f"Error uploading attachment {filename}: {e}")
+            return None
 
 class ZohoClient:
     """Client for Zoho CRM v8 API with PostgreSQL integration."""
@@ -859,9 +867,10 @@ class ZohoClient:
         response.raise_for_status()
         return response.json()
 
-    async def upsert_account(self, company_name: str, website: str = None, enriched_data: Dict = None) -> str:
-        """Create or update Account with PostgreSQL caching."""
-        
+    async def upsert_account(self, company_name: str, website: str = None,
+                           phone: str = None, enriched_data: Dict = None) -> str:
+        """Create or update Account with PostgreSQL caching and Steve's template fields."""
+
         # Check PostgreSQL cache first
         if self.pg_client and website:
             domain = website.replace('http://', '').replace('https://', '').replace('www.', '')
@@ -869,87 +878,117 @@ class ZohoClient:
             if cached_id:
                 logger.info(f"Found cached account ID: {cached_id}")
                 return cached_id
-        
+
         # Search Zoho
         account_id = None
         if website:
             account_id = self.search_account_by_website(website)
-        
+
         if not account_id:
             account_id = self.search_account_by_name(company_name)
-        
+
+        # Build account data with all fields from Steve's Company Record template
         account_data = {"Account_Name": company_name}
-        
+
         if website:
             account_data["Website"] = website
-        
+
+        if phone:
+            account_data["Phone"] = phone
+
+        # Add enriched data and Steve's template fields
         if enriched_data:
             if enriched_data.get("description"):
                 account_data["Description"] = enriched_data["description"]
             if enriched_data.get("industry"):
                 account_data["Industry"] = enriched_data["industry"]
-        
+            # Steve's template fields
+            if enriched_data.get("source"):
+                account_data["Account_Source"] = enriched_data["source"]
+            if enriched_data.get("source_detail"):
+                account_data["Source_Detail"] = enriched_data["source_detail"]
+            if enriched_data.get("who_gets_credit"):
+                account_data["Who_Gets_Credit"] = enriched_data["who_gets_credit"]
+            if enriched_data.get("credit_detail"):
+                account_data["Credit_Detail"] = enriched_data["credit_detail"]
+
         if account_id:
             payload = {"data": [{"id": account_id, **account_data}]}
             response = self._make_request("PUT", "Accounts", payload)
         else:
             payload = {"data": [account_data]}
             response = self._make_request("POST", "Accounts", payload)
-        
+
         if response.get("data") and len(response["data"]) > 0:
             account_id = response["data"][0]["details"]["id"]
-            
+
             # Cache in PostgreSQL
             if self.pg_client:
                 if website:
                     domain = website.replace('http://', '').replace('https://', '').replace('www.', '')
                     await self.pg_client.store_zoho_mapping('account', account_id, 'domain', domain)
                 await self.pg_client.store_zoho_mapping('account', account_id, 'name', company_name)
-            
+
             return account_id
-        
+
         raise ValueError(f"Failed to upsert account: {response}")
 
-    async def upsert_contact(self, full_name: str, email: str, account_id: str) -> str:
-        """Create or update Contact with PostgreSQL caching."""
-        
+    async def upsert_contact(self, full_name: str, email: str, account_id: str,
+                           phone: str = None, city: str = None, state: str = None,
+                           source: str = None) -> str:
+        """Create or update Contact with PostgreSQL caching and enhanced fields."""
+
         # Check PostgreSQL cache first
         if self.pg_client:
             cached_id = await self.pg_client.get_zoho_mapping('contact', 'email', email)
             if cached_id:
                 logger.info(f"Found cached contact ID: {cached_id}")
                 return cached_id
-        
+
         # Search Zoho
         contact_id = self.search_contact_by_email(email)
-        
+
         names = self.extract_names(full_name)
-        
+
+        # Build contact data with all fields from Steve's template
         contact_data = {
             "First_Name": names["First_Name"],
             "Email": email,
             "Account_Name": {"id": account_id}
         }
-        
+
         if names["Last_Name"]:
             contact_data["Last_Name"] = names["Last_Name"]
-        
+
+        # Add optional fields from Steve's Contact Record template
+        if phone:
+            contact_data["Phone"] = phone
+
+        if city:
+            contact_data["Mailing_City"] = city
+
+        if state:
+            contact_data["Mailing_State"] = state
+
+        if source:
+            contact_data["Lead_Source"] = source
+
         if contact_id:
             payload = {"data": [{"id": contact_id, **contact_data}]}
             response = self._make_request("PUT", "Contacts", payload)
         else:
             payload = {"data": [contact_data]}
             response = self._make_request("POST", "Contacts", payload)
-        
+
         if response.get("data") and len(response["data"]) > 0:
             contact_id = response["data"][0]["details"]["id"]
-            
+
             # Cache in PostgreSQL
             if self.pg_client:
                 await self.pg_client.store_zoho_mapping('contact', contact_id, 'email', email)
-            
+
             return contact_id
-        
+
         raise ValueError(f"Failed to upsert contact: {response}")
 
     def search_account_by_website(self, website: str) -> Optional[str]:
@@ -990,8 +1029,8 @@ class ZohoClient:
         return None
 
     def create_deal(self, deal_data: Dict[str, Any], internet_message_id: str = None) -> str:
-        """Create Deal with exact Zoho field mapping."""
-        
+        """Create Deal with Steve's template field mapping."""
+
         # Owner field - skip if not configured (Zoho will use default)
         # In production, this will be set based on the authorized user making the request
         owner_field = None
@@ -999,47 +1038,54 @@ class ZohoClient:
             owner_field = {"id": self.default_owner_id}
         elif self.default_owner_email:
             owner_field = {"email": self.default_owner_email}
-        
-        # Build Deal data with correct Zoho field names
+
+        # Build Deal data with correct Zoho field names from Steve's template
         zoho_deal = {
             "Deal_Name": deal_data.get("deal_name", "Unknown Deal"),
             "Contact_Name": {"id": deal_data["contact_id"]},
             "Account_Name": {"id": deal_data["account_id"]},
             "Stage": "Lead",  # Using "Lead" as the initial stage
             "Pipeline": deal_data.get("pipeline", "Sales Pipeline"),
-            "Source": deal_data.get("source", "Email Inbound"),  # Using proper source value
+            "Source": deal_data.get("source", "Email Inbound"),
             "Description": deal_data.get("description", "")
         }
-        
-        # Add optional fields only if they have values
+
+        # Add all optional fields from Steve's Deal Record template
         if deal_data.get("closing_date"):
             zoho_deal["Closing_Date"] = deal_data["closing_date"]
-        
+
         if deal_data.get("next_activity_date"):
             zoho_deal["Next_Activity_Date"] = deal_data["next_activity_date"]
-            
+
         if deal_data.get("next_activity_description"):
             zoho_deal["Next_Activity_Description"] = deal_data["next_activity_description"]
-        
+
+        # Company-level credit tracking from Steve's template
+        if deal_data.get("who_gets_credit"):
+            zoho_deal["Who_Gets_Credit"] = deal_data["who_gets_credit"]
+
+        if deal_data.get("credit_detail"):
+            zoho_deal["Credit_Detail"] = deal_data["credit_detail"]
+
         # Only add Owner if configured
         if owner_field:
             zoho_deal["Owner"] = owner_field
-        
-        # Handle Source_Detail field
+
+        # Handle Source_Detail field from Steve's template
         if deal_data.get("source_detail"):
             zoho_deal["Source_Detail"] = deal_data["source_detail"]
         elif internet_message_id:
             zoho_deal["Source_Detail"] = f"Email ID: {internet_message_id}"
-        
+
         # Remove None values
         zoho_deal = {k: v for k, v in zoho_deal.items() if v is not None and v != ""}
-        
+
         payload = {"data": [zoho_deal]}
-        logger.info(f"Creating Deal with payload: {json.dumps(payload, indent=2)}")
-        
+        logger.info(f"Creating Deal with Steve's template mapping: {json.dumps(payload, indent=2)}")
+
         try:
             response = self._make_request("POST", "Deals", payload)
-            
+
             if response.get("data") and len(response["data"]) > 0:
                 deal_id = response["data"][0]["details"]["id"]
                 logger.info(f"Successfully created Deal with ID: {deal_id}")
@@ -1047,7 +1093,7 @@ class ZohoClient:
             else:
                 logger.error(f"Unexpected response structure when creating deal: {response}")
                 raise ValueError(f"Failed to create deal - unexpected response: {response}")
-                
+
         except Exception as e:
             logger.error(f"Error creating deal: {str(e)}")
             logger.error(f"Deal data was: {json.dumps(zoho_deal, indent=2)}")
@@ -1081,20 +1127,67 @@ class ZohoApiClient(ZohoClient):
         """
         Create or update Zoho records (Account -> Contact -> Deal) based on extracted data.
         This is the main orchestration method called by the API.
+        Uses Steve's 3-record template structure for comprehensive field mapping.
         Returns dict with all created record IDs and details.
         """
         try:
-            # Extract data with defaults
-            candidate_name = extracted_data.candidate_name or "Unknown Contact"
-            company_name = extracted_data.company_name or self.infer_company_from_domain(sender_email)
-            job_title = extracted_data.job_title or "Financial Advisor"
-            location = extracted_data.location or "Unknown Location"
-            
-            # Format deal name using business rules format
-            deal_name = f"{job_title} ({location}) - {company_name}"
-            
+            # Extract structured data from Steve's template format
+            company_record = extracted_data.company_record if hasattr(extracted_data, 'company_record') else None
+            contact_record = extracted_data.contact_record if hasattr(extracted_data, 'contact_record') else None
+            deal_record = extracted_data.deal_record if hasattr(extracted_data, 'deal_record') else None
+
+            # Fallback to legacy fields for backward compatibility
+            if not company_record:
+                company_name = extracted_data.company_name or self.infer_company_from_domain(sender_email)
+                company_phone = getattr(extracted_data, 'phone', None)
+                company_website = getattr(extracted_data, 'website', None)
+            else:
+                company_name = company_record.company_name or self.infer_company_from_domain(sender_email)
+                company_phone = company_record.phone
+                company_website = company_record.website
+
+            if not contact_record:
+                contact_name = extracted_data.candidate_name or "Unknown Contact"
+                contact_email = sender_email
+                contact_phone = getattr(extracted_data, 'phone', None)
+                contact_city = None
+                contact_state = None
+                if hasattr(extracted_data, 'location') and extracted_data.location:
+                    location_parts = extracted_data.location.split(',')
+                    contact_city = location_parts[0].strip() if location_parts else None
+                    contact_state = location_parts[1].strip() if len(location_parts) > 1 else None
+            else:
+                contact_name = f"{contact_record.first_name or ''} {contact_record.last_name or ''}".strip() or "Unknown Contact"
+                contact_email = contact_record.email or sender_email
+                contact_phone = contact_record.phone
+                contact_city = contact_record.city
+                contact_state = contact_record.state
+
+            if not deal_record:
+                job_title = extracted_data.job_title or "Financial Advisor"
+                location = getattr(extracted_data, 'location', None)
+                # Use legacy format for backward compatibility
+                from .business_rules import format_deal_name
+                deal_name = format_deal_name(job_title, location, company_name, use_steve_format=False)
+                pipeline = "Sales Pipeline"
+                closing_date = None
+                description = getattr(extracted_data, 'notes', None)
+            else:
+                # Steve's template provides the deal name directly
+                deal_name = deal_record.deal_name
+                # If deal name is not provided, format using Steve's format
+                if not deal_name:
+                    from .business_rules import format_deal_name
+                    # Extract components for formatting with Steve's format
+                    job_title = getattr(extracted_data, 'job_title', None)
+                    location = getattr(extracted_data, 'location', None)
+                    deal_name = format_deal_name(job_title, location, company_name, use_steve_format=True)
+                pipeline = deal_record.pipeline or "Sales Pipeline"
+                closing_date = deal_record.closing_date
+                description = deal_record.description_of_reqs
+
             # Determine primary email (Reply-To or From)
-            primary_email = sender_email
+            primary_email = contact_email or sender_email
             
             # Check for existing records in Zoho CRM first
             existing_contact = await self.check_zoho_contact_duplicate(primary_email)
@@ -1106,29 +1199,52 @@ class ZohoApiClient(ZohoClient):
             if existing_account:
                 logger.info(f"Found existing account in Zoho: {existing_account.get('id')}")
             
-            # Determine source based on referrer
-            if extracted_data.referrer_name and extracted_data.referrer_name != "Unknown":
+            # Determine source based on Steve's template structure
+            if company_record and company_record.company_source:
+                source = company_record.company_source
+                source_detail = company_record.source_detail or company_record.detail
+            elif deal_record and deal_record.source:
+                source = deal_record.source
+                source_detail = deal_record.source_detail
+            elif extracted_data.referrer_name and extracted_data.referrer_name != "Unknown":
                 source = "Referral"
                 source_detail = extracted_data.referrer_name
             else:
                 source = "Email Inbound"
                 source_detail = "Direct email contact"
-            
-            # 1. Create/update Account
+
+            # 1. Create/update Account with comprehensive company data
             logger.info(f"Creating/updating account for: {company_name}")
+            # Prepare enriched data from company record
+            enriched_data = {}
+            if company_record:
+                if company_record.company_source:
+                    enriched_data['source'] = company_record.company_source
+                if company_record.source_detail:
+                    enriched_data['source_detail'] = company_record.source_detail
+                if company_record.who_gets_credit:
+                    enriched_data['who_gets_credit'] = company_record.who_gets_credit
+                if company_record.detail:
+                    enriched_data['credit_detail'] = company_record.detail
+
             account_id = await self.upsert_account(
                 company_name=company_name,
-                website=None,  # Could be enriched later
-                enriched_data=None
+                website=company_website,
+                phone=company_phone,
+                enriched_data=enriched_data if enriched_data else None
             )
             logger.info(f"Account ID: {account_id}")
-            
-            # 2. Create/update Contact
-            logger.info(f"Creating/updating contact for: {candidate_name} ({primary_email})")
+
+            # 2. Create/update Contact with enhanced contact data
+            logger.info(f"Creating/updating contact for: {contact_name} ({primary_email})")
             contact_id = await self.upsert_contact(
-                full_name=candidate_name,
+                full_name=contact_name,
                 email=primary_email,
-                account_id=account_id
+                account_id=account_id,
+                phone=contact_phone,
+                city=contact_city,
+                state=contact_state,
+                source=contact_record.source if contact_record else source
             )
             logger.info(f"Contact ID: {contact_id}")
             
@@ -1153,14 +1269,30 @@ class ZohoApiClient(ZohoClient):
                     "existing_account_id": existing_account.get('id') if existing_account else None
                 }
             logger.info(f"Creating deal: {deal_name}")
+            # Build comprehensive deal data using Steve's template structure
             deal_data = {
                 "deal_name": deal_name,
                 "contact_id": contact_id,
                 "account_id": account_id,
                 "source": source,
                 "source_detail": source_detail,
-                "description": f"Email intake from {primary_email}"
+                "pipeline": pipeline,
+                "description": description or f"Email intake from {primary_email}"
             }
+
+            # Add all fields from Steve's Deal Record template
+            if deal_record:
+                if deal_record.closing_date:
+                    deal_data["closing_date"] = deal_record.closing_date
+                if deal_record.description_of_reqs:
+                    deal_data["description"] = deal_record.description_of_reqs
+
+            # Add company-level source information if available
+            if company_record:
+                if company_record.who_gets_credit:
+                    deal_data["who_gets_credit"] = company_record.who_gets_credit
+                if company_record.detail:
+                    deal_data["credit_detail"] = company_record.detail
             
             deal_id = self.create_deal(deal_data)
             logger.info(f"Deal ID: {deal_id}")

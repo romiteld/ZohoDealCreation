@@ -1,38 +1,98 @@
 from typing import Tuple, Optional, Dict, Any
 import re
 
-def format_deal_name(job_title: Optional[str], location: Optional[str], company_name: Optional[str]) -> str:
+def filter_well_info(data: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Formats the deal name according to the strict business rule.
-    Rule: [Position] [Location] - [Company Name]
-    
-    CRITICAL: Boss requires this exact format - no parentheses around location
+    Filters out The Well Recruiting Solutions information from client/candidate data.
+    This prevents the referrer's information from being mistaken as client data.
+    """
+    # The Well's known information to exclude
+    well_info = {
+        'company_names': ['The Well Recruiting Solutions', 'The Well', 'Well Recruiting'],
+        'addresses': ['21501 N. 78th Ave #100', 'Peoria, AZ 85382', 'Peoria, AZ', 'Peoria'],
+        'phones': ['806.500.4359', '8065004359', '(806) 500-4359'],
+        'emails': ['@emailthewell.com', '@thewell.com']
+    }
+
+    filtered_data = data.copy()
+
+    # Check and clear company name if it's The Well
+    if filtered_data.get('company_name'):
+        for well_company in well_info['company_names']:
+            if well_company.lower() in filtered_data['company_name'].lower():
+                filtered_data['company_name'] = None
+                break
+
+    # Check and clear location if it's The Well's address
+    if filtered_data.get('location'):
+        for well_address in well_info['addresses']:
+            if well_address.lower() in filtered_data['location'].lower():
+                filtered_data['location'] = None
+                break
+
+    # Check and clear phone if it's The Well's phone
+    if filtered_data.get('phone'):
+        # Normalize phone for comparison
+        normalized_phone = re.sub(r'[^\d]', '', filtered_data['phone'])
+        for well_phone in well_info['phones']:
+            normalized_well = re.sub(r'[^\d]', '', well_phone)
+            if normalized_well == normalized_phone:
+                filtered_data['phone'] = None
+                break
+
+    # Check and clear email if it's from The Well domain
+    if filtered_data.get('email'):
+        for well_email in well_info['emails']:
+            if well_email in filtered_data['email'].lower():
+                filtered_data['email'] = None
+                break
+
+    return filtered_data
+
+def format_deal_name(job_title: Optional[str], location: Optional[str], company_name: Optional[str],
+                     use_steve_format: bool = False) -> str:
+    """
+    Formats the deal name according to business rules.
+
+    Legacy format: [Position] [Location] - [Company Name]
+    Steve's template format: [Job Title] ([Location]) [Company Name]
     """
     # Use None for missing values - DO NOT use placeholder text
     jt = job_title.strip() if job_title else None
     loc = location.strip() if location else None
     comp = company_name.strip() if company_name else None
-    
-    # If location has comma, take only city (first part)
-    if loc and "," in loc:
+
+    # If location has comma, take only city (first part) for legacy format
+    if loc and "," in loc and not use_steve_format:
         loc = loc.split(',')[0].strip()
-    
-    # Build deal name only with available data
-    if jt and loc and comp:
-        # All three components available - use standard format
-        return f"{jt} {loc} - {comp}"
-    elif jt and comp:
-        # Missing location
-        return f"{jt} - {comp}"
-    elif jt and loc:
-        # Missing company
-        return f"{jt} {loc}"
-    elif comp:
-        # Only company available
-        return comp
+
+    if use_steve_format:
+        # Steve's template format: [Job Title] ([Location]) - [Company Name]
+        if jt and loc and comp:
+            return f"{jt} ({loc}) - {comp}"
+        elif jt and comp:
+            # Missing location
+            return f"{jt} {comp}"
+        elif jt and loc:
+            # Missing company
+            return f"{jt} ({loc})"
+        elif comp:
+            # Only company available
+            return comp
+        else:
+            return None
     else:
-        # Nothing available - this should trigger user prompt
-        return None
+        # Legacy format: [Position] [Location] - [Company Name]
+        if jt and loc and comp:
+            return f"{jt} {loc} - {comp}"
+        elif jt and comp:
+            return f"{jt} - {comp}"
+        elif jt and loc:
+            return f"{jt} {loc}"
+        elif comp:
+            return comp
+        else:
+            return None
 
 def format_client_deal_name(client_name: Optional[str], company_name: Optional[str]) -> str:
     """
@@ -176,17 +236,20 @@ class BusinessRulesEngine:
     def process_data(self, ai_data: Dict, email_body: str, sender_email: str, subject: str = "") -> Dict:
         """
         Process extracted data through business rules
-        
+
         Args:
             ai_data: Data extracted by AI
             email_body: Original email body
             sender_email: Sender's email address
             subject: Email subject line
-            
+
         Returns:
             Processed data with business rules applied
         """
         result = ai_data.copy() if ai_data else {}
+
+        # Filter out The Well's information from client/candidate data
+        result = filter_well_info(result)
         
         # Try to extract manual referrer information if not already provided
         if not result.get('referrer'):
@@ -233,13 +296,23 @@ class BusinessRulesEngine:
             
         else:
             # Handle as regular candidate application
-            # Format deal name - CRITICAL: Use exact format required by boss
+            # Check if we have Steve's 3-record structure
+            has_structured_records = (
+                result.get('company_record') or
+                result.get('contact_record') or
+                result.get('deal_record')
+            )
+
+            # Format deal name using appropriate format
             job_title = result.get('job_title')
             location = result.get('location')
             company_name = result.get('company_name')
-            
+
             # Don't use placeholder values - keep as None if missing
-            deal_name = format_deal_name(job_title, location, company_name)
+            deal_name = format_deal_name(
+                job_title, location, company_name,
+                use_steve_format=has_structured_records
+            )
             if deal_name:
                 result['deal_name'] = deal_name
             else:

@@ -321,6 +321,104 @@ class CorrectionLearningService:
             logger.warning(f"Could not fetch learning patterns: {e}")
             return []
     
+    async def apply_historical_corrections(
+        self,
+        extracted_data: Dict[str, Any],
+        email_domain: str,
+        email_content: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+        """Apply historical corrections to extracted data based on learned patterns.
+
+        Returns:
+            Tuple of (corrected_data, corrections_applied)
+        """
+        corrected_data = extracted_data.copy()
+        corrections_applied = {}
+
+        try:
+            # Use Azure AI Search for semantic pattern matching if available
+            if self.search_manager and email_content:
+                # Search for similar patterns
+                similar_patterns = await self.search_manager.search_similar_patterns(
+                    email_content=email_content,
+                    email_domain=email_domain,
+                    top_k=5,
+                    min_confidence=0.7
+                )
+
+                if similar_patterns:
+                    logger.info(f"Found {len(similar_patterns)} similar patterns for auto-correction")
+
+                    # Apply corrections from similar patterns
+                    for pattern in similar_patterns:
+                        corrections = pattern.get('corrections', {})
+                        confidence = pattern.get('confidence_score', 0.5)
+
+                        # Only apply corrections with high confidence
+                        if confidence >= 0.7:
+                            for field, correction in corrections.items():
+                                original_value = corrected_data.get(field)
+                                corrected_value = correction.get('corrected')
+
+                                # Check if this field matches the pattern that was corrected before
+                                if original_value == correction.get('original'):
+                                    corrected_data[field] = corrected_value
+                                    corrections_applied[field] = {
+                                        'original': original_value,
+                                        'corrected': corrected_value,
+                                        'confidence': confidence,
+                                        'source': 'pattern_matching'
+                                    }
+                                    logger.info(f"Applied correction to {field}: {original_value} -> {corrected_value} (confidence: {confidence:.2f})")
+
+                # Apply company template if available
+                company_template = await self.search_manager.get_company_template(email_domain)
+                if company_template:
+                    common_fields = company_template.get('common_fields', {})
+                    for field, common_values in common_fields.items():
+                        if common_values and field in corrected_data:
+                            # If the extracted value is None or empty, use the most common value
+                            if not corrected_data[field] and len(common_values) > 0:
+                                corrected_data[field] = common_values[0]
+                                corrections_applied[field] = {
+                                    'original': None,
+                                    'corrected': common_values[0],
+                                    'confidence': 0.8,
+                                    'source': 'company_template'
+                                }
+
+            # Also check database for domain-specific patterns
+            patterns = await self.get_common_patterns(
+                email_domain=email_domain,
+                min_frequency=2
+            )
+
+            for pattern in patterns:
+                field_name = pattern.get('field_name')
+                from_value = pattern.get('from_value')
+                to_value = pattern.get('to_value')
+                frequency = pattern.get('frequency', 1)
+
+                # Apply correction if the field matches and has been corrected multiple times
+                if field_name in corrected_data and corrected_data[field_name] == from_value and frequency >= 2:
+                    corrected_data[field_name] = to_value
+                    if field_name not in corrections_applied:  # Don't override AI Search corrections
+                        corrections_applied[field_name] = {
+                            'original': from_value,
+                            'corrected': to_value,
+                            'confidence': min(0.6 + (frequency * 0.1), 0.9),
+                            'source': 'database_patterns'
+                        }
+                        logger.info(f"Applied DB correction to {field_name}: {from_value} -> {to_value} (frequency: {frequency})")
+
+            if corrections_applied:
+                logger.info(f"Applied {len(corrections_applied)} historical corrections")
+
+        except Exception as e:
+            logger.error(f"Failed to apply historical corrections: {e}")
+
+        return corrected_data, corrections_applied
+
     async def generate_enhanced_prompt(
         self,
         base_prompt: str,

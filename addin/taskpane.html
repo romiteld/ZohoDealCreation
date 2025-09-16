@@ -106,8 +106,11 @@
             padding: 2px 6px;
             border-radius: 3px;
             margin-left: 5px;
+            margin-top: 2px;
+            font-weight: 500;
+            transition: all 0.2s ease;
         }
-        
+
         .edited-indicator {
             display: inline-block;
             background: #ffc107;
@@ -116,6 +119,50 @@
             padding: 2px 6px;
             border-radius: 3px;
             margin-left: 5px;
+            margin-top: 2px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+        }
+
+        /* High confidence - Green */
+        .confidence-high {
+            background: #28a745 !important;
+            color: white !important;
+        }
+
+        /* Medium confidence - Yellow */
+        .confidence-medium {
+            background: #ffc107 !important;
+            color: #212529 !important;
+        }
+
+        /* Low confidence - Orange */
+        .confidence-low {
+            background: #fd7e14 !important;
+            color: white !important;
+        }
+
+        /* Very low confidence - Red */
+        .confidence-very-low {
+            background: #dc3545 !important;
+            color: white !important;
+        }
+
+        /* User added - Purple */
+        .user-added {
+            background: #6f42c1 !important;
+            color: white !important;
+        }
+
+        /* Form field with low confidence gets subtle border highlight */
+        .form-control.low-confidence {
+            border-color: #fd7e14;
+            box-shadow: 0 0 0 0.1rem rgba(253, 126, 20, 0.25);
+        }
+
+        .form-control.very-low-confidence {
+            border-color: #dc3545;
+            box-shadow: 0 0 0 0.1rem rgba(220, 53, 69, 0.25);
         }
         
         .footer {
@@ -240,6 +287,158 @@
             margin-right: 8px;
             color: #6c757d;
         }
+
+        /* Express Send Banner Styles */
+        .express-send-banner {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            color: white;
+            padding: 15px 20px;
+            margin-bottom: 20px;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(40, 167, 69, 0.3);
+            display: none;
+            animation: slideDown 0.5s ease-out;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+        }
+
+        .express-send-banner .banner-content {
+            display: flex;
+            align-items: center;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        .express-send-banner .banner-icon {
+            margin-right: 12px;
+            font-size: 18px;
+        }
+
+        .express-send-banner .banner-text {
+            flex: 1;
+        }
+
+        .express-send-banner .confidence-badge {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 4px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            margin-left: 10px;
+            font-weight: 600;
+        }
+
+        @keyframes slideDown {
+            from {
+                opacity: 0;
+                transform: translateY(-20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Collapsible Section Styles */
+        .collapsible-section {
+            background: white;
+            border-radius: 8px;
+            margin-bottom: 15px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            overflow: hidden;
+        }
+
+        .collapsible-header {
+            padding: 15px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            background: #f8f9fa;
+            border-bottom: 1px solid #dee2e6;
+            transition: background-color 0.2s ease;
+        }
+
+        .collapsible-header:hover {
+            background: #e9ecef;
+        }
+
+        .collapsible-header .section-title-content {
+            display: flex;
+            align-items: center;
+            font-size: 14px;
+            font-weight: 600;
+            color: #495057;
+        }
+
+        .collapsible-header .section-title-content .icon {
+            margin-right: 8px;
+            font-size: 16px;
+        }
+
+        .collapse-icon {
+            font-size: 14px;
+            color: #6c757d;
+            transition: transform 0.2s ease;
+        }
+
+        .collapse-icon.expanded {
+            transform: rotate(180deg);
+        }
+
+        .collapsible-content {
+            padding: 15px;
+            display: none;
+        }
+
+        .collapsible-content.expanded {
+            display: block;
+        }
+
+        /* Confidence Indicators */
+        .low-confidence {
+            border: 2px solid #ffc107 !important;
+            background-color: #fffbf0 !important;
+        }
+
+        .confidence-warning {
+            display: inline-block;
+            margin-left: 5px;
+            color: #ffc107;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: help;
+            position: relative;
+        }
+
+        .confidence-warning::before {
+            content: "⚠️";
+        }
+
+        .confidence-warning:hover::after {
+            content: "Low confidence extraction - please verify";
+            position: absolute;
+            bottom: 100%;
+            left: 50%;
+            transform: translateX(-50%);
+            background: #333;
+            color: white;
+            padding: 5px 8px;
+            border-radius: 4px;
+            font-size: 12px;
+            white-space: nowrap;
+            z-index: 1000;
+            margin-bottom: 5px;
+        }
+
+        .confidence-warning:hover::before {
+            content: "";
+            position: absolute;
+            bottom: 95%;
+            left: 50%;
+            transform: translateX(-50%);
+            border: 5px solid transparent;
+            border-top-color: #333;
+            z-index: 1000;
+        }
     </style>
 </head>
 <body>
@@ -255,6 +454,18 @@
             <p class="loading-text">Initializing...</p>
             <button onclick="testInitialization()" style="margin-top: 10px; padding: 5px 10px;">Test Initialization</button>
             <button onclick="testFieldPopulation()" style="margin-top: 10px; padding: 5px 10px; margin-left: 5px;">Test Field Population</button>
+            <button onclick="testExpressSendBanner()" style="margin-top: 10px; padding: 5px 10px; margin-left: 5px;">Test Express Send</button>
+        </div>
+
+        <!-- Express Send Banner (shown when extraction confidence is high) -->
+        <div id="expressSendBanner" class="express-send-banner">
+            <div class="banner-content">
+                <span class="banner-icon">✅</span>
+                <div class="banner-text">
+                    <strong>High Confidence Extraction</strong> - All fields accurately extracted. Click Send to Zoho to complete.
+                </div>
+                <div class="confidence-badge" id="confidenceBadge">95%</div>
+            </div>
         </div>
         
         <!-- Preview/Edit Form (hidden initially) -->
@@ -293,40 +504,92 @@
                 </div>
             </div>
             
-            <!-- Client Section -->
+            <!-- Contact Information Section (Steve's Template) -->
             <div class="preview-section">
                 <div class="section-title">
                     <span class="icon">👤</span>
-                    Client Information
+                    Contact Information
                 </div>
                 <div class="row">
                     <div class="col-md-6 mb-3">
-                        <label class="form-label">Client Name *</label>
-                        <input type="text" class="form-control" id="candidateName" required>
-                        <span id="candidateNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <label class="form-label">First Name *</label>
+                        <input type="text" class="form-control" id="contactFirstName" required>
+                        <span id="contactFirstNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Last Name *</label>
+                        <input type="text" class="form-control" id="contactLastName" required>
+                        <span id="contactLastNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                </div>
+                <div class="row">
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Email</label>
                         <input type="email" class="form-control" id="candidateEmail">
+                        <span id="candidateEmailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Phone</label>
+                        <input type="tel" class="form-control" id="candidatePhone">
+                        <span id="candidatePhoneIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
                 <div class="row">
                     <div class="col-md-6 mb-3">
-                        <label class="form-label">Phone</label>
-                        <input type="tel" class="form-control" id="candidatePhone">
+                        <label class="form-label">City</label>
+                        <input type="text" class="form-control" id="contactCity">
+                        <span id="contactCityIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                     <div class="col-md-6 mb-3">
-                        <label class="form-label">LinkedIn URL</label>
-                        <input type="url" class="form-control" id="linkedinUrl" placeholder="https://linkedin.com/in/...">
+                        <label class="form-label">State</label>
+                        <input type="text" class="form-control" id="contactState">
+                        <span id="contactStateIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
             </div>
-            
-            <!-- Client Details Section -->
+
+            <!-- Company Information Section (Steve's Template) -->
+            <div class="preview-section">
+                <div class="section-title">
+                    <span class="icon">🏢</span>
+                    Company Information
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Company Name *</label>
+                        <input type="text" class="form-control" id="firmName" required>
+                        <span id="firmNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Company Phone</label>
+                        <input type="tel" class="form-control" id="companyPhone">
+                        <span id="companyPhoneIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Website</label>
+                        <input type="url" class="form-control" id="companyWebsite" placeholder="https://...">
+                        <span id="companyWebsiteIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                    <div class="col-md-6 mb-3">
+                        <label class="form-label">Company Source</label>
+                        <select class="form-select" id="companySource">
+                            <option value="Email Inbound">Email Inbound</option>
+                            <option value="Referral">Referral</option>
+                            <option value="Reverse Recruiting">Reverse Recruiting</option>
+                            <option value="Website Inbound">Website Inbound</option>
+                        </select>
+                        <span id="companySourceIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Deal Information Section (Steve's Template) -->
             <div class="preview-section">
                 <div class="section-title">
                     <span class="icon">💼</span>
-                    Client Details
+                    Deal Information
                 </div>
                 <div class="row">
                     <div class="col-md-6 mb-3">
@@ -337,62 +600,91 @@
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Location</label>
                         <input type="text" class="form-control" id="location">
+                        <span id="locationIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col-md-12 mb-3">
+                        <label class="form-label">Deal Name (Auto-generated)</label>
+                        <input type="text" class="form-control" id="dealName" readonly
+                               placeholder="[Job Title] ([Location]) [Company Name]">
                     </div>
                 </div>
                 <div class="row">
                     <div class="col-md-6 mb-3">
-                        <label class="form-label">Firm/Company</label>
-                        <input type="text" class="form-control" id="firmName">
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label">Source</label>
-                        <select class="form-select" id="source">
-                            <option value="Email Inbound">Email Inbound</option>
-                            <option value="Referral">Referral</option>
-                            <option value="Reverse Recruiting">Reverse Recruiting</option>
-                            <option value="Website Inbound">Website Inbound</option>
+                        <label class="form-label">Pipeline</label>
+                        <select class="form-select" id="pipeline">
+                            <option value="Recruitment">Recruitment</option>
+                            <option value="Active">Active</option>
+                            <option value="Qualified">Qualified</option>
                         </select>
                     </div>
-                </div>
-            </div>
-            
-            <!-- Referrer Section -->
-            <div class="preview-section">
-                <div class="section-title">
-                    <span class="icon">🤝</span>
-                    Referrer Information
-                </div>
-                <div class="row">
                     <div class="col-md-6 mb-3">
-                        <label class="form-label">Referrer Name</label>
-                        <input type="text" class="form-control" id="referrerName">
-                    </div>
-                    <div class="col-md-6 mb-3">
-                        <label class="form-label">Referrer Email</label>
-                        <input type="email" class="form-control" id="referrerEmail" readonly>
+                        <label class="form-label">Closing Date</label>
+                        <input type="date" class="form-control" id="closingDate">
                     </div>
                 </div>
             </div>
+
+            <!-- Who Gets Credit Section (Steve's Template) - Collapsible -->
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="toggleSection('creditSection')">
+                    <div class="section-title-content">
+                        <span class="icon">🤝</span>
+                        Who Gets Credit
+                    </div>
+                    <span class="collapse-icon" id="creditSectionIcon">▼</span>
+                </div>
+                <div class="collapsible-content" id="creditSection">
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Credit Type</label>
+                            <select class="form-select" id="whoGetsCredit">
+                                <option value="">None</option>
+                                <option value="BD Rep">BD Rep</option>
+                                <option value="Affiliate">Affiliate</option>
+                                <option value="Both">Both</option>
+                            </select>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Credit Detail (Name)</label>
+                            <input type="text" class="form-control" id="creditDetail"
+                                   placeholder="Person who gets credit">
+                        </div>
+                    </div>
+                    <div class="row">
+                        <div class="col-md-12 mb-3">
+                            <label class="form-label">Source Detail</label>
+                            <input type="text" class="form-control" id="sourceDetail"
+                                   placeholder="Referrer name or specific source">
+                            <span id="sourceDetailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
             
-            <!-- Additional Information -->
-            <div class="preview-section">
-                <div class="section-title">
-                    <span class="icon">📝</span>
-                    Additional Information
-                    <button type="button" class="btn btn-sm btn-outline-secondary ms-auto" id="btnAddField">
-                        + Add Field
-                    </button>
+            <!-- Additional Information - Collapsible -->
+            <div class="collapsible-section">
+                <div class="collapsible-header" onclick="toggleSection('additionalSection')">
+                    <div class="section-title-content">
+                        <span class="icon">📝</span>
+                        Additional Information
+                    </div>
+                    <span class="collapse-icon" id="additionalSectionIcon">▼</span>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">Notes</label>
-                    <textarea class="form-control" id="notes" rows="3" placeholder="Any additional notes or context..."></textarea>
+                <div class="collapsible-content" id="additionalSection">
+                    <div class="mb-3">
+                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAddField">
+                            + Add Field
+                        </button>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Notes</label>
+                        <textarea class="form-control" id="notes" rows="3" placeholder="Any additional notes or context..."></textarea>
+                    </div>
+                    <!-- Container for custom fields -->
+                    <div id="customFieldsContainer"></div>
                 </div>
-                <div class="mb-3">
-                    <label class="form-label">Calendly URL</label>
-                    <input type="url" class="form-control" id="calendlyUrl" placeholder="https://calendly.com/...">
-                </div>
-                <!-- Container for custom fields -->
-                <div id="customFieldsContainer"></div>
             </div>
             
             <!-- Custom Field Modal -->
@@ -486,6 +778,26 @@
         </button>
     </div>
     
+    <!-- Collapsible Section JavaScript -->
+    <script>
+        function toggleSection(sectionId) {
+            const content = document.getElementById(sectionId);
+            const icon = document.getElementById(sectionId + 'Icon');
+
+            if (content && icon) {
+                if (content.classList.contains('expanded')) {
+                    content.classList.remove('expanded');
+                    icon.classList.remove('expanded');
+                    icon.textContent = '▼';
+                } else {
+                    content.classList.add('expanded');
+                    icon.classList.add('expanded');
+                    icon.textContent = '▲';
+                }
+            }
+        }
+    </script>
+
     <!-- Include the taskpane JavaScript -->
     <script src="config.js"></script>
     <script src="taskpane.js"></script>

@@ -9,6 +9,25 @@
 const API_BASE_URL = window.API_BASE_URL || 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io';
 const API_KEY = window.API_KEY || ''; // API key should be injected from config.js
 
+/**
+ * Get current Outlook user context for client extraction
+ * @returns {Object|null} User context with name and email, or null if unavailable
+ */
+function getUserContext() {
+  try {
+    if (Office?.context?.mailbox?.userProfile) {
+      const userProfile = Office.context.mailbox.userProfile;
+      return {
+        name: userProfile.displayName || '',
+        email: userProfile.emailAddress || ''
+      };
+    }
+  } catch (error) {
+    console.log('Could not get user context from Office:', error);
+  }
+  return null;
+}
+
 Office.onReady(() => {
   // Office is ready - initialization code can go here if needed
 });
@@ -318,11 +337,12 @@ async function processWithWebSocket(ws, emailData, onProgress) {
         body: emailData.body || '',
         attachments: (emailData.attachments || [])
           .filter(att => att.content && att.format === 'base64')
-          .map(att => ({ 
-            filename: att.name, 
-            content_base64: att.content, 
-            content_type: att.contentType 
-          }))
+          .map(att => ({
+            filename: att.name,
+            content_base64: att.content,
+            content_type: att.contentType
+          })),
+        user_context: getUserContext()  // Include current Outlook user context
       }
     }));
   });
@@ -348,10 +368,11 @@ async function sendToBackend(emailData) {
         sender_name: emailData.from?.displayName || '',
         subject: emailData.subject || '',
         body: emailData.body || '',
-        dry_run: true, // Get extracted data first for review
+        dry_run: false, // Create Zoho records when extracting
         attachments: (emailData.attachments || [])
           .filter(att => att.content && att.format === 'base64')
-          .map(att => ({ filename: att.name, content_base64: att.content, content_type: att.contentType }))
+          .map(att => ({ filename: att.name, content_base64: att.content, content_type: att.contentType })),
+        user_context: getUserContext()  // Include current Outlook user context
       })
     });
 
