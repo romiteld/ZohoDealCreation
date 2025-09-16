@@ -84,7 +84,7 @@ class SecurityConfig:
             "X-Frame-Options": "DENY",
             "X-XSS-Protection": "1; mode=block",
             "Strict-Transport-Security": "max-age=31536000; includeSubDomains",
-            "Content-Security-Policy": "default-src 'self'",
+            "Content-Security-Policy": "default-src 'self'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline';",
             "Referrer-Policy": "strict-origin-when-cross-origin"
         }
     

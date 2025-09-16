@@ -67,7 +67,7 @@ class ApolloWebSocketManager {
             }
 
             const script = document.createElement('script');
-            script.src = 'https://unpkg.com/@microsoft/signalr@latest/dist/browser/signalr.min.js';
+            script.src = 'https://cdnjs.cloudflare.com/ajax/libs/microsoft-signalr/6.0.1/signalr.min.js';
             script.onload = () => resolve(window.signalR);
             script.onerror = () => reject(new Error('Failed to load SignalR client'));
             document.head.appendChild(script);

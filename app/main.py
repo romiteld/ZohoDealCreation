@@ -504,7 +504,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
             )
         else:
             # Standard CSP for API endpoints
-            response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com; style-src 'self' 'unsafe-inline';"
+            response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline' https://appsforoffice.microsoft.com https://cdnjs.cloudflare.com; style-src 'self' 'unsafe-inline';"
         
         return response
 

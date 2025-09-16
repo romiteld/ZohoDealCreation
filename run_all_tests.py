@@ -51,9 +51,15 @@ async def check_environment():
             "ZOHO_OAUTH_SERVICE_URL",
             "ZOHO_DEFAULT_OWNER_EMAIL"
         ],
+        "Apollo": [
+            "APOLLO_API_KEY"
+        ],
+        "Firecrawl": [
+            "FIRECRAWL_API_KEY"
+        ],
         "Zoom": [
             "ZOOM_ACCOUNT_ID",
-            "ZOOM_CLIENT_ID", 
+            "ZOOM_CLIENT_ID",
             "ZOOM_CLIENT_SECRET",
             "ZOOM_SECRET_TOKEN",
             "ZOOM_VERIFICATION_TOKEN"
@@ -86,13 +92,56 @@ async def check_environment():
 async def run_zoom_tests():
     """Run Zoom integration tests."""
     print_section("🎥 Zoom Integration Tests")
-    
+
     try:
         from tests.test_zoom_integration import main as zoom_main
         success = await zoom_main()
         return success
     except Exception as e:
         print(f"{RED}Failed to run Zoom tests: {e}{ENDC}")
+        return False
+
+async def run_apollo_tests():
+    """Run Apollo.io integration tests."""
+    print_section("🚀 Apollo.io Integration Tests")
+
+    try:
+        # Import and run key Apollo tests
+        success = True
+
+        # Test Apollo quick functionality
+        from tests.apollo.test_apollo_quick import main as apollo_quick
+        if not await apollo_quick():
+            success = False
+
+        # Test Apollo deep integration
+        from tests.apollo.test_apollo_deep_integration import main as apollo_deep
+        if not await apollo_deep():
+            success = False
+
+        print(f"{GREEN if success else RED}Apollo tests {'passed' if success else 'failed'}{ENDC}")
+        return success
+    except Exception as e:
+        print(f"{RED}Failed to run Apollo tests: {e}{ENDC}")
+        return False
+
+async def run_firecrawl_tests():
+    """Run Firecrawl integration tests."""
+    print_section("🔥 Firecrawl Integration Tests")
+
+    try:
+        # Import and run key Firecrawl tests
+        success = True
+
+        # Test Firecrawl SDK
+        from tests.firecrawl.test_firecrawl_sdk import main as firecrawl_sdk
+        if not await firecrawl_sdk():
+            success = False
+
+        print(f"{GREEN if success else RED}Firecrawl tests {'passed' if success else 'failed'}{ENDC}")
+        return success
+    except Exception as e:
+        print(f"{RED}Failed to run Firecrawl tests: {e}{ENDC}")
         return False
 
 async def run_candidate_tests():
@@ -201,13 +250,19 @@ async def main():
     
     # 3. Run test suites
     print(f"\n{BOLD}Running Test Suites...{ENDC}")
-    
+
+    apollo_tests_ok = await run_apollo_tests()
+    results["Apollo Tests"] = apollo_tests_ok
+
+    firecrawl_tests_ok = await run_firecrawl_tests()
+    results["Firecrawl Tests"] = firecrawl_tests_ok
+
     zoom_tests_ok = await run_zoom_tests()
     results["Zoom Tests"] = zoom_tests_ok
-    
+
     candidate_tests_ok = await run_candidate_tests()
     results["Candidate Tests"] = candidate_tests_ok
-    
+
     email_tests_ok = await run_email_tests()
     results["Email Tests"] = email_tests_ok
     

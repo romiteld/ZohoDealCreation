@@ -68,16 +68,17 @@ python test_container_deployment.py
 
 ### Testing
 ```bash
-# Run all tests
-pytest
+# Run all organized tests
+python run_all_tests.py
 
-# Run specific test categories
-pytest -m unit                    # Unit tests only
-pytest -m integration            # Integration tests only
-pytest -m "unit and not slow"    # Fast unit tests only
-pytest -m critical               # Critical infrastructure tests
+# Run specific test categories by directory
+pytest tests/apollo/             # Apollo.io integration tests
+pytest tests/firecrawl/          # Firecrawl integration tests
+pytest tests/integration/        # End-to-end integration tests
+pytest tests/production/         # Production environment tests
+pytest tests/zoom/              # Zoom integration tests
 
-# Run tests with coverage
+# Run pytest with coverage
 pytest --cov=app --cov-report=html
 
 # Run specific service tests
@@ -90,6 +91,14 @@ pytest tests/test_specific_file.py
 
 # Run with specific verbosity and stop on first failure
 pytest -v --maxfail=1
+
+# Test specific Apollo functionality
+python tests/apollo/test_apollo_quick.py
+python tests/apollo/test_apollo_deep_integration.py
+
+# Test specific Firecrawl functionality
+python tests/firecrawl/test_firecrawl_sdk.py
+python tests/firecrawl/test_firecrawl_v2_fire.py
 ```
 
 ### Deployment
