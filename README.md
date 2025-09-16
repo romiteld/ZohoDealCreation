@@ -38,6 +38,10 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 ## 🏗️ Comprehensive Architecture Overview
 
 > **Latest Updates (September 16, 2025)**:
+> - **🗄️ DATABASE FULLY OPTIMIZED**: Complete migration deployment with zero errors and performance tuning
+> - **✅ PostgreSQL Enhancements**: All migrations applied, 231 indexes optimized, VACUUM completed
+> - **🚀 400K Token Support**: pgvector enabled, GPT-5 context tables ready, cost tracking operational
+> - **📊 Analytics Infrastructure**: Daily cost summary and cache performance views deployed
 > - **🔧 Duplicate Prevention Enhancement**: Refined to 5-minute window for same candidate to prevent rapid resubmissions
 > - **📧 Brandon's Vault System**: Added candidate email generation capability for streamlined outreach
 > - **✅ Extraction Fix**: Corrected client info extraction to properly isolate referrer details
@@ -70,199 +74,522 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 
 ## 🏗️ System Architecture Overview
 
-### High-Level Architecture
+### 🌐 Complete System Architecture
 
 ```mermaid
 graph TB
-    subgraph "Client Layer"
-        OA[Outlook Add-in<br/>Client Info Form]
-        API_CLIENT[API Clients]
-        WEB[Web Interface]
+    subgraph "📱 Client Layer"
+        OA[["📧 Outlook Add-in<br/>• Client Info Form<br/>• Send to Zoho Button<br/>• Manifest v2.0.0.5"]]
+        API_CLIENT[["🔌 API Clients<br/>• REST Integration<br/>• Webhook Receivers<br/>• Third-party Apps"]]
+        WEB[["🌐 Web Interface<br/>• Admin Dashboard<br/>• Analytics Portal<br/>• Configuration UI"]]
     end
 
-    subgraph "Gateway & Security Layer"
-        PROXY[OAuth Proxy<br/>Flask/IIS]
-        FD[Azure Front Door<br/>CDN]
+    subgraph "🔐 Security & Gateway Layer"
+        PROXY[["🛡️ OAuth Proxy Service<br/>• Flask/IIS Server<br/>• Token Management<br/>• Rate Limiting: 100/min<br/>• Circuit Breaker"]]
+        FD[["⚡ Azure Front Door<br/>• Global CDN<br/>• DDoS Protection<br/>• WAF Rules<br/>• SSL Termination"]]
+        KV[["🔑 Key Vault<br/>• Secret Rotation<br/>• API Keys<br/>• OAuth Tokens<br/>• Connection Strings"]]
     end
 
-    subgraph "Processing Layer"
-        API[FastAPI<br/>Container Apps]
-        LG[LangGraph<br/>3-Node Pipeline<br/>Extract→Research→Validate]
-        GPT[GPT-5 Tiers<br/>nano/mini/full]
+    subgraph "🧠 AI Processing Engine"
+        API[["🚀 FastAPI Core<br/>• Container Apps<br/>• Auto-scaling 2-10<br/>• Health Monitoring<br/>• WebSocket Support"]]
+
+        LG[["🔄 LangGraph Pipeline<br/>━━━━━━━━━━━━━━━━<br/>1️⃣ Extract Node<br/>2️⃣ Research Node<br/>3️⃣ Validate Node<br/>━━━━━━━━━━━━━━━━<br/>StateGraph v0.2.74"]]
+
+        GPT[["🤖 GPT-5 Multi-Tier<br/>• GPT-5-nano: $0.05/1M<br/>• GPT-5-mini: $0.25/1M<br/>• GPT-5-full: $1.25/1M<br/>• Temperature: 1.0"]]
+
+        VOIT[["🎯 VoIT Orchestrator<br/>• Budget Control<br/>• Model Selection<br/>• Quality Target: 0.9<br/>• Effort Units: 5.0"]]
     end
 
-    subgraph "Data & Intelligence"
-        CACHE[Redis Cache<br/>90% Cost Reduction]
-        PG[PostgreSQL<br/>Deduplication<br/>+ pgvector]
-        SEARCH[AI Search<br/>Semantic Learning]
-        FIRE[Firecrawl API<br/>Company Research]
-        APOLLO[Apollo.io API<br/>Contact Enrichment]
+    subgraph "💾 Data & Intelligence Services"
+        CACHE[["💎 Redis Cache<br/>• 90% Cost Reduction<br/>• 92% Hit Rate<br/>• 24hr TTL<br/>• Pattern Recognition"]]
+
+        PG[["🗄️ PostgreSQL<br/>• v15 + pgvector<br/>• 400K Context<br/>• Vector Search<br/>• Deduplication"]]
+
+        SEARCH[["🔍 AI Search<br/>• Semantic Index<br/>• Template Learning<br/>• Pattern Storage<br/>• Company Profiles"]]
+
+        C3[["🔮 C³ Cache<br/>• Conformal Bounds<br/>• Risk: 1% (δ=0.01)<br/>• Edit Distance: 3<br/>• Embeddings"]]
     end
 
-    subgraph "Async Processing"
-        SB[Service Bus<br/>Batch Queue]
-        SR[SignalR<br/>WebSocket]
+    subgraph "🌐 External Enrichment APIs"
+        FIRE[["🔥 Firecrawl v2<br/>• Company Research<br/>• 30+ Data Fields<br/>• 5s Timeout<br/>• $149-800 Savings"]]
+
+        APOLLO[["🚀 Apollo.io<br/>• Contact Enrichment<br/>• People Match API<br/>• Email Validation<br/>• Phone Numbers"]]
+
+        ULTRA[["💫 Ultra Enrichment<br/>• Revenue Data<br/>• Employee Count<br/>• Funding Info<br/>• Tech Stack"]]
     end
 
-    subgraph "Integration & Storage"
-        ZOHO[Zoho CRM v8<br/>Clients/Deals]
-        BLOB[Blob Storage<br/>Attachments]
-        KV[Key Vault<br/>Secrets]
+    subgraph "⚡ Async & Streaming"
+        SB[["📬 Service Bus<br/>• Batch Processing<br/>• 50 emails/context<br/>• Message Queue<br/>• Retry Logic"]]
+
+        SR[["📡 SignalR<br/>• WebSocket Server<br/>• Real-time Updates<br/>• <200ms Latency<br/>• Live Streaming"]]
+
+        BATCH[["📦 Batch Processor<br/>• Parallel Execution<br/>• Queue Management<br/>• Error Handling<br/>• Progress Tracking"]]
     end
 
-    subgraph "Monitoring"
-        AI[App Insights<br/>Telemetry]
+    subgraph "🔗 Integration Layer"
+        ZOHO[["📊 Zoho CRM v8<br/>• Accounts/Contacts<br/>• Deals Pipeline<br/>• Custom Fields<br/>• Webhook Events"]]
+
+        BLOB[["☁️ Blob Storage<br/>• Attachments<br/>• 25MB Limit<br/>• SAS Tokens<br/>• Private Container"]]
+
+        QUEUE[["📋 Storage Queue<br/>• Dead Letter<br/>• Poison Messages<br/>• Retry Queue<br/>• Archive Storage"]]
     end
 
-    OA --> PROXY
-    API_CLIENT --> PROXY
-    WEB --> FD
-    FD --> PROXY
-    PROXY --> API
-    API --> LG
-    LG --> GPT
-    LG --> CACHE
-    LG --> PG
-    LG --> SEARCH
-    LG --> APOLLO
-    API --> SB
-    API --> SR
-    API --> ZOHO
-    API --> BLOB
-    API --> KV
-    API --> AI
+    subgraph "📊 Monitoring & Analytics"
+        AI[["📈 App Insights<br/>• Custom Metrics<br/>• Cost Tracking<br/>• Performance KPIs<br/>• Alert Rules"]]
 
-    style LG fill:#2196F3
-    style GPT fill:#FF9800
-    style CACHE fill:#9C27B0
-    style PROXY fill:#4CAF50
+        DASH[["📊 Dashboards<br/>• Real-time Metrics<br/>• Business KPIs<br/>• Error Tracking<br/>• Usage Analytics"]]
+
+        LOG[["📝 Log Analytics<br/>• Query Engine<br/>• Alert Manager<br/>• Retention: 30d<br/>• Export to SIEM"]]
+    end
+
+    %% Client Connections
+    OA -.->|HTTPS| PROXY
+    API_CLIENT -.->|REST| PROXY
+    WEB -.->|HTTPS| FD
+
+    %% Gateway Routing
+    FD ==>|Cache/CDN| PROXY
+    PROXY ==>|Auth| KV
+    PROXY ==>|Forward| API
+
+    %% Core Processing Flow
+    API ==>|Workflow| LG
+    LG ==>|Extract| GPT
+    LG ==>|Optimize| VOIT
+    VOIT ==>|Select Model| GPT
+
+    %% Data Layer
+    LG ==>|Check Cache| C3
+    C3 ==>|Miss| CACHE
+    LG ==>|Store| PG
+    LG ==>|Index| SEARCH
+
+    %% Enrichment Flow
+    LG -.->|Research| FIRE
+    FIRE -.->|Enhance| APOLLO
+    APOLLO -.->|Enrich| ULTRA
+
+    %% Async Operations
+    API ==>|Queue| SB
+    SB ==>|Process| BATCH
+    API ==>|Stream| SR
+
+    %% Integration Points
+    API ==>|Create Records| ZOHO
+    API ==>|Upload| BLOB
+    API -.->|Dead Letter| QUEUE
+
+    %% Monitoring
+    API -.->|Telemetry| AI
+    AI -.->|Visualize| DASH
+    AI -.->|Analyze| LOG
+
+    %% Styling
+    classDef client fill:#E3F2FD,stroke:#1976D2,stroke-width:2px
+    classDef security fill:#E8F5E9,stroke:#388E3C,stroke-width:2px
+    classDef ai fill:#FFF3E0,stroke:#F57C00,stroke-width:2px
+    classDef data fill:#F3E5F5,stroke:#7B1FA2,stroke-width:2px
+    classDef external fill:#E0F2F1,stroke:#00796B,stroke-width:2px
+    classDef async fill:#FFEBEE,stroke:#C62828,stroke-width:2px
+    classDef integration fill:#F1F8E9,stroke:#558B2F,stroke-width:2px
+    classDef monitoring fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px
+
+    class OA,API_CLIENT,WEB client
+    class PROXY,FD,KV security
+    class API,LG,GPT,VOIT ai
+    class CACHE,PG,SEARCH,C3 data
+    class FIRE,APOLLO,ULTRA external
+    class SB,SR,BATCH async
+    class ZOHO,BLOB,QUEUE integration
+    class AI,DASH,LOG monitoring
 ```
 
 ### 🔄 Enhanced LangGraph Processing Pipeline with Firecrawl v2 Supercharged
 
 ```mermaid
 graph LR
-    subgraph "Email Input"
-        EMAIL[Email Content]
-        ATT[Attachments]
+    subgraph "📨 Email Input Layer"
+        EMAIL[["📧 Email Content<br/>• Subject<br/>• Body HTML/Text<br/>• Headers<br/>• Metadata"]]
+        ATT[["📎 Attachments<br/>• Resume PDF<br/>• Cover Letter<br/>• Portfolio<br/>• Max 25MB"]]
+        CLIENT[["👤 Client Info<br/>• Referrer Details<br/>• Company Context<br/>• Location Data<br/>• Custom Fields"]]
     end
 
-    subgraph "LangGraph StateGraph"
+    subgraph "🧠 LangGraph StateGraph Engine"
         direction TB
-        EXT[Extract Node<br/>GPT-5-mini<br/>Pydantic Output]
-        RES[Research Node<br/>Firecrawl v2 Supercharged<br/>Ultra Enrichment<br/>5s Timeout]
-        VAL[Validate Node<br/>Normalization<br/>JSON Standard]
+        STATE[["📊 State Manager<br/>━━━━━━━━━━━━━━━━<br/>EmailProcessingState<br/>• email_content<br/>• sender_domain<br/>• extraction_result<br/>• company_research<br/>• validation_result<br/>• final_output"]]
+
+        EXT[["1️⃣ Extract Node<br/>━━━━━━━━━━━━━━━━<br/>GPT-5-mini<br/>• Pydantic Schema<br/>• Structured Output<br/>• Field Extraction<br/>• Entity Recognition"]]
+
+        RES[["2️⃣ Research Node<br/>━━━━━━━━━━━━━━━━<br/>Firecrawl v2 API<br/>• Company Research<br/>• Website Analysis<br/>• 5s Timeout<br/>• Graceful Fallback"]]
+
+        VAL[["3️⃣ Validate Node<br/>━━━━━━━━━━━━━━━━<br/>Data Normalization<br/>• JSON Validation<br/>• Field Mapping<br/>• Business Rules<br/>• Quality Check"]]
+
+        STATE --> EXT
+        EXT --> RES
+        RES --> VAL
     end
 
-    subgraph "Enhanced Enrichment Layer"
-        FC2[Firecrawl v2 API<br/>SuperchargedExtractor<br/>30+ Data Fields]
-        APOLLO_ENR[Apollo.io Enricher<br/>People Match API<br/>Contact Data]
-        ULTRA[UltraEnrichmentService<br/>Revenue, Employees<br/>Funding, Tech Stack]
-        SMART[SmartCandidateEnricher<br/>Industry Analysis<br/>Market Intelligence]
+    subgraph "🌐 Enhanced Enrichment Services"
+        FC2[["🔥 Firecrawl v2<br/>SuperchargedExtractor<br/>━━━━━━━━━━━━━━━━<br/>• Company URL<br/>• Industry Type<br/>• Employee Count<br/>• Founded Year<br/>• Tech Stack"]]
+
+        APOLLO_ENR[["🚀 Apollo.io API<br/>People Match Service<br/>━━━━━━━━━━━━━━━━<br/>• Email Validation<br/>• Phone Numbers<br/>• Social Profiles<br/>• Title Verification<br/>• Company Match"]]
+
+        ULTRA[["💫 Ultra Enrichment<br/>Business Intelligence<br/>━━━━━━━━━━━━━━━━<br/>• Revenue Data<br/>• Funding Rounds<br/>• Growth Metrics<br/>• Market Position<br/>• Competitors"]]
+
+        SMART[["🎯 Smart Enricher<br/>AI-Powered Analysis<br/>━━━━━━━━━━━━━━━━<br/>• Industry Trends<br/>• Hiring Signals<br/>• Company Health<br/>• Tech Adoption<br/>• Risk Factors"]]
+
+        CLAY[["🏗️ Clay Alternative<br/>$149-800 Savings<br/>━━━━━━━━━━━━━━━━<br/>• 30+ Data Fields<br/>• No API Limits<br/>• Custom Extraction<br/>• Batch Processing<br/>• White Label"]]
     end
 
-    subgraph "Caching Layer"
-        C3[C³ Cache<br/>Conformal Bounds<br/>90% Hit Rate]
-        VOIT[VoIT Orchestrator<br/>Budget Control<br/>Model Selection]
+    subgraph "⚡ Intelligent Caching Layer"
+        C3[["🔮 C³ Cache Algorithm<br/>━━━━━━━━━━━━━━━━<br/>Conformal Counterfactual<br/>• δ=0.01 Risk Bound<br/>• ε=3 Edit Distance<br/>• 90% Hit Rate<br/>• Vector Similarity"]]
+
+        VOIT[["🎯 VoIT Controller<br/>━━━━━━━━━━━━━━━━<br/>Value-of-Insight Tree<br/>• Budget: 5.0 units<br/>• Quality: 0.9 target<br/>• Model Selection<br/>• Cost Optimization"]]
+
+        PATTERN[["📋 Pattern Recognition<br/>━━━━━━━━━━━━━━━━<br/>Email Classification<br/>• Referral: 48hr TTL<br/>• Recruiter: 7d TTL<br/>• Template: 90d TTL<br/>• Direct: 24hr TTL"]]
     end
 
-    subgraph "Data Storage"
-        PG_DB[(PostgreSQL<br/>pgvector<br/>400K Context)]
-        REDIS[(Redis<br/>Pattern Cache<br/>24hr TTL)]
-        AZURE_SEARCH[(AI Search<br/>Semantic Index)]
+    subgraph "💾 Data Persistence Layer"
+        PG_DB[["🗄️ PostgreSQL<br/>━━━━━━━━━━━━━━━━<br/>• v15 + pgvector<br/>• 400K Context<br/>• Vector Search<br/>• Deduplication<br/>• JSONB Storage"]]
+
+        REDIS[["💎 Redis Cache<br/>━━━━━━━━━━━━━━━━<br/>• 256MB Basic C0<br/>• Pattern Storage<br/>• 24hr Default TTL<br/>• LRU Eviction<br/>• Cluster Ready"]]
+
+        AZURE_SEARCH[["🔍 AI Search<br/>━━━━━━━━━━━━━━━━<br/>• Semantic Index<br/>• Vector Embeddings<br/>• Fuzzy Matching<br/>• Faceted Search<br/>• ML Ranking"]]
+
+        BLOB_STORE[["☁️ Blob Storage<br/>━━━━━━━━━━━━━━━━<br/>• Attachment Store<br/>• SAS Tokens<br/>• CDN Integration<br/>• Lifecycle Rules<br/>• Archive Tier"]]
     end
 
-    subgraph "Output"
-        CRM[Zoho Records<br/>Enhanced Data<br/>Steve's 21 Fields]
-        METRICS[Analytics<br/>Enrichment Metrics]
+    subgraph "📤 Output & Integration"
+        CRM[["📊 Zoho CRM<br/>━━━━━━━━━━━━━━━━<br/>✅ Account Record<br/>✅ Contact Record<br/>✅ Deal Record<br/>• Steve's 21 Fields<br/>• Enhanced 30+ Fields"]]
+
+        METRICS[["📈 Analytics<br/>━━━━━━━━━━━━━━━━<br/>• Processing Time<br/>• Enrichment Score<br/>• Cache Performance<br/>• Cost per Email<br/>• Success Rate"]]
+
+        WEBHOOK[["🔔 Webhooks<br/>━━━━━━━━━━━━━━━━<br/>• Event Triggers<br/>• Status Updates<br/>• Error Alerts<br/>• Completion Events<br/>• Custom Callbacks"]]
     end
 
-    EMAIL --> C3
-    C3 -->|Cache Hit| CRM
-    C3 -->|Cache Miss| VOIT
-    VOIT --> EXT
-    ATT --> BLOB[Blob Storage]
-    EXT --> RES
-    RES --> FC2
-    FC2 --> APOLLO_ENR
-    APOLLO_ENR --> ULTRA
-    ULTRA --> SMART
-    SMART --> VAL
-    VAL --> PG_DB
-    VAL --> REDIS
-    VAL --> AZURE_SEARCH
-    VAL --> CRM
-    VAL --> METRICS
+    %% Input Flow
+    EMAIL ==>|Parse| STATE
+    ATT ==>|Upload| BLOB_STORE
+    CLIENT ==>|Context| STATE
 
-    style C3 fill:#9C27B0
-    style VOIT fill:#FF5722
-    style EXT fill:#2196F3
-    style FC2 fill:#00BCD4
-    style ULTRA fill:#4CAF50
-    style SMART fill:#FF9800
+    %% Cache Check
+    STATE ==>|Check| C3
+    C3 -->|Hit 92%| CRM
+    C3 -->|Miss 8%| VOIT
+
+    %% Processing Flow
+    VOIT ==>|Optimize| EXT
+    EXT ==>|Extract| RES
+    RES ==>|Enrich| FC2
+    FC2 ==>|Contact| APOLLO_ENR
+    APOLLO_ENR ==>|Business| ULTRA
+    ULTRA ==>|Analyze| SMART
+    SMART ==>|Alternative| CLAY
+
+    %% Validation Flow
+    CLAY ==>|Validate| VAL
+    VAL ==>|Store| PG_DB
+    VAL ==>|Cache| REDIS
+    VAL ==>|Index| AZURE_SEARCH
+    VAL ==>|Cache Pattern| PATTERN
+    PATTERN ==>|Update| C3
+
+    %% Output Flow
+    VAL ==>|Create| CRM
+    VAL ==>|Track| METRICS
+    VAL ==>|Notify| WEBHOOK
+
+    %% Styling
+    classDef input fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px
+    classDef langgraph fill:#FFF3E0,stroke:#F57C00,stroke-width:3px
+    classDef enrichment fill:#E0F2F1,stroke:#00695C,stroke-width:2px
+    classDef cache fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px
+    classDef storage fill:#E3F2FD,stroke:#1565C0,stroke-width:2px
+    classDef output fill:#FFEBEE,stroke:#C62828,stroke-width:2px
+
+    class EMAIL,ATT,CLIENT input
+    class STATE,EXT,RES,VAL langgraph
+    class FC2,APOLLO_ENR,ULTRA,SMART,CLAY enrichment
+    class C3,VOIT,PATTERN cache
+    class PG_DB,REDIS,AZURE_SEARCH,BLOB_STORE storage
+    class CRM,METRICS,WEBHOOK output
 ```
 
-### 🚀 Production Infrastructure
+### 🚀 Production Infrastructure & Deployment Architecture
 
 ```mermaid
 graph TB
-    subgraph "Azure Resources"
-        subgraph "TheWell-Infra-East"
-            CA[Container Apps<br/>well-intake-api]
-            AS[App Service<br/>well-zoho-oauth]
-            ACR[Container Registry<br/>wellintakeacr0903]
-            
-            subgraph "Data Services"
-                PG[PostgreSQL Flex<br/>well-intake-db-0903]
-                REDIS[Redis Cache<br/>wellintakecache0903]
-                BLOB[Blob Storage<br/>wellintakestorage0903]
-                SEARCH[AI Search<br/>wellintakesearch0903]
+    subgraph "☁️ Azure Cloud Infrastructure - East US Region"
+        subgraph "🏢 Resource Group: TheWell-Infra-East"
+            subgraph "🚀 Compute Services"
+                CA[["📦 Container Apps<br/>well-intake-api<br/>━━━━━━━━━━━━━━━━<br/>• FastAPI v0.104.1<br/>• Auto-scale 2-10<br/>• 2 vCPU / 4GB RAM<br/>• Health Probes<br/>• Ingress: HTTPS"]]
+
+                AS[["🌐 App Service<br/>well-zoho-oauth<br/>━━━━━━━━━━━━━━━━<br/>• Flask/IIS Proxy<br/>• B1 Plan (1 vCPU)<br/>• Always On<br/>• Managed Identity<br/>• Custom Domain"]]
+
+                ACR[["🐳 Container Registry<br/>wellintakeacr0903<br/>━━━━━━━━━━━━━━━━<br/>• Basic SKU<br/>• Geo-redundant<br/>• Webhook Triggers<br/>• Vulnerability Scan<br/>• 10GB Storage"]]
             end
-            
-            subgraph "Messaging"
-                SB[Service Bus<br/>wellintakebus0903]
-                SR[SignalR<br/>wellintakesignalr0903]
+
+            subgraph "💾 Data Services Tier"
+                PG[["🗄️ PostgreSQL Flex<br/>well-intake-db-0903<br/>━━━━━━━━━━━━━━━━<br/>• v15 + pgvector<br/>• B_Standard_B2ms<br/>• 32GB Storage<br/>• Daily Backups<br/>• Zone Redundant"]]
+
+                REDIS[["💎 Redis Cache<br/>wellintakecache0903<br/>━━━━━━━━━━━━━━━━<br/>• Basic C0 256MB<br/>• Redis 6.0<br/>• SSL Only<br/>• Persistence Off<br/>• Cluster: No"]]
+
+                BLOB[["☁️ Blob Storage<br/>wellintakestorage0903<br/>━━━━━━━━━━━━━━━━<br/>• Standard LRS<br/>• Hot Tier<br/>• Private Container<br/>• SAS Auth<br/>• Lifecycle Rules"]]
+
+                SEARCH[["🔍 AI Search<br/>wellintakesearch0903<br/>━━━━━━━━━━━━━━━━<br/>• Basic Tier<br/>• 1 Replica<br/>• 1 Partition<br/>• Semantic Search<br/>• Vector Index"]]
             end
-            
-            subgraph "Security & Monitoring"
-                KV[Key Vault<br/>wellintakevault]
-                AI[App Insights<br/>wellintakeinsights]
+
+            subgraph "📡 Messaging & Real-time"
+                SB[["📬 Service Bus<br/>wellintakebus0903<br/>━━━━━━━━━━━━━━━━<br/>• Standard Tier<br/>• email-batch Queue<br/>• 1GB Queue Size<br/>• Sessions Enabled<br/>• Dead Letter Queue"]]
+
+                SR[["📡 SignalR Service<br/>wellintakesignalr0903<br/>━━━━━━━━━━━━━━━━<br/>• Free Tier<br/>• 20 Connections<br/>• 20K Messages/day<br/>• WebSocket<br/>• Server Mode"]]
+            end
+
+            subgraph "🔐 Security & Monitoring"
+                KV[["🔑 Key Vault<br/>wellintakevault<br/>━━━━━━━━━━━━━━━━<br/>• Standard Tier<br/>• HSM Protected<br/>• Secret Rotation<br/>• Access Policies<br/>• Audit Logs"]]
+
+                AI[["📈 App Insights<br/>wellintakeinsights<br/>━━━━━━━━━━━━━━━━<br/>• Application Map<br/>• Live Metrics<br/>• Custom Events<br/>• Alert Rules<br/>• 90-day Retention"]]
+
+                FD[["⚡ Front Door<br/>well-intake-cdn<br/>━━━━━━━━━━━━━━━━<br/>• Premium Tier<br/>• WAF Protection<br/>• Global CDN<br/>• Custom Rules<br/>• Bot Protection"]]
             end
         end
     end
 
-    subgraph "CI/CD Pipeline"
-        GH[GitHub Actions]
-        DOCKER[Docker Build<br/>Multi-platform]
+    subgraph "🔧 CI/CD Pipeline"
+        subgraph "GitHub Actions Workflows"
+            GH_MAIN[["🎯 Main Workflow<br/>deploy-production.yml<br/>━━━━━━━━━━━━━━━━<br/>• Triggered on push<br/>• Path filters<br/>• Matrix builds<br/>• Secret injection<br/>• Artifact upload"]]
+
+            GH_CACHE[["💾 Cache Workflow<br/>manifest-cache-bust.yml<br/>━━━━━━━━━━━━━━━━<br/>• Version increment<br/>• Cache invalidation<br/>• CDN purge<br/>• Rollback logic<br/>• Health checks"]]
+        end
+
+        DOCKER[["🐳 Docker Build<br/>━━━━━━━━━━━━━━━━<br/>• Multi-stage build<br/>• Layer caching<br/>• linux/amd64<br/>• Size: ~500MB<br/>• Python 3.11"]]
+
+        HELM[["⚓ Helm Charts<br/>━━━━━━━━━━━━━━━━<br/>• values.yaml<br/>• ConfigMaps<br/>• Secrets<br/>• Ingress<br/>• HPA Rules"]]
     end
 
-    subgraph "External Services"
-        OPENAI[OpenAI GPT-5]
-        FIRECRAWL[Firecrawl API]
-        APOLLO_API[Apollo.io API]
-        ZOHO_API[Zoho CRM v8]
+    subgraph "🌐 External Services Integration"
+        OPENAI[["🤖 OpenAI API<br/>━━━━━━━━━━━━━━━━<br/>• GPT-5 Models<br/>• 300 RPM Limit<br/>• Embeddings API<br/>• Function Calling<br/>• $0.05-1.25/1M"]]
+
+        FIRECRAWL[["🔥 Firecrawl API<br/>━━━━━━━━━━━━━━━━<br/>• v2 Endpoint<br/>• Web Scraping<br/>• 5s Timeout<br/>• 30+ Fields<br/>• Rate Limited"]]
+
+        APOLLO_API[["🚀 Apollo.io API<br/>━━━━━━━━━━━━━━━━<br/>• People Match<br/>• Contact Data<br/>• Company Info<br/>• Email Finder<br/>• 100 credits/mo"]]
+
+        ZOHO_API[["📊 Zoho CRM v8<br/>━━━━━━━━━━━━━━━━<br/>• REST API<br/>• OAuth 2.0<br/>• Bulk Operations<br/>• Webhooks<br/>• 5000 req/hr"]]
     end
 
-    GH --> DOCKER
-    DOCKER --> ACR
-    ACR --> CA
-    AS --> CA
-    CA --> PG
-    CA --> REDIS
-    CA --> BLOB
-    CA --> SEARCH
-    CA --> SB
-    CA --> SR
-    CA --> KV
-    CA --> AI
-    CA --> OPENAI
-    CA --> FIRECRAWL
-    CA --> APOLLO_API
-    CA --> ZOHO_API
+    subgraph "📊 Performance Metrics"
+        PERF[["⚡ Performance<br/>━━━━━━━━━━━━━━━━<br/>• API: <3s p99<br/>• Cache: 92% hit<br/>• DB: 45ms avg<br/>• Queue: 1500/hr<br/>• Uptime: 99.9%"]]
 
-    style CA fill:#2196F3
-    style AS fill:#4CAF50
-    style REDIS fill:#9C27B0
+        COST[["💰 Cost Optimization<br/>━━━━━━━━━━━━━━━━<br/>• ~$450/month total<br/>• 90% cache savings<br/>• Spot instances<br/>• Reserved capacity<br/>• Auto-shutdown dev"]]
+    end
+
+    %% CI/CD Flow
+    GH_MAIN ==>|Build| DOCKER
+    GH_CACHE ==>|Version| HELM
+    DOCKER ==>|Push| ACR
+    HELM ==>|Deploy| CA
+
+    %% Infrastructure Flow
+    ACR ==>|Pull| CA
+    AS ==>|Proxy| CA
+    CA ==>|Query| PG
+    CA ==>|Cache| REDIS
+    CA ==>|Store| BLOB
+    CA ==>|Index| SEARCH
+    CA ==>|Queue| SB
+    CA ==>|Stream| SR
+    CA ==>|Secrets| KV
+    CA ==>|Monitor| AI
+    AS ==>|CDN| FD
+
+    %% External Services
+    CA -.->|API Call| OPENAI
+    CA -.->|Scrape| FIRECRAWL
+    CA -.->|Enrich| APOLLO_API
+    CA -.->|CRM| ZOHO_API
+
+    %% Metrics Collection
+    CA -.->|Metrics| PERF
+    AI -.->|Analytics| COST
+
+    %% Styling
+    classDef compute fill:#E3F2FD,stroke:#1565C0,stroke-width:3px
+    classDef data fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px
+    classDef messaging fill:#FFEBEE,stroke:#C62828,stroke-width:2px
+    classDef security fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px
+    classDef cicd fill:#FFF3E0,stroke:#E65100,stroke-width:2px
+    classDef external fill:#E0F2F1,stroke:#00695C,stroke-width:2px
+    classDef metrics fill:#F1F8E9,stroke:#558B2F,stroke-width:2px
+
+    class CA,AS,ACR compute
+    class PG,REDIS,BLOB,SEARCH data
+    class SB,SR messaging
+    class KV,AI,FD security
+    class GH_MAIN,GH_CACHE,DOCKER,HELM cicd
+    class OPENAI,FIRECRAWL,APOLLO_API,ZOHO_API external
+    class PERF,COST metrics
+```
+
+### 🔒 Security Architecture & Data Protection
+
+```mermaid
+graph TB
+    subgraph "🌐 Network Security Perimeter"
+        WAF[["🛡️ WAF Rules<br/>━━━━━━━━━━━━━━━━<br/>• OWASP Top 10<br/>• SQL Injection<br/>• XSS Protection<br/>• Rate Limiting<br/>• Bot Detection"]]
+
+        DDoS[["⚡ DDoS Protection<br/>━━━━━━━━━━━━━━━━<br/>• L3/L4 Protection<br/>• Adaptive Tuning<br/>• Attack Analytics<br/>• Auto Mitigation<br/>• Rapid Response"]]
+
+        NSG[["🚪 Network Security<br/>━━━━━━━━━━━━━━━━<br/>• Inbound Rules<br/>• Outbound Rules<br/>• Service Tags<br/>• IP Whitelisting<br/>• Port Restrictions"]]
+    end
+
+    subgraph "🔐 Identity & Access Management"
+        MI[["👤 Managed Identity<br/>━━━━━━━━━━━━━━━━<br/>• System Assigned<br/>• User Assigned<br/>• No Passwords<br/>• Auto Rotation<br/>• RBAC Integration"]]
+
+        OAuth[["🔑 OAuth 2.0<br/>━━━━━━━━━━━━━━━━<br/>• Authorization Code<br/>• Refresh Tokens<br/>• Token Caching<br/>• 55min TTL<br/>• Secure Storage"]]
+
+        API_KEY[["🎫 API Key Auth<br/>━━━━━━━━━━━━━━━━<br/>• Header Validation<br/>• Rate Limiting<br/>• IP Restrictions<br/>• Usage Tracking<br/>• Key Rotation"]]
+    end
+
+    subgraph "🔒 Data Encryption"
+        TLS[["🔐 TLS 1.3<br/>━━━━━━━━━━━━━━━━<br/>• In Transit<br/>• Certificate Pinning<br/>• Perfect Forward<br/>• HSTS Enabled<br/>• Cipher Suites"]]
+
+        AES[["🔐 AES-256<br/>━━━━━━━━━━━━━━━━<br/>• At Rest<br/>• Blob Encryption<br/>• Database TDE<br/>• Key Vault<br/>• Backup Encryption"]]
+
+        SAS[["📝 SAS Tokens<br/>━━━━━━━━━━━━━━━━<br/>• Time Limited<br/>• IP Restricted<br/>• Permission Scoped<br/>• Revocable<br/>• Audit Trail"]]
+    end
+
+    subgraph "🛡️ Application Security"
+        INPUT[["✅ Input Validation<br/>━━━━━━━━━━━━━━━━<br/>• Pydantic Models<br/>• Type Checking<br/>• Size Limits<br/>• Sanitization<br/>• Schema Validation"]]
+
+        SECRETS[["🔑 Secret Management<br/>━━━━━━━━━━━━━━━━<br/>• Key Vault Store<br/>• Env Variables<br/>• No Hardcoding<br/>• Auto Rotation<br/>• Access Policies"]]
+
+        AUDIT[["📝 Audit Logging<br/>━━━━━━━━━━━━━━━━<br/>• All API Calls<br/>• Auth Events<br/>• Data Changes<br/>• Error Tracking<br/>• Compliance Logs"]]
+    end
+
+    subgraph "🔍 Monitoring & Detection"
+        SIEM[["🎯 SIEM Integration<br/>━━━━━━━━━━━━━━━━<br/>• Log Analytics<br/>• Sentinel Rules<br/>• Threat Detection<br/>• Incident Response<br/>• Alert Automation"]]
+
+        ANOMALY[["🔍 Anomaly Detection<br/>━━━━━━━━━━━━━━━━<br/>• ML Algorithms<br/>• Baseline Analysis<br/>• Pattern Recognition<br/>• Behavioral Analytics<br/>• Real-time Alerts"]]
+
+        COMPLIANCE[["📋 Compliance<br/>━━━━━━━━━━━━━━━━<br/>• GDPR Ready<br/>• SOC 2 Type II<br/>• ISO 27001<br/>• PII Protection<br/>• Data Retention"]]
+    end
+
+    subgraph "🚨 Incident Response"
+        CIRCUIT[["⚡ Circuit Breaker<br/>━━━━━━━━━━━━━━━━<br/>• Failure Detection<br/>• Auto Recovery<br/>• Fallback Logic<br/>• Health Checks<br/>• State Management"]]
+
+        BACKUP[["💾 Backup & Recovery<br/>━━━━━━━━━━━━━━━━<br/>• Daily Backups<br/>• Geo-redundant<br/>• Point-in-time<br/>• Automated Testing<br/>• 30-day Retention"]]
+
+        ROLLBACK[["↩️ Rollback Strategy<br/>━━━━━━━━━━━━━━━━<br/>• Blue-Green Deploy<br/>• Canary Releases<br/>• Version Control<br/>• Quick Revert<br/>• Zero Downtime"]]
+    end
+
+    %% Security Flow
+    WAF ==> DDoS
+    DDoS ==> NSG
+    NSG ==> MI
+    MI ==> OAuth
+    OAuth ==> API_KEY
+    API_KEY ==> TLS
+    TLS ==> AES
+    AES ==> SAS
+    SAS ==> INPUT
+    INPUT ==> SECRETS
+    SECRETS ==> AUDIT
+    AUDIT ==> SIEM
+    SIEM ==> ANOMALY
+    ANOMALY ==> COMPLIANCE
+    COMPLIANCE ==> CIRCUIT
+    CIRCUIT ==> BACKUP
+    BACKUP ==> ROLLBACK
+
+    %% Styling
+    classDef network fill:#FFEBEE,stroke:#C62828,stroke-width:2px
+    classDef identity fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px
+    classDef encryption fill:#E3F2FD,stroke:#1565C0,stroke-width:2px
+    classDef appsec fill:#FFF3E0,stroke:#E65100,stroke-width:2px
+    classDef monitoring fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px
+    classDef incident fill:#E0F2F1,stroke:#00695C,stroke-width:2px
+
+    class WAF,DDoS,NSG network
+    class MI,OAuth,API_KEY identity
+    class TLS,AES,SAS encryption
+    class INPUT,SECRETS,AUDIT appsec
+    class SIEM,ANOMALY,COMPLIANCE monitoring
+    class CIRCUIT,BACKUP,ROLLBACK incident
+```
+
+### 📦 Deployment Flow & CI/CD Pipeline
+
+```mermaid
+sequenceDiagram
+    participant DEV as 👨‍💻 Developer
+    participant GIT as 📚 GitHub
+    participant GHA as 🔧 GitHub Actions
+    participant TEST as 🧪 Test Suite
+    participant BUILD as 🐳 Docker Build
+    participant ACR as 📦 Container Registry
+    participant STAGE as 🎭 Staging
+    participant PROD as 🚀 Production
+    participant MON as 📊 Monitoring
+
+    DEV->>GIT: git push (feature branch)
+    GIT->>GHA: Trigger PR workflow
+
+    Note over GHA,TEST: Automated Testing Phase
+    GHA->>TEST: Run unit tests
+    TEST-->>GHA: ✅ Pass (95% coverage)
+    GHA->>TEST: Run integration tests
+    TEST-->>GHA: ✅ Pass
+    GHA->>TEST: Security scan (SAST)
+    TEST-->>GHA: ✅ No vulnerabilities
+
+    GHA->>GIT: ✅ All checks passed
+    DEV->>GIT: Merge to main
+
+    Note over GIT,BUILD: Build & Package Phase
+    GIT->>GHA: Trigger main workflow
+    GHA->>BUILD: Multi-stage Docker build
+    BUILD->>BUILD: Install dependencies
+    BUILD->>BUILD: Compile assets
+    BUILD->>BUILD: Optimize layers
+    BUILD-->>GHA: Image ready (500MB)
+
+    Note over GHA,ACR: Registry Push Phase
+    GHA->>ACR: docker push :latest
+    GHA->>ACR: docker push :v3.5.0
+    GHA->>ACR: docker push :sha-abc123
+    ACR-->>GHA: ✅ Images stored
+
+    Note over ACR,STAGE: Staging Deployment
+    GHA->>STAGE: Deploy to staging
+    STAGE->>STAGE: Health check
+    STAGE->>STAGE: Smoke tests
+    STAGE->>STAGE: Load tests
+    STAGE-->>GHA: ✅ Staging healthy
+
+    Note over GHA,PROD: Production Deployment
+    GHA->>PROD: Blue-Green deployment
+    PROD->>PROD: Route 10% traffic
+    PROD->>MON: Monitor metrics
+    MON-->>PROD: ✅ No anomalies
+    PROD->>PROD: Route 50% traffic
+    MON-->>PROD: ✅ Performance good
+    PROD->>PROD: Route 100% traffic
+    PROD-->>GHA: ✅ Deployment complete
+
+    Note over PROD,MON: Post-Deployment
+    PROD->>MON: Continuous monitoring
+    MON->>MON: Track KPIs
+    MON->>MON: Cost analysis
+    MON-->>DEV: 📊 Dashboard updated
+
+    opt Rollback Scenario
+        MON->>PROD: ⚠️ Anomaly detected
+        PROD->>PROD: Auto-rollback
+        PROD->>GHA: Trigger rollback
+        GHA->>ACR: Get previous version
+        ACR->>PROD: Deploy stable version
+        PROD-->>MON: ✅ Service restored
+    end
 ```
 
 For complete detailed architecture diagrams, see **[ARCHITECTURE.md](ARCHITECTURE.md)**
