@@ -9,9 +9,11 @@ def filter_well_info(data: Dict[str, Any]) -> Dict[str, Any]:
     # The Well's known information to exclude
     well_info = {
         'company_names': ['The Well Recruiting Solutions', 'The Well', 'Well Recruiting'],
+        'contact_names': ['Steve Perry', 'steven perry'],  # Prevent Steve Perry from being extracted as candidate
+        'job_titles': ['Founder/CEO', 'CEO', 'Founder'],  # When combined with The Well
         'addresses': ['21501 N. 78th Ave #100', 'Peoria, AZ 85382', 'Peoria, AZ', 'Peoria'],
         'phones': ['806.500.4359', '8065004359', '(806) 500-4359'],
-        'emails': ['@emailthewell.com', '@thewell.com']
+        'emails': ['@emailthewell.com', '@thewell.com', 'steve@emailthewell.com']
     }
 
     filtered_data = data.copy()
@@ -21,6 +23,26 @@ def filter_well_info(data: Dict[str, Any]) -> Dict[str, Any]:
         for well_company in well_info['company_names']:
             if well_company.lower() in filtered_data['company_name'].lower():
                 filtered_data['company_name'] = None
+                break
+
+    # Check and clear candidate/contact name if it's Steve Perry
+    if filtered_data.get('candidate_name'):
+        for well_contact in well_info['contact_names']:
+            if well_contact.lower() in filtered_data['candidate_name'].lower():
+                filtered_data['candidate_name'] = None
+                break
+
+    if filtered_data.get('contact_name'):
+        for well_contact in well_info['contact_names']:
+            if well_contact.lower() in filtered_data['contact_name'].lower():
+                filtered_data['contact_name'] = None
+                break
+
+    # Check and clear job title if it's The Well's CEO/Founder (when company is also The Well)
+    if filtered_data.get('job_title') and not filtered_data.get('company_name'):  # Only clear if no company specified
+        for well_title in well_info['job_titles']:
+            if well_title.lower() in filtered_data['job_title'].lower():
+                filtered_data['job_title'] = None
                 break
 
     # Check and clear location if it's The Well's address
@@ -46,6 +68,40 @@ def filter_well_info(data: Dict[str, Any]) -> Dict[str, Any]:
             if well_email in filtered_data['email'].lower():
                 filtered_data['email'] = None
                 break
+
+    # Also check candidate_email field
+    if filtered_data.get('candidate_email'):
+        for well_email in well_info['emails']:
+            if well_email in filtered_data['candidate_email'].lower():
+                filtered_data['candidate_email'] = None
+                break
+
+    # Filter structured records (for newer LangGraph format)
+    if filtered_data.get('company_record'):
+        company_record = filtered_data['company_record']
+        if company_record.get('company_name'):
+            for well_company in well_info['company_names']:
+                if well_company.lower() in company_record['company_name'].lower():
+                    filtered_data['company_record'] = None
+                    break
+
+    if filtered_data.get('contact_record'):
+        contact_record = filtered_data['contact_record']
+        # Check first_name and last_name
+        full_name = f"{contact_record.get('first_name', '')} {contact_record.get('last_name', '')}".strip()
+        if full_name:
+            for well_contact in well_info['contact_names']:
+                if well_contact.lower() in full_name.lower():
+                    filtered_data['contact_record'] = None
+                    break
+
+        # Check email in contact record
+        if contact_record.get('email'):
+            for well_email in well_info['emails']:
+                if well_email in contact_record['email'].lower():
+                    if filtered_data.get('contact_record'):
+                        filtered_data['contact_record']['email'] = None
+                    break
 
     return filtered_data
 
