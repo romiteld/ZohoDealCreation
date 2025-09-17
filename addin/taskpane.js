@@ -1032,7 +1032,7 @@ function populateForm(data) {
 
     // Company owner information from structured backend data
     if (data.companyOwner) {
-        setValueWithConfidence('companyOwner', data.companyOwner, data);
+        setValueWithConfidence('creditDetail', data.companyOwner, data);
     }
 
     // Set company source based on extracted data
