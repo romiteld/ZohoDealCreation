@@ -1244,6 +1244,9 @@ function calculateAndShowExtractionConfidence(data) {
  * Set form field value with confidence indicator
  */
 function setValueWithConfidence(fieldId, value, extractedData, confidenceScore = null) {
+    // Debug logging to track calls
+    console.log(`🔍 setValueWithConfidence called with fieldId: "${fieldId}", value: "${value}"`);
+
     // Map legacy field names to current field IDs
     const fieldIdMap = {
         'companyOwner': 'creditDetail'  // Backend sends companyOwner, but form uses creditDetail
@@ -1251,6 +1254,8 @@ function setValueWithConfidence(fieldId, value, extractedData, confidenceScore =
 
     // Use mapped field ID if available, otherwise use original
     const actualFieldId = fieldIdMap[fieldId] || fieldId;
+
+    console.log(`🔄 Field mapping: "${fieldId}" → "${actualFieldId}"`);
 
     const field = document.getElementById(actualFieldId);
     if (field) {
@@ -1278,6 +1283,7 @@ function setValueWithConfidence(fieldId, value, extractedData, confidenceScore =
         console.log(`Set ${actualFieldId} to: "${safeValue}" (confidence: ${confidence})`);
     } else {
         console.error(`ERROR: Element with ID '${actualFieldId}' not found in DOM! (Original field: ${fieldId})`);
+        console.error('Call stack:', new Error().stack);
     }
 }
 

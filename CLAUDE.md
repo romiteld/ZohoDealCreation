@@ -218,11 +218,13 @@ class EmailProcessingState(TypedDict):
 3. **Validate Node**: Data normalization and structured record creation
 
 ### Research Node Architecture
-- **Firecrawl v2 Integration**: `app/firecrawl_v2_fire_agent.py` with Extract API
+- **Firecrawl v2 Integration**: `app/firecrawl_v2_fire_agent.py` with FIRE-1 agent using Scrape API
 - **Apollo.io Enrichment**: Contact/company data from REST API
+- **Web Search Client**: Frontend button in Outlook Add-in with progress indicator
 - **Dynamic Import**: Falls back gracefully if Firecrawl modules missing
-- **Company Research**: Enriches `CompanyRecord` with phone, website, location data
+- **Company Research**: Enriches `CompanyRecord` with phone, website, location data via regex parsing
 - **Contact Research**: Populates `ContactRecord.city/state` from company location
+- **API Endpoint**: `/api/firecrawl/enrich` for direct company domain enrichment
 
 ### Error Handling
 - Fallback to `SimplifiedEmailExtractor` on errors
@@ -444,6 +446,20 @@ Target significant cost reductions through intelligent caching and adaptive reas
 - Eliminated ChromaDB/SQLite issues
 - Reduced processing: 45s → 2-3s
 - Docker image v10 on Container Apps
+
+### 2025-09-17: Firecrawl v2 Web Search Client Complete Implementation
+✅ **Full Firecrawl v2 Integration with Web Search Client**
+- **Web Search Client Button**: Added to Outlook Add-in taskpane with progress indicator
+- **Progress Tracking**: 5-step progress indicator (Web Crawl → Data Extract → Company Intel → Contact Enrich → AI Analysis)
+- **API Endpoint Fix**: Corrected Firecrawl API from `/v2` to `/v1` endpoint
+- **Enhanced Data Extraction**: Regex-based parsing of company phone, email, address, LinkedIn from scraped content
+- **Graceful Fallbacks**: Switched from Extract API to Scrape API to work within token limitations
+- **Container Deployment**: Successfully deployed as revision `complete-20250917-053434`
+- **Key Components**:
+  - `app/firecrawl_v2_fire_agent.py`: Core FIRE-1 agent with company research capabilities
+  - `app/firecrawl_v2_adapter.py`: LangGraph interface adapter for workflow integration
+  - `addin/taskpane.js`: Frontend integration with progress indicator and form population
+  - `/api/firecrawl/enrich`: Backend REST endpoint for company enrichment
 
 ### 2025-09-17: Frontend Data Mapping Architecture Fix
 ✅ **Critical Frontend Bug Fixes**
