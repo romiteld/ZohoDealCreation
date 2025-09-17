@@ -1078,10 +1078,13 @@ class EmailProcessingWorkflow:
             YOUR TASK: Extract data into Company Record, Contact Record, and Deal Record fields:
 
             === COMPANY RECORD FIELDS ===
-            - company_name: The CANDIDATE'S company name (extract from their email domain if possible, e.g., "mariner.com" → "Mariner")
-              NOT the sender's company (NOT "The Well Recruiting Solutions")
-            - company_phone: CANDIDATE'S company phone number if mentioned
-            - company_website: CANDIDATE'S company website (derive from email domain if not explicitly stated)
+            ⚠️ CRITICAL: These fields are for the CANDIDATE'S EMPLOYER, NOT The Well!
+            - company_name: The company where the CANDIDATE/CLIENT works
+              • Extract from THEIR email domain (e.g., roy.janse@mariner.com → "Mariner")
+              • NEVER use "The Well Recruiting Solutions" here
+              • If candidate email is steve@example.com → company_name: "Example"
+            - company_phone: The CANDIDATE'S company phone (NOT The Well's phone)
+            - company_website: The CANDIDATE'S company website (e.g., mariner.com → "https://mariner.com")
             - company_source: How sourced (e.g., "Conference/Trade Show", "Referral", "Email Inbound")
             - source_detail: Specific detail (e.g., "FutureProof 2026", referrer name)
             - who_gets_credit: "BD Rep", "Affiliate", or "Both"
@@ -1149,11 +1152,14 @@ class EmailProcessingWorkflow:
         EMAIL CONTENT:
         {state['email_content']}
 
-        IMPORTANT INSTRUCTIONS:
+        ⚠️ CRITICAL EXTRACTION RULES - READ CAREFULLY:
         1. If this is a forwarded email, extract candidate info from the ORIGINAL/FORWARDED message
-        2. Extract the CANDIDATE'S company from their email domain (e.g., roy.janse@mariner.com → company_name: "Mariner")
-        3. DO NOT use "The Well Recruiting Solutions" as the candidate's company - that's the sender/recruiter
-        4. The company_name field should be the company where the CANDIDATE works, not where the email came from
+        2. COMPANY FIELDS = CANDIDATE'S EMPLOYER INFORMATION:
+           - If candidate email is roy.janse@mariner.com → company_name: "Mariner" (NOT "The Well")
+           - company_phone = Mariner's phone number (NOT The Well's phone)
+           - company_website = "https://mariner.com" (NOT The Well's website)
+        3. NEVER use "The Well Recruiting Solutions" for company_name - that's the RECRUITER, not the CANDIDATE
+        4. The Well = RECRUITER/SENDER. The company fields are for where the CANDIDATE works!
 
         Extract and return the information in the required JSON format."""
         
@@ -1594,29 +1600,49 @@ class EmailProcessingWorkflow:
             
             # Determine what to research
             research_domain = None
-            
+
+            # Log extracted data for debugging
+            logger.info(f"🔍 DEBUG - Research Node Input:")
+            logger.info(f"  - Candidate Email: {candidate_email}")
+            logger.info(f"  - Candidate Website: {candidate_website}")
+            logger.info(f"  - Company Guess: {company_guess}")
+            logger.info(f"  - Sender Domain: {sender_domain}")
+
             # Priority 1: Use candidate's website if available
             if candidate_website:
                 import re
                 domain_match = re.search(r'https?://(?:www\.)?([^/]+)', candidate_website)
                 if domain_match:
                     research_domain = domain_match.group(1)
-                    logger.info(f"Using candidate website for research: {research_domain}")
-            
-            # Priority 2: Use candidate's email domain (skip generic domains)
+                    logger.info(f"✅ Using candidate website for research: {research_domain}")
+
+            # Priority 2: Use candidate's email domain (for clients/candidates with company emails)
             if not research_domain and candidate_email and '@' in candidate_email:
                 email_domain = candidate_email.split('@')[1]
                 # Skip generic email domains for company research
                 generic_domains = [
-                    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 
+                    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
                     'aol.com', 'icloud.com', 'me.com', 'mac.com', 'msn.com',
                     'live.com', 'protonmail.com', 'ymail.com'
                 ]
                 if email_domain not in generic_domains:
                     research_domain = email_domain
-                    logger.info(f"Using candidate email domain for research: {research_domain}")
+                    logger.info(f"✅ Using candidate/client email domain for research: {research_domain}")
                 else:
-                    logger.info(f"Skipping generic email domain: {email_domain}")
+                    logger.info(f"⚠️ Candidate has generic email domain: {email_domain}")
+                    # For clients/candidates with generic emails, try to infer company from name
+                    if company_guess and company_guess.lower() not in ['unknown', 'n/a', '']:
+                        # Try to construct possible domain from company name
+                        import re
+                        # Clean company name for domain construction
+                        clean_name = re.sub(r'[^\w\s]', '', company_guess.lower())
+                        clean_name = clean_name.replace(' ', '')
+                        # Common domain extensions to try
+                        extensions = ['.com', '.org', '.net', '.co', '.io', '.solutions', '.biz', '.info', '.us', '.ai', '.tech']
+                        possible_domains = [f"{clean_name}{ext}" for ext in extensions]
+                        # Also try with www prefix for some common ones
+                        possible_domains.extend([f"www.{clean_name}.com", f"www.{clean_name}.org"])
+                        logger.info(f"🔍 Will try to research company '{company_guess}' via web search with multiple TLDs")
             
             # Search for candidate information if we have a name
             candidate_info = {}

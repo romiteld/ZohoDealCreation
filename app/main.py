@@ -2328,7 +2328,24 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
 
                 existing_record = await req.app.state.duplicate_checker.check_database_duplicate(duplicate_data)
 
-                if existing_record and req.app.state.duplicate_checker.should_block_duplicate(existing_record):
+                # Also check Zoho CRM for duplicates
+                zoho_duplicate = None
+                if hasattr(req.app.state, 'zoho_integration') and req.app.state.zoho_integration:
+                    zoho_duplicate = await req.app.state.duplicate_checker.check_zoho_duplicate_flexible(
+                        req.app.state.zoho_integration,
+                        duplicate_data
+                    )
+                    if zoho_duplicate:
+                        logger.warning(f"Found duplicate in Zoho CRM: {zoho_duplicate}")
+                        # Create existing_record format for consistency
+                        existing_record = {
+                            'zoho_contact_id': zoho_duplicate.get('contact_id'),
+                            'zoho_account_id': zoho_duplicate.get('account_id'),
+                            'time_since_creation': 0,  # Zoho duplicate is immediate block
+                            'match_type': zoho_duplicate.get('match_type', 'zoho_match')
+                        }
+
+                if existing_record and (req.app.state.duplicate_checker.should_block_duplicate(existing_record) or zoho_duplicate):
                     # Duplicate found within time window - block creation
                     time_since = existing_record.get('time_since_creation', 0)
                     logger.warning(
