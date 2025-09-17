@@ -635,6 +635,7 @@
                         <label class="form-label">Deal Name (Auto-generated)</label>
                         <input type="text" class="form-control" id="dealName" readonly
                                placeholder="[Job Title] ([Location]) [Company Name]">
+                        <span id="dealNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
                 <div class="row">
@@ -645,10 +646,12 @@
                             <option value="Active">Active</option>
                             <option value="Qualified">Qualified</option>
                         </select>
+                        <span id="pipelineIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                     <div class="col-md-6 mb-3">
                         <label class="form-label">Closing Date</label>
                         <input type="date" class="form-control" id="closingDate">
+                        <span id="closingDateIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
             </div>
@@ -672,11 +675,13 @@
                                 <option value="Affiliate">Affiliate</option>
                                 <option value="Both">Both</option>
                             </select>
+                            <span id="whoGetsCreditIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                         </div>
                         <div class="col-md-6 mb-3">
                             <label class="form-label">Credit Detail (Name)</label>
                             <input type="text" class="form-control" id="creditDetail"
                                    placeholder="Person who gets credit">
+                            <span id="creditDetailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                             <!-- Hidden field for backward compatibility with backend mapping -->
                             <input type="hidden" id="companyOwner">
                         </div>
@@ -710,6 +715,7 @@
                     <div class="mb-3">
                         <label class="form-label">Notes</label>
                         <textarea class="form-control" id="notes" rows="3" placeholder="Any additional notes or context..."></textarea>
+                        <span id="notesIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                     <!-- Container for custom fields -->
                     <div id="customFieldsContainer"></div>
@@ -832,6 +838,6 @@
 
     <!-- Include the taskpane JavaScript -->
     <script src="config.js"></script>
-    <script src="taskpane.js?v=debug-20250917-1"></script>
+    <script src="taskpane.js?v=indicators-20250917-2"></script>
 </body>
 </html>
