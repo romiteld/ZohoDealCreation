@@ -7061,6 +7061,106 @@ async def delete_enrichment_schedule(request: Request, schedule_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ==================== FIRECRAWL V2 FIRE AGENT ENDPOINTS ====================
+
+@app.post("/api/firecrawl/enrich", dependencies=[Depends(verify_api_key)])
+async def firecrawl_enrich_data(
+    email_data: Dict[str, Any],
+    extracted_data: Optional[Dict[str, Any]] = None
+):
+    """
+    Enrich email/company data using Firecrawl v2 Fire Agent
+
+    This endpoint provides web scraping and company research capabilities
+    using the Firecrawl v2 API with FIRE-1 agent for enhanced data extraction.
+
+    Args:
+        email_data: Dictionary containing sender email, name, and email body
+        extracted_data: Previously extracted data with company information
+
+    Returns:
+        Enriched company and contact information from web sources
+    """
+    try:
+        logger.info("🔍 Firecrawl v2 enrichment request received")
+
+        # Import the Firecrawl v2 adapter
+        from app.firecrawl_v2_adapter import FirecrawlV2Agent
+
+        # Initialize the Firecrawl service
+        firecrawl_service = FirecrawlV2Agent()
+
+        if not firecrawl_service:
+            raise HTTPException(
+                status_code=503,
+                detail="Firecrawl v2 service not available"
+            )
+
+        # Perform enrichment
+        enrichment_result = await firecrawl_service.enrich_email_data(
+            email_data=email_data,
+            extracted_data=extracted_data
+        )
+
+        logger.info(f"✅ Firecrawl enrichment completed: {enrichment_result.get('success', False)}")
+
+        return {
+            "status": "success",
+            "data": enrichment_result,
+            "enrichments": enrichment_result.get("enrichments", {}),
+            "source": "firecrawl_v2_fire_agent"
+        }
+
+    except ImportError as e:
+        logger.error(f"❌ Firecrawl v2 import error: {e}")
+        raise HTTPException(
+            status_code=503,
+            detail="Firecrawl v2 Fire Agent not available - check dependencies"
+        )
+    except Exception as e:
+        logger.error(f"❌ Firecrawl enrichment error: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Enrichment failed: {str(e)}")
+
+
+@app.get("/api/firecrawl/status", dependencies=[Depends(verify_api_key)])
+async def firecrawl_service_status():
+    """
+    Check Firecrawl v2 Fire Agent service status and configuration
+    """
+    try:
+        from app.firecrawl_v2_adapter import FirecrawlV2Agent
+
+        # Test service initialization
+        firecrawl_service = FirecrawlV2Agent()
+
+        return {
+            "status": "available" if firecrawl_service else "unavailable",
+            "service": "firecrawl_v2_fire_agent",
+            "initialized": bool(firecrawl_service),
+            "endpoints": {
+                "enrich": "/api/firecrawl/enrich",
+                "status": "/api/firecrawl/status"
+            }
+        }
+
+    except ImportError as e:
+        return {
+            "status": "unavailable",
+            "service": "firecrawl_v2_fire_agent",
+            "initialized": False,
+            "error": f"Import failed: {str(e)}",
+            "endpoints": {}
+        }
+    except Exception as e:
+        return {
+            "status": "error",
+            "service": "firecrawl_v2_fire_agent",
+            "initialized": False,
+            "error": str(e),
+            "endpoints": {}
+        }
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8000)

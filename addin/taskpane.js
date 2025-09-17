@@ -315,6 +315,9 @@ async function initializeTaskpane() {
         document.getElementById('btnApplyCorrections').addEventListener('click', applyNaturalLanguageCorrections);
         document.getElementById('btnSuggestFixes').addEventListener('click', showSuggestedFixes);
 
+        // Web Search Client button
+        document.getElementById('btnWebSearchClient').addEventListener('click', handleWebSearchClient);
+
         // Apollo enrichment button
         document.getElementById('btnApolloEnrich').addEventListener('click', handleApolloEnrichment);
         
@@ -1031,8 +1034,14 @@ function populateForm(data) {
     setValueWithConfidence('companyWebsite', data.companyWebsite || data.company_website || '', data);
 
     // Company owner information from structured backend data
+    // Map to both fields for compatibility
     if (data.companyOwner) {
         setValueWithConfidence('creditDetail', data.companyOwner, data);
+        // Also set the hidden companyOwner field for any code that might reference it
+        const companyOwnerField = document.getElementById('companyOwner');
+        if (companyOwnerField) {
+            companyOwnerField.value = data.companyOwner;
+        }
     }
 
     // Set company source based on extracted data
@@ -1082,6 +1091,27 @@ function populateForm(data) {
 
     // Calculate extraction confidence and show Express Send banner if high
     calculateAndShowExtractionConfidence(data);
+
+    // ============ WEB SEARCH CLIENT (FIRECRAWL V2) ============
+    // Web Search Client is available via the "Web Search Client" button
+    const webSearchBtn = document.getElementById('btnWebSearchClient');
+    if (shouldEnhanceWithFirecrawl(data)) {
+        console.log('🔍 Web Search Client available - company website or business email found');
+        // Show Web Search Client button when enhancement is available
+        if (webSearchBtn) {
+            webSearchBtn.style.display = 'inline-block';
+            webSearchBtn.classList.remove('d-none'); // Remove any Bootstrap hide classes
+            // Add a data attribute to track that Web Search should be visible
+            webSearchBtn.setAttribute('data-firecrawl-available', 'true');
+        }
+    } else {
+        console.log('⚡ Web Search Client requires a company website or business email');
+        // Hide Web Search Client button when not applicable
+        if (webSearchBtn) {
+            webSearchBtn.style.display = 'none';
+            webSearchBtn.setAttribute('data-firecrawl-available', 'false');
+        }
+    }
 
     // ============ APOLLO ENHANCEMENT ============
     // Apollo enrichment is now available via the "Enrich" button
@@ -1216,7 +1246,15 @@ function calculateAndShowExtractionConfidence(data) {
  * Set form field value with confidence indicator
  */
 function setValueWithConfidence(fieldId, value, extractedData, confidenceScore = null) {
-    const field = document.getElementById(fieldId);
+    // Map legacy field names to current field IDs
+    const fieldIdMap = {
+        'companyOwner': 'creditDetail'  // Backend sends companyOwner, but form uses creditDetail
+    };
+
+    // Use mapped field ID if available, otherwise use original
+    const actualFieldId = fieldIdMap[fieldId] || fieldId;
+
+    const field = document.getElementById(actualFieldId);
     if (field) {
         // Ensure value is a string and not an object or array
         let safeValue = '';
@@ -1236,12 +1274,12 @@ function setValueWithConfidence(fieldId, value, extractedData, confidenceScore =
         field.value = safeValue;
 
         // Calculate confidence based on extraction quality
-        const confidence = calculateFieldConfidence(fieldId, safeValue, extractedData, confidenceScore);
-        updateFieldConfidenceIndicator(fieldId, safeValue, confidence);
+        const confidence = calculateFieldConfidence(actualFieldId, safeValue, extractedData, confidenceScore);
+        updateFieldConfidenceIndicator(actualFieldId, safeValue, confidence);
 
-        console.log(`Set ${fieldId} to: "${safeValue}" (confidence: ${confidence})`);
+        console.log(`Set ${actualFieldId} to: "${safeValue}" (confidence: ${confidence})`);
     } else {
-        console.error(`ERROR: Element with ID '${fieldId}' not found in DOM!`);
+        console.error(`ERROR: Element with ID '${actualFieldId}' not found in DOM! (Original field: ${fieldId})`);
     }
 }
 
@@ -1489,7 +1527,15 @@ function buildComprehensiveNotes(data) {
  * Set form field value with type checking
  */
 function setValue(fieldId, value) {
-    const field = document.getElementById(fieldId);
+    // Map legacy field names to current field IDs
+    const fieldIdMap = {
+        'companyOwner': 'creditDetail'  // Backend sends companyOwner, but form uses creditDetail
+    };
+
+    // Use mapped field ID if available, otherwise use original
+    const actualFieldId = fieldIdMap[fieldId] || fieldId;
+
+    const field = document.getElementById(actualFieldId);
     if (field) {
         // Ensure value is a string and not an object or array
         let safeValue = '';
@@ -1507,9 +1553,9 @@ function setValue(fieldId, value) {
         }
 
         field.value = safeValue;
-        console.log(`Set ${fieldId} to: "${safeValue}" (type: ${typeof safeValue})`);
+        console.log(`Set ${actualFieldId} to: "${safeValue}" (type: ${typeof safeValue})`);
     } else {
-        console.error(`ERROR: Element with ID '${fieldId}' not found in DOM!`);
+        console.error(`ERROR: Element with ID '${actualFieldId}' not found in DOM! (Original field: ${fieldId})`);
         // List all available input elements for debugging
         const inputs = document.querySelectorAll('input, select, textarea');
         console.log('Available form elements:', Array.from(inputs).map(el => el.id).filter(id => id));
@@ -3041,6 +3087,32 @@ function shouldEnhanceWithApollo(data) {
     return !!hasName;
 }
 
+function shouldEnhanceWithFirecrawl(data) {
+    // Check if we have a company website or business email domain for web search
+    const hasWebsite = data.companyWebsite || data.company_website || data.website;
+    const hasEmail = data.candidateEmail || data.candidate_email || data.email;
+    const hasCompany = data.firmName || data.firm_name || data.company_name;
+
+    // Check if email has a business domain (not generic)
+    let hasBusinessEmail = false;
+    if (hasEmail && hasEmail.includes('@')) {
+        const emailDomain = hasEmail.split('@')[1];
+        const genericDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com', 'aol.com'];
+        hasBusinessEmail = !genericDomains.includes(emailDomain);
+    }
+
+    console.log('Firecrawl enhancement check:', {
+        hasWebsite: !!hasWebsite,
+        hasEmail: !!hasEmail,
+        hasBusinessEmail: hasBusinessEmail,
+        hasCompany: !!hasCompany,
+        firecrawlAvailable: !!(hasWebsite || hasBusinessEmail)
+    });
+
+    // Firecrawl is available if we have a website or business email
+    return !!(hasWebsite || hasBusinessEmail);
+}
+
 /**
  * Enhance form data with Apollo intelligence using REST API
  * @param {Object} data - Current extracted data
@@ -3319,6 +3391,174 @@ async function enhanceWithApolloData(data) {
 }
 
 /**
+ * Handle Web Search Client button click (Firecrawl v2)
+ */
+async function handleWebSearchClient() {
+    console.log('Web Search Client button clicked');
+
+    // Gather current form data for company domain
+    const currentData = {
+        companyWebsite: document.getElementById('companyWebsite')?.value || '',
+        firmName: document.getElementById('firmName')?.value || '',
+        candidateEmail: document.getElementById('candidateEmail')?.value || '',
+        contactFirstName: document.getElementById('contactFirstName')?.value || '',
+        contactLastName: document.getElementById('contactLastName')?.value || ''
+    };
+
+    // Determine what domain to research
+    let researchDomain = null;
+
+    if (currentData.companyWebsite) {
+        // Extract domain from website URL
+        const urlMatch = currentData.companyWebsite.match(/https?:\/\/(?:www\.)?([^\/]+)/);
+        researchDomain = urlMatch ? urlMatch[1] : currentData.companyWebsite;
+    } else if (currentData.candidateEmail && currentData.candidateEmail.includes('@')) {
+        // Use email domain if not generic
+        const emailDomain = currentData.candidateEmail.split('@')[1];
+        const genericDomains = ['gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com'];
+        if (!genericDomains.includes(emailDomain)) {
+            researchDomain = emailDomain;
+        }
+    }
+
+    if (!researchDomain) {
+        showNotification('Company website or business email required for web search', 'warning');
+        return;
+    }
+
+    // Show progress indicator before starting
+    showFirecrawlEnrichmentProgress();
+
+    try {
+        // Perform Firecrawl web search
+        await enrichWithFirecrawl(currentData, researchDomain);
+    } finally {
+        // Hide progress indicator when done
+        hideFirecrawlEnrichmentProgress();
+    }
+}
+
+/**
+ * Enrich data using Firecrawl v2 Fire Agent
+ */
+async function enrichWithFirecrawl(data, researchDomain) {
+    try {
+        console.log('🔍 Starting Firecrawl v2 web search for domain:', researchDomain);
+
+        // Update progress
+        updateFirecrawlProgress(15, 'Initializing web search...');
+
+        // Prepare email data for Firecrawl enrichment
+        const emailData = {
+            sender_email: data.candidateEmail || '',
+            sender_name: `${data.contactFirstName || ''} ${data.contactLastName || ''}`.trim(),
+            body: `Company: ${data.firmName || ''}`
+        };
+
+        // Prepare extracted data with company domain
+        const extractedData = {
+            company_record: {
+                company_name: data.firmName || '',
+                company_domain: researchDomain
+            }
+        };
+
+        updateFirecrawlProgress(30, 'Connecting to Firecrawl v2 API...');
+        console.log('Calling Firecrawl API with:', { emailData, extractedData });
+
+        // Call Firecrawl v2 adapter endpoint
+        const response = await fetch(`${API_BASE_URL}/api/firecrawl/enrich`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
+            },
+            body: JSON.stringify({
+                email_data: emailData,
+                extracted_data: extractedData
+            })
+        });
+
+        updateFirecrawlProgress(50, 'Scraping company website...');
+
+        if (!response.ok) {
+            throw new Error(`Firecrawl API error: ${response.status}`);
+        }
+
+        updateFirecrawlProgress(75, 'Analyzing company data...');
+        const enrichedData = await response.json();
+        console.log('✅ Firecrawl enrichment successful:', enrichedData);
+
+        // Update form fields with enriched data
+        if (enrichedData.enrichments) {
+            const enrichments = enrichedData.enrichments;
+
+            // Update company information
+            if (enrichments.company) {
+                const company = enrichments.company;
+
+                console.log('Updating company fields with Firecrawl data:', company);
+
+                // Update company fields
+                if (company.phone) {
+                    updateFieldValue('companyPhone', company.phone);
+                    console.log('Updated company phone:', company.phone);
+                }
+
+                if (company.website) {
+                    updateFieldValue('companyWebsite', company.website);
+                    console.log('Updated company website:', company.website);
+                }
+
+                if (company.description) {
+                    updateFieldValue('companyDescription', company.description);
+                    console.log('Updated company description');
+                }
+
+                // Update location from headquarters
+                if (company.headquarters) {
+                    updateFieldValue('companyLocation', company.headquarters);
+                    console.log('Updated company location:', company.headquarters);
+                }
+            }
+
+            // Update contact information
+            if (enrichments.contact) {
+                const contact = enrichments.contact;
+
+                console.log('Updating contact fields with Firecrawl data:', contact);
+
+                if (contact.phone) {
+                    updateFieldValue('candidatePhone', contact.phone);
+                    console.log('Updated contact phone:', contact.phone);
+                }
+
+                if (contact.location) {
+                    updateFieldValue('location', contact.location);
+                    console.log('Updated contact location:', contact.location);
+                }
+
+                if (contact.linkedin_url) {
+                    updateFieldValue('linkedinUrl', contact.linkedin_url);
+                    console.log('Updated LinkedIn URL:', contact.linkedin_url);
+                }
+            }
+
+            updateFirecrawlProgress(100, 'Enrichment complete!');
+            showNotification('✅ Web search completed! Company data enriched.', 'success');
+        } else {
+            updateFirecrawlProgress(100, 'Search complete - no new data found');
+            console.log('No enrichments found in Firecrawl response');
+            showNotification('⚠️ Web search completed but no additional data found.', 'warning');
+        }
+
+    } catch (error) {
+        console.error('❌ Firecrawl enrichment error:', error);
+        showNotification(`❌ Web search failed: ${error.message}`, 'error');
+    }
+}
+
+/**
  * Handle Apollo enrichment button click
  */
 async function handleApolloEnrichment() {
@@ -3448,6 +3688,107 @@ function animateApolloProgress() {
             setTimeout(() => hideApolloEnrichmentProgress(), 2000);
         }
     }, 1500); // 1.5 seconds per step
+}
+
+/**
+ * Show Firecrawl enrichment progress indicator
+ */
+function showFirecrawlEnrichmentProgress() {
+    // Check if progress element already exists
+    let progressElement = document.getElementById('firecrawlEnrichmentProgress');
+
+    if (!progressElement) {
+        // Create progress element
+        progressElement = document.createElement('div');
+        progressElement.id = 'firecrawlEnrichmentProgress';
+        progressElement.className = 'firecrawl-enrichment-progress';
+        progressElement.innerHTML = `
+            <div class="firecrawl-progress-header">
+                <div class="firecrawl-progress-title">
+                    <span class="icon">🔍</span> Web Search Client (Firecrawl v2)
+                </div>
+                <div class="firecrawl-progress-percentage">0%</div>
+            </div>
+            <div class="firecrawl-progress-bar">
+                <div class="firecrawl-progress-fill" style="width: 0%"></div>
+            </div>
+            <div class="firecrawl-progress-steps">
+                <div class="firecrawl-progress-step active">Web Crawl</div>
+                <div class="firecrawl-progress-step">Data Extract</div>
+                <div class="firecrawl-progress-step">Company Intel</div>
+                <div class="firecrawl-progress-step">Contact Enrich</div>
+                <div class="firecrawl-progress-step">AI Analysis</div>
+            </div>
+            <div class="firecrawl-progress-message">Initializing...</div>
+        `;
+
+        // Insert after the Express Send banner or at the top
+        const expressBanner = document.getElementById('expressSendBanner');
+        const previewForm = document.getElementById('previewForm');
+
+        if (expressBanner && expressBanner.style.display !== 'none') {
+            expressBanner.parentNode.insertBefore(progressElement, expressBanner.nextSibling);
+        } else if (previewForm) {
+            previewForm.insertBefore(progressElement, previewForm.firstChild);
+        }
+    }
+
+    // Show the progress element
+    progressElement.style.display = 'block';
+}
+
+/**
+ * Hide Firecrawl enrichment progress indicator
+ */
+function hideFirecrawlEnrichmentProgress() {
+    const progressElement = document.getElementById('firecrawlEnrichmentProgress');
+    if (progressElement) {
+        // Fade out after showing completion for 2 seconds
+        setTimeout(() => {
+            if (progressElement) {
+                progressElement.style.display = 'none';
+            }
+        }, 2000);
+    }
+}
+
+/**
+ * Update Firecrawl enrichment progress
+ * @param {number} percentage - Progress percentage
+ * @param {string} message - Progress message
+ */
+function updateFirecrawlProgress(percentage, message) {
+    const progressElement = document.getElementById('firecrawlEnrichmentProgress');
+    if (progressElement) {
+        const progressFill = progressElement.querySelector('.firecrawl-progress-fill');
+        const progressPercent = progressElement.querySelector('.firecrawl-progress-percentage');
+        const progressMessage = progressElement.querySelector('.firecrawl-progress-message');
+        const progressSteps = progressElement.querySelectorAll('.firecrawl-progress-step');
+
+        if (progressFill) {
+            progressFill.style.width = `${percentage}%`;
+        }
+
+        if (progressPercent) {
+            progressPercent.textContent = `${Math.round(percentage)}%`;
+        }
+
+        if (progressMessage) {
+            progressMessage.textContent = message;
+        }
+
+        // Update step indicators based on percentage
+        progressSteps.forEach((step, index) => {
+            step.classList.remove('active', 'completed');
+            const stepPercentage = ((index + 1) / progressSteps.length) * 100;
+
+            if (percentage >= stepPercentage) {
+                step.classList.add('completed');
+            } else if (percentage >= stepPercentage - (100 / progressSteps.length)) {
+                step.classList.add('active');
+            }
+        });
+    }
 }
 
 /**

@@ -517,6 +517,9 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSuggestFixes">
                         <span class="icon">💡</span> Suggest Common Fixes
                     </button>
+                    <button type="button" class="btn btn-sm btn-outline-info" id="btnWebSearchClient" style="display: none;">
+                        <span class="icon">🔍</span> Web Search Client
+                    </button>
                     <button type="button" class="btn btn-sm btn-outline-success" id="btnApolloEnrich" style="display: none;">
                         <span class="icon">🚀</span> Enrich
                     </button>
@@ -674,6 +677,8 @@
                             <label class="form-label">Credit Detail (Name)</label>
                             <input type="text" class="form-control" id="creditDetail"
                                    placeholder="Person who gets credit">
+                            <!-- Hidden field for backward compatibility with backend mapping -->
+                            <input type="hidden" id="companyOwner">
                         </div>
                     </div>
                     <div class="row">

@@ -94,3 +94,6 @@ aiofiles==23.2.1
 
 # Scheduled job management
 croniter==1.4.1
+
+# Firecrawl v2 SDK for web scraping and enrichment
+firecrawl-py==4.3.6

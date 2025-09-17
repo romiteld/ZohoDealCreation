@@ -1583,16 +1583,16 @@ class EmailProcessingWorkflow:
             from app.firecrawl_research import CompanyResearchService
             from app.redis_cache_manager import RedisCacheManager
 
-            # Import the supercharged extractor for enhanced enrichment
+            # Import the Firecrawl v2 Fire Agent for enhanced enrichment
             try:
-                from app.firecrawl_v2_supercharged import UltraEnrichmentService
-                ultra_service = UltraEnrichmentService()
+                from app.firecrawl_v2_adapter import FirecrawlV2Agent
+                ultra_service = FirecrawlV2Agent()
                 use_ultra_enrichment = True
-                logger.info("✅ Using Firecrawl v2 Supercharged for enhanced enrichment")
-            except ImportError:
+                logger.info("✅ Using Firecrawl v2 Fire Agent for enhanced enrichment")
+            except ImportError as e:
                 ultra_service = None
                 use_ultra_enrichment = False
-                logger.info("⚠️ Firecrawl v2 Supercharged not available, using standard service")
+                logger.warning(f"⚠️ Firecrawl v2 Fire Agent not available: {e}")
 
             research_service = CompanyResearchService()
             cache_manager = RedisCacheManager()
