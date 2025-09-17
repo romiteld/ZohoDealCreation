@@ -1950,8 +1950,9 @@ class EmailProcessingWorkflow:
             "candidate_name": extracted.get('candidate_name'),
             "job_title": extracted.get('job_title'),
             "location": extracted.get('location'),
-            # Don't use research company if it's generic like "Example" or domain-based guesses
+            # Use extracted company name first, then research if confident
             "company_name": (
+                extracted.get('company_name') or
                 extracted.get('company_guess') or
                 (research.get('company_name') if research.get('confidence', 0) > 0.7 else None)
             ),
@@ -1959,12 +1960,16 @@ class EmailProcessingWorkflow:
             "referrer_email": extracted.get('referrer_email'),
             # Prioritize extracted email (including from Calendly), fallback to Firecrawl research
             "email": extracted.get('email') or research.get('email'),
-            # Prioritize extracted phone (including from Calendly), fallback to Firecrawl research
-            "phone": extracted.get('phone') or research.get('phone'),
+            # Company phone from research (NOT candidate's personal phone)
+            "company_phone": research.get('phone'),
+            # Candidate's personal phone from extraction
+            "phone": extracted.get('phone'),
             # Prioritize extracted LinkedIn, fallback to Firecrawl research
             "linkedin_url": extracted.get('linkedin_url') or research.get('linkedin_url'),
             "notes": extracted.get('notes'),
-            # Use Firecrawl website if found
+            # Company website from research
+            "company_website": research.get('website') or f"https://{research.get('company_domain', '')}" if research.get('company_domain') else None,
+            # Legacy website field for backward compatibility
             "website": research.get('website') or research.get('company_domain'),
             "industry": research.get('industry'),  # From research if available
             "source": source,
@@ -2006,30 +2011,53 @@ class EmailProcessingWorkflow:
             first_name = extracted.get('first_name', '')
             last_name = extracted.get('last_name', '')
 
-        # Create Company Record - prioritize Apollo.io research data
+        # Create Company Record - prioritize research data (Apollo/Firecrawl) over extraction
         company_record = CompanyRecord(
-            company_name=extracted.get('company_name') or extracted.get('company_guess') or validated_data.get('company_name'),
-            phone=research.get('phone') or extracted.get('company_phone') or extracted.get('phone'),  # Apollo phone first
-            website=research.get('website') or extracted.get('company_website') or extracted.get('website') or validated_data.get('website'),  # Apollo website first
+            company_name=research.get('company_name') or extracted.get('company_name') or extracted.get('company_guess') or validated_data.get('company_name'),
+            phone=research.get('phone') or extracted.get('company_phone') or validated_data.get('company_phone'),  # Research phone first
+            website=research.get('website') or extracted.get('company_website') or validated_data.get('company_website'),  # Research website first
             company_source=extracted.get('company_source') or source,
             source_detail=extracted.get('source_detail') or source_detail,
             who_gets_credit=extracted.get('who_gets_credit'),
             detail=extracted.get('credit_person_name') or extracted.get('referrer_name')
         )
 
-        # Create Contact Record
+        # Get city/state from research data (Firecrawl/Apollo provide these directly now)
+        research_city = research.get('city')
+        research_state = research.get('state')
+
+        # Fallback: Try to extract city/state from full address if not provided separately
+        if (not research_city or not research_state) and research.get('address'):
+            # Parse address like "123 Main St, San Francisco, CA 94105"
+            address_parts = research.get('address', '').split(',')
+            if len(address_parts) >= 3:
+                # Typical format: street, city, state+zip
+                if not research_city:
+                    research_city = address_parts[-2].strip() if len(address_parts) > 1 else None
+                if not research_state:
+                    state_zip = address_parts[-1].strip() if address_parts else ''
+                    # Extract state (usually 2 letters before zip)
+                    import re
+                    state_match = re.search(r'([A-Z]{2})\s*\d{5}', state_zip)
+                    if state_match:
+                        research_state = state_match.group(1)
+                    else:
+                        # Might just be state without zip
+                        research_state = state_zip.strip()[:2] if len(state_zip.strip()) >= 2 else None
+
+        # Create Contact Record with research data as fallback
         contact_record = ContactRecord(
             first_name=first_name,
             last_name=last_name,
             company_name=extracted.get('contact_company_name') or company_record.company_name,
             email=extracted.get('contact_email') or extracted.get('email') or validated_data.get('email'),
             phone=extracted.get('contact_phone') or extracted.get('phone') or validated_data.get('phone'),
-            city=extracted.get('contact_city'),
-            state=extracted.get('contact_state'),
+            city=extracted.get('contact_city') or research_city,  # Use research city as fallback
+            state=extracted.get('contact_state') or research_state,  # Use research state as fallback
             source=extracted.get('contact_source') or source
         )
 
-        # Parse location for city/state if not already set
+        # Parse location for city/state if STILL not set (last resort)
         if not contact_record.city and extracted.get('location'):
             location_parts = extracted.get('location', '').split(',')
             if location_parts:

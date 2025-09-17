@@ -46,12 +46,17 @@ class CompanyResearchService:
                 - Company name (official name)
                 - Website URL
                 - Phone number (main business line)
-                - Physical address and locations
+                - Physical address (full street address)
+                - City (city name only)
+                - State (state abbreviation or full name)
+                - Zip code
+                - Country
                 - Company description/industry
                 - Key executives and contact information
                 - Social media profiles (LinkedIn, etc.)
 
-                Focus on official, verified information from the company website or reliable sources.""",
+                Focus on official, verified information from the company website or reliable sources.
+                Parse address components into separate fields.""",
                 enable_web_search=True,
                 use_fire_agent=True
             )
@@ -94,6 +99,10 @@ class CompanyResearchService:
             'website': f"https://{email_domain}",
             'phone': None,
             'address': None,
+            'city': None,
+            'state': None,
+            'zip': None,
+            'country': None,
             'industry': None,
             'description': None,
             'linkedin': None,
@@ -105,18 +114,34 @@ class CompanyResearchService:
         if isinstance(raw_data, dict):
             # Look for common field names
             for key, value in raw_data.items():
-                if 'phone' in key.lower() and value:
-                    company_info['phone'] = str(value).strip()
-                elif 'website' in key.lower() and value:
-                    company_info['website'] = str(value).strip()
-                elif 'address' in key.lower() and value:
-                    company_info['address'] = str(value).strip()
-                elif 'industry' in key.lower() and value:
-                    company_info['industry'] = str(value).strip()
-                elif 'description' in key.lower() and value:
-                    company_info['description'] = str(value).strip()
-                elif 'linkedin' in key.lower() and value:
-                    company_info['linkedin'] = str(value).strip()
+                key_lower = key.lower()
+                if value:  # Only process non-empty values
+                    value_str = str(value).strip()
+
+                    if 'phone' in key_lower and not company_info['phone']:
+                        company_info['phone'] = value_str
+                    elif 'website' in key_lower and not company_info['website'].startswith('http'):
+                        company_info['website'] = value_str if value_str.startswith('http') else f"https://{value_str}"
+                    elif 'city' in key_lower and not company_info['city']:
+                        company_info['city'] = value_str
+                    elif 'state' in key_lower and not company_info['state']:
+                        company_info['state'] = value_str
+                    elif 'zip' in key_lower and not company_info['zip']:
+                        company_info['zip'] = value_str
+                    elif 'country' in key_lower and not company_info['country']:
+                        company_info['country'] = value_str
+                    elif 'address' in key_lower and 'physical' in key_lower and not company_info['address']:
+                        # This is the street address
+                        company_info['address'] = value_str
+                    elif 'address' in key_lower and not company_info['address']:
+                        # Generic address field - might be full address
+                        company_info['address'] = value_str
+                    elif 'industry' in key_lower and not company_info['industry']:
+                        company_info['industry'] = value_str
+                    elif 'description' in key_lower and not company_info['description']:
+                        company_info['description'] = value_str
+                    elif 'linkedin' in key_lower and not company_info['linkedin']:
+                        company_info['linkedin'] = value_str
 
         return company_info
 
@@ -127,6 +152,10 @@ class CompanyResearchService:
             'website': f"https://{email_domain}",
             'phone': None,
             'address': None,
+            'city': None,
+            'state': None,
+            'zip': None,
+            'country': None,
             'industry': None,
             'description': f"Company information from {email_domain}",
             'linkedin': None,
