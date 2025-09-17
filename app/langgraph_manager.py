@@ -1078,9 +1078,10 @@ class EmailProcessingWorkflow:
             YOUR TASK: Extract data into Company Record, Contact Record, and Deal Record fields:
 
             === COMPANY RECORD FIELDS ===
-            - company_name: Official company name ONLY (e.g., "Capital Investment Advisors, LLC")
-            - company_phone: Company phone number if mentioned
-            - company_website: Company website URL if mentioned (e.g., "www.yourwealth.com")
+            - company_name: The CANDIDATE'S company name (extract from their email domain if possible, e.g., "mariner.com" → "Mariner")
+              NOT the sender's company (NOT "The Well Recruiting Solutions")
+            - company_phone: CANDIDATE'S company phone number if mentioned
+            - company_website: CANDIDATE'S company website (derive from email domain if not explicitly stated)
             - company_source: How sourced (e.g., "Conference/Trade Show", "Referral", "Email Inbound")
             - source_detail: Specific detail (e.g., "FutureProof 2026", referrer name)
             - who_gets_credit: "BD Rep", "Affiliate", or "Both"
@@ -1135,6 +1136,8 @@ class EmailProcessingWorkflow:
             - Separate names into first_name and last_name properly
             - Ensure consistency across all three record types (same company_name, source, etc.)
             - Location fields: extract city and state separately when possible
+            - COMPANY NAME: Extract from CANDIDATE'S email domain (e.g., roy.janse@mariner.com → "Mariner")
+            - DO NOT use sender's company (The Well) as the candidate's company
             
             {learning_hints}
             
@@ -1142,11 +1145,16 @@ class EmailProcessingWorkflow:
             Return "Unknown" for unclear fields rather than null."""
         
         user_prompt = f"""Analyze this recruitment email and extract the key details:
-        
+
         EMAIL CONTENT:
         {state['email_content']}
-        
-        IMPORTANT: If this is a forwarded email, make sure to extract information from the forwarded/original message portion.
+
+        IMPORTANT INSTRUCTIONS:
+        1. If this is a forwarded email, extract candidate info from the ORIGINAL/FORWARDED message
+        2. Extract the CANDIDATE'S company from their email domain (e.g., roy.janse@mariner.com → company_name: "Mariner")
+        3. DO NOT use "The Well Recruiting Solutions" as the candidate's company - that's the sender/recruiter
+        4. The company_name field should be the company where the CANDIDATE works, not where the email came from
+
         Extract and return the information in the required JSON format."""
         
         try:
