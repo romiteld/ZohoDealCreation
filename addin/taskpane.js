@@ -637,7 +637,14 @@ async function extractAndPreview() {
                     linkedinUrl: getString(extracted?.linkedin_url || extracted?.linkedinUrl),
                     jobTitle: getString(extracted?.job_title || extracted?.jobTitle),
                     location: getString(extracted?.location || extracted?.candidateLocation),
+                    // Use structured contact location data first, fallback to parsed location
+                    contactCity: getString(contact.city),
+                    contactState: getString(contact.state),
                     firmName: getString(company.company_name) || getString(extracted?.company_name) || getString(extracted?.firmName) || getString(extracted?.firm_name) || '', // CACHE_BUST_V2
+                    // Map company fields from structured data (Firecrawl/Apollo enrichment)
+                    companyPhone: getString(company.phone || extracted?.company_phone || extracted?.phone),
+                    companyWebsite: getString(company.website || extracted?.company_website || extracted?.website),
+                    companyOwner: getString(company.detail || extracted?.credit_person_name || extracted?.referrer_name),
                     referrerName: getString(extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName),
                     referrerEmail: getString(extracted?.referrer_email || extracted?.referrerEmail || currentEmailData?.from?.emailAddress),
                     notes: getString(extracted?.notes || deal.description_of_reqs),
@@ -1003,18 +1010,30 @@ function populateForm(data) {
     setValueWithConfidence('candidateEmail', data.candidateEmail || data.candidate_email || data.email || '', data);
     setValueWithConfidence('candidatePhone', data.candidatePhone || data.candidate_phone || data.phone || '', data);
 
-    // Parse location into city and state
-    const locationParts = (data.location || '').split(',');
-    const city = locationParts[0]?.trim() || '';
-    const state = locationParts[1]?.trim() || locationParts.length === 1 ? locationParts[0]?.trim() : '';
+    // Parse location into city and state - prefer structured data first
+    let city = data.contactCity || '';
+    let state = data.contactState || '';
+
+    // Fallback to parsing location string if structured data not available
+    if (!city && !state && data.location) {
+        const locationParts = data.location.split(',');
+        city = locationParts[0]?.trim() || '';
+        // Fix ternary precedence: only use second part for state, empty string for single-city locations
+        state = locationParts[1]?.trim() || '';
+    }
 
     setValueWithConfidence('contactCity', city, data);
     setValueWithConfidence('contactState', state, data);
 
-    // Company Information
+    // Company Information - now uses Firecrawl/Apollo enriched data
     setValueWithConfidence('firmName', data.firmName || data.firm_name || data.company_name || '', data);
     setValueWithConfidence('companyPhone', data.companyPhone || data.company_phone || '', data);
     setValueWithConfidence('companyWebsite', data.companyWebsite || data.company_website || '', data);
+
+    // Company owner information from structured backend data
+    if (data.companyOwner) {
+        setValueWithConfidence('companyOwner', data.companyOwner, data);
+    }
 
     // Set company source based on extracted data
     const source = data.source || data.Source || 'Email Inbound';
@@ -3070,17 +3089,53 @@ async function enrichWithApolloREST(data) {
         const enrichedData = await response.json();
         console.log('✅ Apollo enrichment successful:', enrichedData);
 
+        // Debug: Log the exact structure
+        console.log('Apollo response structure:', {
+            hasData: !!enrichedData.data,
+            hasStatus: enrichedData.status,
+            dataKeys: enrichedData.data ? Object.keys(enrichedData.data) : [],
+            fullData: enrichedData.data
+        });
+
         updateApolloProgress(60, 'Processing enriched data...');
 
         // Update form fields with enriched data
-        if (enrichedData.person) {
+        // Handle both direct data and nested data.person/data.company structure
+        const apolloData = enrichedData.data || enrichedData;
+
+        console.log('Apollo data being processed:', {
+            hasPerson: !!apolloData.person,
+            hasOrganization: !!apolloData.organization,
+            hasCompany: !!apolloData.company,
+            keys: Object.keys(apolloData)
+        });
+
+        if (apolloData.person) {
+            console.log('Person data found:', apolloData.person);
             updateApolloProgress(80, 'Updating contact information...');
-            updateFieldsWithApolloData(enrichedData.person);
+            updateFieldsWithApolloData(apolloData.person);
         }
 
-        if (enrichedData.company) {
+        if (apolloData.organization || apolloData.company) {
+            console.log('Company data found:', apolloData.organization || apolloData.company);
             updateApolloProgress(90, 'Updating company information...');
-            updateCompanyFieldsWithApolloData(enrichedData.company);
+            updateCompanyFieldsWithApolloData(apolloData.organization || apolloData.company);
+        }
+
+        // Check if data exists but in different structure
+        if (!apolloData.person && !apolloData.organization && !apolloData.company) {
+            console.log('No person/organization/company found. Apollo data structure:', apolloData);
+
+            // Try to extract data directly from apolloData if it has the fields
+            if (apolloData.first_name || apolloData.last_name || apolloData.phone || apolloData.city || apolloData.state) {
+                console.log('Found person fields directly in apolloData');
+                updateFieldsWithApolloData(apolloData);
+            }
+
+            if (apolloData.company_name || apolloData.website || apolloData.company_phone) {
+                console.log('Found company fields directly in apolloData');
+                updateCompanyFieldsWithApolloData(apolloData);
+            }
         }
 
         updateApolloProgress(100, 'Apollo enrichment complete!');
@@ -3105,33 +3160,63 @@ async function enrichWithApolloREST(data) {
  * @param {Object} personData - Apollo person data
  */
 function updateFieldsWithApolloData(personData) {
-    // Update contact fields if they have better data
-    if (personData.first_name && !document.getElementById('contactFirstName').value) {
+    // Helper function to check if field should be updated
+    const shouldUpdateField = (fieldId, newValue) => {
+        const field = document.getElementById(fieldId);
+        if (!field) return false;
+
+        // Always update if field is empty
+        if (!field.value || field.value.trim() === '') return true;
+
+        // Update if new value is longer/more complete than existing
+        if (newValue && newValue.length > field.value.length) return true;
+
+        // Special cases for specific fields
+        if (fieldId === 'candidatePhone' && !field.value.includes('+')) {
+            // Update if we don't have a full phone number
+            return true;
+        }
+
+        if ((fieldId === 'contactCity' || fieldId === 'contactState') && field.value.length < 2) {
+            // Update if city/state is too short to be valid
+            return true;
+        }
+
+        return false;
+    };
+
+    // Update contact fields with Apollo data
+    if (personData.first_name && shouldUpdateField('contactFirstName', personData.first_name)) {
         document.getElementById('contactFirstName').value = personData.first_name;
         showFieldEnhanced('contactFirstName', 'Apollo');
     }
 
-    if (personData.last_name && !document.getElementById('contactLastName').value) {
+    if (personData.last_name && shouldUpdateField('contactLastName', personData.last_name)) {
         document.getElementById('contactLastName').value = personData.last_name;
         showFieldEnhanced('contactLastName', 'Apollo');
     }
 
-    if (personData.phone_numbers?.length > 0 && !document.getElementById('candidatePhone').value) {
-        document.getElementById('candidatePhone').value = personData.phone_numbers[0];
+    // Handle phone numbers - Apollo might return array or single value
+    const phoneNumber = personData.phone_numbers?.length > 0 ?
+                       personData.phone_numbers[0] :
+                       personData.phone_number || personData.phone;
+
+    if (phoneNumber && shouldUpdateField('candidatePhone', phoneNumber)) {
+        document.getElementById('candidatePhone').value = phoneNumber;
         showFieldEnhanced('candidatePhone', 'Apollo');
     }
 
-    if (personData.title && !document.getElementById('jobTitle').value) {
+    if (personData.title && shouldUpdateField('jobTitle', personData.title)) {
         document.getElementById('jobTitle').value = personData.title;
         showFieldEnhanced('jobTitle', 'Apollo');
     }
 
-    if (personData.city && !document.getElementById('contactCity').value) {
+    if (personData.city && shouldUpdateField('contactCity', personData.city)) {
         document.getElementById('contactCity').value = personData.city;
         showFieldEnhanced('contactCity', 'Apollo');
     }
 
-    if (personData.state && !document.getElementById('contactState').value) {
+    if (personData.state && shouldUpdateField('contactState', personData.state)) {
         document.getElementById('contactState').value = personData.state;
         showFieldEnhanced('contactState', 'Apollo');
     }
@@ -3139,7 +3224,7 @@ function updateFieldsWithApolloData(personData) {
     // Update LinkedIn URL if available
     if (personData.linkedin_url) {
         const linkedinField = document.getElementById('linkedinUrl');
-        if (linkedinField && !linkedinField.value) {
+        if (linkedinField && shouldUpdateField('linkedinUrl', personData.linkedin_url)) {
             linkedinField.value = personData.linkedin_url;
             showFieldEnhanced('linkedinUrl', 'Apollo');
         }
@@ -3151,18 +3236,33 @@ function updateFieldsWithApolloData(personData) {
  * @param {Object} companyData - Apollo company data
  */
 function updateCompanyFieldsWithApolloData(companyData) {
-    if (companyData.name && !document.getElementById('firmName').value) {
-        document.getElementById('firmName').value = companyData.name;
+    // Helper to check if field should be updated (same logic as person fields)
+    const shouldUpdateField = (fieldId, newValue) => {
+        const field = document.getElementById(fieldId);
+        if (!field) return false;
+        if (!field.value || field.value.trim() === '') return true;
+        if (newValue && newValue.length > field.value.length) return true;
+        return false;
+    };
+
+    // Check for company name in various possible fields
+    const companyName = companyData.name || companyData.company_name || companyData.organization_name;
+    if (companyName && shouldUpdateField('firmName', companyName)) {
+        document.getElementById('firmName').value = companyName;
         showFieldEnhanced('firmName', 'Apollo');
     }
 
-    if (companyData.phone && !document.getElementById('companyPhone').value) {
-        document.getElementById('companyPhone').value = companyData.phone;
+    // Check for phone in various possible fields
+    const companyPhone = companyData.phone || companyData.company_phone || companyData.phone_number;
+    if (companyPhone && shouldUpdateField('companyPhone', companyPhone)) {
+        document.getElementById('companyPhone').value = companyPhone;
         showFieldEnhanced('companyPhone', 'Apollo');
     }
 
-    if (companyData.website_url && !document.getElementById('companyWebsite').value) {
-        document.getElementById('companyWebsite').value = companyData.website_url;
+    // Check for website in various possible fields
+    const companyWebsite = companyData.website_url || companyData.website || companyData.domain || companyData.company_website;
+    if (companyWebsite && shouldUpdateField('companyWebsite', companyWebsite)) {
+        document.getElementById('companyWebsite').value = companyWebsite;
         showFieldEnhanced('companyWebsite', 'Apollo');
     }
 }

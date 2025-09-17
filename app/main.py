@@ -1663,9 +1663,10 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                         logger.error(f"Client extraction error: {str(e)}")
                         # Don't fail the entire processing - this is an enhancement feature
 
-                # APOLLO DEEP ENRICHMENT: Use comprehensive Apollo capabilities for maximum data extraction
+                # COMPREHENSIVE ENRICHMENT: Use Apollo + Firecrawl v2 with FIRE-1 agent for maximum data extraction
                 try:
-                    from app.apollo_enricher import apollo_deep_enrichment, extract_linkedin_urls
+                    from app.firecrawl_enricher import comprehensive_enrichment
+                    from app.apollo_enricher import extract_linkedin_urls
 
                     # Extract company name from existing data for better enrichment
                     company_hint = None
@@ -1708,12 +1709,12 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                             elif extracted_dict:
                                 extracted_dict['notes'] = extracted_dict.get('notes', '') + social_note
 
-                    # Perform deep enrichment with all Apollo capabilities
-                    apollo_result = await apollo_deep_enrichment(
+                    # Perform comprehensive enrichment with Apollo + Firecrawl v2 FIRE-1 agent
+                    apollo_result = await comprehensive_enrichment(
                         email=request.sender_email,
                         name=request.sender_name,
                         company=company_hint,
-                        extract_all=True  # Get everything including employees
+                        domain=None  # Will be extracted from email if needed
                     )
 
                     # Extract comprehensive location and website data
@@ -2154,9 +2155,9 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                 from app.langgraph_manager import SimplifiedEmailExtractor
                 extracted_data = SimplifiedEmailExtractor.extract(request.body, request.sender_email)
 
-                # APOLLO DEEP ENRICHMENT: Apply comprehensive enrichment for fallback extraction
+                # COMPREHENSIVE ENRICHMENT: Apply Apollo + Firecrawl v2 for fallback extraction
                 try:
-                    from app.apollo_enricher import apollo_deep_enrichment
+                    from app.firecrawl_enricher import comprehensive_enrichment
 
                     # Extract company name from fallback data
                     company_hint = None
@@ -2165,12 +2166,12 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                     elif hasattr(extracted_data, '__dict__'):
                         company_hint = extracted_data.__dict__.get('company_name')
 
-                    # Try deep enrichment first
-                    apollo_result = await apollo_deep_enrichment(
+                    # Try comprehensive enrichment with all services
+                    apollo_result = await comprehensive_enrichment(
                         email=request.sender_email,
                         name=request.sender_name,
                         company=company_hint,
-                        extract_all=True
+                        domain=None  # Will be extracted from email
                     )
 
                     if apollo_result and (apollo_result.get('person') or apollo_result.get('company')):
@@ -5575,22 +5576,24 @@ async def apollo_comprehensive_enrichment(
     extract_all: bool = True
 ):
     """
-    Production Apollo.io comprehensive enrichment endpoint.
-    Maximizes data extraction with unlimited searches for:
-    - LinkedIn URLs
-    - Phone numbers (mobile, work)
-    - Company website and location
-    - Key employees and decision makers
-    - Alternative matches for validation
+    Comprehensive enrichment endpoint using Apollo + Firecrawl v2 with FIRE-1 agent.
+
+    Orchestrates multiple services for maximum data extraction:
+    - Apollo.io for known contacts and companies
+    - Firecrawl v2 Extract with FIRE-1 agent for web scraping
+    - Intelligent data merging from all sources
+
+    Returns comprehensive company and contact information even when
+    Apollo doesn't have the data.
     """
-    from app.apollo_enricher import apollo_deep_enrichment
+    from app.firecrawl_enricher import comprehensive_enrichment
 
     try:
-        result = await apollo_deep_enrichment(
+        result = await comprehensive_enrichment(
             email=email,
             name=name,
             company=company,
-            extract_all=extract_all
+            domain=None  # Will be extracted from email if needed
         )
 
         # Store enriched data in database for future reference

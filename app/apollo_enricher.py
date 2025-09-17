@@ -544,6 +544,75 @@ async def apollo_deep_enrichment(
         except Exception as e:
             logger.error(f"Free plan enrichment fallback error: {str(e)}")
 
+    # Fallback to Firecrawl if Apollo has no data
+    if not result["person"] and not result["company"] and (email or company):
+        logger.info("Apollo returned no data, trying Firecrawl web research")
+        try:
+            from app.firecrawl_research import CompanyResearchService
+
+            research_service = CompanyResearchService()
+
+            # Extract domain from email if available
+            research_domain = None
+            if email and '@' in email:
+                email_domain = email.split('@')[1]
+                # Skip generic email domains
+                generic_domains = [
+                    'gmail.com', 'yahoo.com', 'hotmail.com', 'outlook.com',
+                    'aol.com', 'icloud.com', 'me.com', 'mac.com', 'msn.com',
+                    'live.com', 'protonmail.com', 'ymail.com'
+                ]
+                if email_domain not in generic_domains:
+                    research_domain = email_domain
+                    logger.info(f"Using email domain for Firecrawl research: {research_domain}")
+
+            # Research the company/domain
+            if research_domain or company:
+                firecrawl_result = await research_service.research_company(
+                    email_domain=research_domain,
+                    company_guess=company
+                )
+
+                if firecrawl_result:
+                    logger.info(f"Firecrawl found data: {firecrawl_result}")
+
+                    # Map Firecrawl data to Apollo format
+                    if firecrawl_result.get('company_name') or firecrawl_result.get('website'):
+                        result["company"] = {
+                            "name": firecrawl_result.get('company_name', company),
+                            "website": firecrawl_result.get('website', ''),
+                            "phone": firecrawl_result.get('phone', ''),
+                            "industry": firecrawl_result.get('industry', ''),
+                            "description": firecrawl_result.get('description', ''),
+                            "linkedin_url": firecrawl_result.get('linkedin_url', ''),
+                            "address": firecrawl_result.get('address', ''),
+                            "city": firecrawl_result.get('city', ''),
+                            "state": firecrawl_result.get('state', ''),
+                            "source": "firecrawl"
+                        }
+
+                    # Try to find person info if we have a name
+                    if name and not result["person"]:
+                        candidate_info = await research_service.search_candidate_info(name, company)
+                        if candidate_info:
+                            result["person"] = {
+                                "name": name,
+                                "email": email,
+                                "phone": candidate_info.get('phone', ''),
+                                "linkedin_url": candidate_info.get('linkedin', ''),
+                                "title": candidate_info.get('title', ''),
+                                "company": company or firecrawl_result.get('company_name', ''),
+                                "city": candidate_info.get('location', ''),
+                                "source": "firecrawl"
+                            }
+
+                    # Update completeness score
+                    if result["company"] or result["person"]:
+                        result["data_completeness"] = 60  # Firecrawl data is less complete than Apollo
+
+        except Exception as e:
+            logger.error(f"Firecrawl enrichment error: {str(e)}")
+
     # Step 3: Calculate data completeness (if we have paid data)
     if result["person"] or result["company"]:
         total_fields = 0

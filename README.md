@@ -203,7 +203,7 @@ C4Component
     UpdateElementStyle(integrations, $bgColor="#00796B", $fontColor="#FFFFFF")
 ```
 
-### 🔄 Enhanced LangGraph Processing Pipeline with Firecrawl v2 Supercharged
+### 🔄 Enhanced LangGraph Processing Pipeline with Frontend Data Mapping Fix
 
 ```mermaid
 graph LR
@@ -219,9 +219,9 @@ graph LR
 
         EXT[["1️⃣ Extract Node<br/>━━━━━━━━━━━━━━━━<br/>GPT-5-mini<br/>• Pydantic Schema<br/>• Structured Output<br/>• Field Extraction<br/>• Entity Recognition"]]
 
-        RES[["2️⃣ Research Node<br/>━━━━━━━━━━━━━━━━<br/>Firecrawl v2 API<br/>• Company Research<br/>• Website Analysis<br/>• 5s Timeout<br/>• Graceful Fallback"]]
+        RES[["2️⃣ Research Node<br/>━━━━━━━━━━━━━━━━<br/>Firecrawl v2 Fire Agent<br/>• Company Research<br/>• Apollo.io Enrichment<br/>• Website Analysis<br/>• 5s Timeout<br/>• Graceful Fallback"]]
 
-        VAL[["3️⃣ Validate Node<br/>━━━━━━━━━━━━━━━━<br/>Data Normalization<br/>• JSON Validation<br/>• Field Mapping<br/>• Business Rules<br/>• Quality Check"]]
+        VAL[["3️⃣ Validate Node<br/>━━━━━━━━━━━━━━━━<br/>Structured Records Creation<br/>• CompanyRecord<br/>• ContactRecord<br/>• DealRecord<br/>• JSON Validation<br/>• Business Rules"]]
 
         STATE --> EXT
         EXT --> RES
@@ -229,15 +229,27 @@ graph LR
     end
 
     subgraph "🌐 Enhanced Enrichment Services"
-        FC2[["🔥 Firecrawl v2<br/>SuperchargedExtractor<br/>━━━━━━━━━━━━━━━━<br/>• Company URL<br/>• Industry Type<br/>• Employee Count<br/>• Founded Year<br/>• Tech Stack"]]
+        FC2[["🔥 Firecrawl v2<br/>Fire Agent<br/>━━━━━━━━━━━━━━━━<br/>• Company URL<br/>• Industry Type<br/>• Employee Count<br/>• Founded Year<br/>• Tech Stack<br/>• Location Data"]]
 
-        APOLLO_ENR[["🚀 Apollo.io API<br/>People Match Service<br/>━━━━━━━━━━━━━━━━<br/>• Email Validation<br/>• Phone Numbers<br/>• Social Profiles<br/>• Title Verification<br/>• Company Match"]]
+        APOLLO_ENR[["🚀 Apollo.io API<br/>People Match Service<br/>━━━━━━━━━━━━━━━━<br/>• Email Validation<br/>• Phone Numbers<br/>• Social Profiles<br/>• Title Verification<br/>• Company Match<br/>• Contact City/State"]]
 
         ULTRA[["💫 Ultra Enrichment<br/>Business Intelligence<br/>━━━━━━━━━━━━━━━━<br/>• Revenue Data<br/>• Funding Rounds<br/>• Growth Metrics<br/>• Market Position<br/>• Competitors"]]
 
         SMART[["🎯 Smart Enricher<br/>AI-Powered Analysis<br/>━━━━━━━━━━━━━━━━<br/>• Industry Trends<br/>• Hiring Signals<br/>• Company Health<br/>• Tech Adoption<br/>• Risk Factors"]]
+    end
 
-        CLAY[["🏗️ Clay Alternative<br/>$149-800 Savings<br/>━━━━━━━━━━━━━━━━<br/>• 30+ Data Fields<br/>• No API Limits<br/>• Custom Extraction<br/>• Batch Processing<br/>• White Label"]]
+    subgraph "📋 Structured Data Layer"
+        COMPANY[["🏢 CompanyRecord<br/>━━━━━━━━━━━━━━━━<br/>• company_name<br/>• phone (from Apollo)<br/>• website (from Firecrawl)<br/>• detail (owner info)<br/>• source/source_detail"]]
+
+        CONTACT[["👤 ContactRecord<br/>━━━━━━━━━━━━━━━━<br/>• first_name<br/>• last_name<br/>• email<br/>• phone<br/>• city (from research)<br/>• state (from research)"]]
+
+        DEAL[["💼 DealRecord<br/>━━━━━━━━━━━━━━━━<br/>• deal_name (formatted)<br/>• source<br/>• closing_date<br/>• description_of_reqs<br/>• pipeline"]]
+    end
+
+    subgraph "🔄 Frontend Data Mapping (FIXED)"
+        MAPPER[["📱 Frontend Mapper<br/>━━━━━━━━━━━━━━━━<br/>FIXED: taskpane.js<br/>• Structured Data First<br/>• contactCity: contact.city<br/>• contactState: contact.state<br/>• companyPhone: company.phone<br/>• companyWebsite: company.website<br/>• Fallback Parsing Fixed"]]
+
+        FORM[["📝 Form Population<br/>━━━━━━━━━━━━━━━━<br/>ENHANCED:<br/>• Prefers backend research<br/>• No city→state duplication<br/>• Company data from APIs<br/>• Owner info populated<br/>• Ternary bug fixed"]]
     end
 
     subgraph "⚡ Intelligent Caching Layer"
@@ -259,11 +271,11 @@ graph LR
     end
 
     subgraph "📤 Output & Integration"
-        CRM[["📊 Zoho CRM<br/>━━━━━━━━━━━━━━━━<br/>✅ Account Record<br/>✅ Contact Record<br/>✅ Deal Record<br/>• Steve's 21 Fields<br/>• Enhanced 30+ Fields"]]
+        CRM[["📊 Zoho CRM<br/>━━━━━━━━━━━━━━━━<br/>✅ Account Record<br/>✅ Contact Record<br/>✅ Deal Record<br/>• Steve's 21 Fields<br/>• Enhanced 30+ Fields<br/>• Research Data Integrated"]]
+
+        OUTLOOK[["📧 Outlook Add-in<br/>━━━━━━━━━━━━━━━━<br/>ENHANCED DISPLAY:<br/>• Company phone/website<br/>• Contact city/state<br/>• Owner details<br/>• Research data visible<br/>• Form fields populated"]]
 
         METRICS[["📈 Analytics<br/>━━━━━━━━━━━━━━━━<br/>• Processing Time<br/>• Enrichment Score<br/>• Cache Performance<br/>• Cost per Email<br/>• Success Rate"]]
-
-        WEBHOOK[["🔔 Webhooks<br/>━━━━━━━━━━━━━━━━<br/>• Event Triggers<br/>• Status Updates<br/>• Error Alerts<br/>• Completion Events<br/>• Custom Callbacks"]]
     end
 
     %% Input Flow
@@ -273,7 +285,7 @@ graph LR
 
     %% Cache Check
     STATE ==>|Check| C3
-    C3 -->|Hit 92%| CRM
+    C3 -->|Hit 92%| MAPPER
     C3 -->|Miss 8%| VOIT
 
     %% Processing Flow
@@ -283,35 +295,51 @@ graph LR
     FC2 ==>|Contact| APOLLO_ENR
     APOLLO_ENR ==>|Business| ULTRA
     ULTRA ==>|Analyze| SMART
-    SMART ==>|Alternative| CLAY
 
-    %% Validation Flow
-    CLAY ==>|Validate| VAL
-    VAL ==>|Store| PG_DB
+    %% Structured Data Creation
+    SMART ==>|Validate| VAL
+    VAL ==>|Create| COMPANY
+    VAL ==>|Create| CONTACT
+    VAL ==>|Create| DEAL
+
+    %% Data Persistence
+    COMPANY ==>|Store| PG_DB
+    CONTACT ==>|Store| PG_DB
+    DEAL ==>|Store| PG_DB
     VAL ==>|Cache| REDIS
     VAL ==>|Index| AZURE_SEARCH
     VAL ==>|Cache Pattern| PATTERN
     PATTERN ==>|Update| C3
 
+    %% Frontend Data Flow (NEW)
+    COMPANY ==>|Map| MAPPER
+    CONTACT ==>|Map| MAPPER
+    DEAL ==>|Map| MAPPER
+    MAPPER ==>|Populate| FORM
+
     %% Output Flow
     VAL ==>|Create| CRM
+    FORM ==>|Display| OUTLOOK
     VAL ==>|Track| METRICS
-    VAL ==>|Notify| WEBHOOK
 
     %% Styling
     classDef input fill:#E8F5E9,stroke:#2E7D32,stroke-width:2px
     classDef langgraph fill:#FFF3E0,stroke:#F57C00,stroke-width:3px
     classDef enrichment fill:#E0F2F1,stroke:#00695C,stroke-width:2px
-    classDef cache fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px
+    classDef structured fill:#F3E5F5,stroke:#6A1B9A,stroke-width:2px
+    classDef frontend fill:#FFEBEE,stroke:#C62828,stroke-width:3px
+    classDef cache fill:#E8EAF6,stroke:#3F51B5,stroke-width:2px
     classDef storage fill:#E3F2FD,stroke:#1565C0,stroke-width:2px
-    classDef output fill:#FFEBEE,stroke:#C62828,stroke-width:2px
+    classDef output fill:#F1F8E9,stroke:#558B2F,stroke-width:2px
 
     class EMAIL,ATT,CLIENT input
     class STATE,EXT,RES,VAL langgraph
-    class FC2,APOLLO_ENR,ULTRA,SMART,CLAY enrichment
+    class FC2,APOLLO_ENR,ULTRA,SMART enrichment
+    class COMPANY,CONTACT,DEAL structured
+    class MAPPER,FORM frontend
     class C3,VOIT,PATTERN cache
     class PG_DB,REDIS,AZURE_SEARCH,BLOB_STORE storage
-    class CRM,METRICS,WEBHOOK output
+    class CRM,OUTLOOK,METRICS output
 ```
 
 ### 🚀 Production Infrastructure & Deployment Architecture

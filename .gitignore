@@ -161,7 +161,6 @@ app/crewai_manager*.py
 app/chromadb_mock.py
 app/sqlite_patcher.py
 app/custom_llm.py
-app/firecrawl_research.py
 app/vector_store.py
 app/error_handlers.py
 app/static_files.py

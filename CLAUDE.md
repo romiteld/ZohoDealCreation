@@ -214,13 +214,49 @@ class EmailProcessingState(TypedDict):
 
 ### Three-Node Pipeline
 1. **Extract Node**: GPT-5-mini with Pydantic structured output
-2. **Research Node**: Firecrawl API for company validation (5s timeout)
-3. **Validate Node**: Data normalization and JSON standardization
+2. **Research Node**: Firecrawl v2 Fire Agent + Apollo.io for company enrichment (5s timeout)
+3. **Validate Node**: Data normalization and structured record creation
+
+### Research Node Architecture
+- **Firecrawl v2 Integration**: `app/firecrawl_v2_fire_agent.py` with Extract API
+- **Apollo.io Enrichment**: Contact/company data from REST API
+- **Dynamic Import**: Falls back gracefully if Firecrawl modules missing
+- **Company Research**: Enriches `CompanyRecord` with phone, website, location data
+- **Contact Research**: Populates `ContactRecord.city/state` from company location
 
 ### Error Handling
 - Fallback to `SimplifiedEmailExtractor` on errors
 - Maintains partial data through pipeline
-- Always returns valid `ExtractedData` object
+- Always returns valid `ExtractedData` object with structured records
+
+## Data Flow Architecture
+
+### Backend → Frontend Data Mapping
+```javascript
+// Backend returns ExtractedData with structured records:
+{
+  company_record: { company_name, phone, website, detail },
+  contact_record: { first_name, last_name, email, phone, city, state },
+  deal_record: { source, deal_name, description_of_reqs }
+}
+
+// Frontend maps to form fields (taskpane.js:633-647):
+extractedData = {
+  // Structured data preferred over legacy flat fields
+  contactCity: getString(contact.city),           // From Firecrawl research
+  contactState: getString(contact.state),         // From Firecrawl research
+  companyPhone: getString(company.phone),         // From Apollo/Firecrawl
+  companyWebsite: getString(company.website),     // From Apollo/Firecrawl
+  companyOwner: getString(company.detail),        // From referrer data
+  // Legacy flat fields as fallbacks
+  location: getString(extracted?.location)
+}
+```
+
+### Critical Frontend Form Population Logic
+- **Structured Data First**: `taskpane.js:1013-1026` prefers backend research data
+- **Fallback Parsing**: Only parses `location` string if structured fields empty
+- **Precedence Fixed**: No longer duplicates city into state for single-location strings
 
 ## Business Rules
 
@@ -408,3 +444,16 @@ Target significant cost reductions through intelligent caching and adaptive reas
 - Eliminated ChromaDB/SQLite issues
 - Reduced processing: 45s → 2-3s
 - Docker image v10 on Container Apps
+
+### 2025-09-17: Frontend Data Mapping Architecture Fix
+✅ **Critical Frontend Bug Fixes**
+- **Issue**: Frontend ignored structured backend data from Firecrawl/Apollo research
+- **Root Cause**: Outlook Add-in mapping only used legacy flat fields, not new structured records
+- **Solution**: Enhanced `taskpane.js` data mapper to use `ExtractedData` structured format
+- **Key Changes**:
+  - Fixed ternary operator precedence bug in location parsing (single cities no longer duplicate to state)
+  - Added mapping for `contact_record.city/state` from backend research
+  - Added mapping for `company_record.phone/website/detail` from Firecrawl/Apollo enrichment
+  - Form population now prefers structured backend data over text parsing
+- **Data Flow**: LangGraph Research → Structured Records → Frontend Mapping → Form Population
+- **Impact**: Firecrawl v2 and Apollo.io research data now properly displays in Outlook Add-in forms
