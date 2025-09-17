@@ -1093,23 +1093,21 @@ function populateForm(data) {
     calculateAndShowExtractionConfidence(data);
 
     // ============ WEB SEARCH CLIENT (FIRECRAWL V2) ============
-    // Web Search Client is available via the "Web Search Client" button
+    // Web Search Client is always available via the "Web Search Client" button
     const webSearchBtn = document.getElementById('btnWebSearchClient');
-    if (shouldEnhanceWithFirecrawl(data)) {
-        console.log('🔍 Web Search Client available - company website or business email found');
-        // Show Web Search Client button when enhancement is available
-        if (webSearchBtn) {
-            webSearchBtn.style.display = 'inline-block';
-            webSearchBtn.classList.remove('d-none'); // Remove any Bootstrap hide classes
-            // Add a data attribute to track that Web Search should be visible
-            webSearchBtn.setAttribute('data-firecrawl-available', 'true');
-        }
-    } else {
-        console.log('⚡ Web Search Client requires a company website or business email');
-        // Hide Web Search Client button when not applicable
-        if (webSearchBtn) {
-            webSearchBtn.style.display = 'none';
-            webSearchBtn.setAttribute('data-firecrawl-available', 'false');
+    if (webSearchBtn) {
+        console.log('🔍 Web Search Client always available for manual company research');
+        // Always show Web Search Client button - users can manually input company domains
+        webSearchBtn.style.display = 'inline-block';
+        webSearchBtn.classList.remove('d-none'); // Remove any Bootstrap hide classes
+        // Add a data attribute to track availability
+        webSearchBtn.setAttribute('data-firecrawl-available', 'true');
+
+        // Log whether auto-enhancement data is available for context
+        if (shouldEnhanceWithFirecrawl(data)) {
+            console.log('🎯 Auto-enhancement data available - company website or business email found');
+        } else {
+            console.log('📝 Manual enhancement mode - user can input company domain for research');
         }
     }
 
@@ -3422,8 +3420,25 @@ async function handleWebSearchClient() {
     }
 
     if (!researchDomain) {
-        showNotification('Company website or business email required for web search', 'warning');
-        return;
+        // Prompt user to manually enter a company domain for research
+        const userDomain = prompt(
+            'Enter a company domain for web research (e.g., microsoft.com):',
+            currentData.firmName ? currentData.firmName.toLowerCase().replace(/\s+/g, '') + '.com' : ''
+        );
+
+        if (!userDomain || userDomain.trim() === '') {
+            showNotification('Company domain required for web search', 'info');
+            return;
+        }
+
+        // Clean up the user input
+        researchDomain = userDomain.trim().toLowerCase();
+        // Remove http/https if user included it
+        researchDomain = researchDomain.replace(/^https?:\/\//, '');
+        // Remove www. if present
+        researchDomain = researchDomain.replace(/^www\./, '');
+
+        console.log(`🔍 Manual domain entered: ${researchDomain}`);
     }
 
     // Show progress indicator before starting
