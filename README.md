@@ -12,13 +12,13 @@
 
 > **Transform recruitment emails into structured Zoho CRM records in seconds with AI-powered extraction, intelligent caching, and enterprise-grade security.**
 
-An advanced email processing system that leverages **LangGraph workflows**, **GPT-5 multi-tier models**, and **Azure cloud services** to automatically extract candidate information from emails and create CRM records. Features 90% cost reduction through intelligent caching, real-time processing with WebSockets, and seamless Outlook integration.
+An advanced email processing system that leverages **LangGraph workflows**, **GPT-5 multi-tier models**, and **Azure cloud services** to automatically extract candidate information from emails and create CRM records. Features 90% cost reduction through intelligent caching, REST API processing, and seamless Outlook integration.
 
 ## 🎯 Key Features
 
 - **🤖 AI-Powered Extraction**: Uses LangGraph with GPT-5-mini for intelligent, multi-step data extraction
 - **🔥 Firecrawl v2 Supercharged**: Enhanced enrichment extracting 30+ company data fields (revenue, employees, funding, tech stack) - saves $149-800/month vs Clay API
-- **🚀 Apollo.io Contact Enrichment**: Real-time contact data enrichment via Apollo People Match API for enhanced candidate profiles
+- **🚀 Apollo.io Contact Enrichment**: Contact data enrichment via Apollo People Match API for enhanced candidate profiles
 - **🔐 Secure Reverse Proxy**: Centralized OAuth and API key management through dedicated proxy service
 - **🔗 Three-Node Workflow**: Extract → Research (Firecrawl v2 + Apollo) → Validate pipeline for maximum accuracy
 - **📧 Outlook Integration**: Seamless integration via Outlook Add-in with "Send to Zoho" button
@@ -67,7 +67,7 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 ## 📊 Quick Links
 
 - 📐 **[Detailed Architecture Diagrams](ARCHITECTURE.md)** - Complete system architecture with Mermaid diagrams
-- 🔧 **[API Documentation](#api-endpoints)** - REST and WebSocket endpoint reference
+- 🔧 **[API Documentation](#api-endpoints)** - REST API endpoint reference
 - 🚀 **[Deployment Guide](#deployment)** - Step-by-step deployment instructions
 - 📈 **[Performance Metrics](#performance-metrics)** - System performance and optimization
 - 🔐 **[Security](#security-features)** - Authentication and data protection
@@ -125,7 +125,6 @@ C4Container
     ContainerDb(search_index, "AI Search", "Azure Search", "Semantic pattern learning and indexing")
 
     Container(service_bus, "Service Bus", "Azure Service Bus", "Batch processing and message queuing")
-    Container(signalr, "SignalR Service", "Azure SignalR", "Real-time streaming and WebSocket connections")
 
     System_Ext(zoho, "Zoho CRM", "Customer relationship management")
     System_Ext(openai, "OpenAI API", "GPT-5 language models")
@@ -142,7 +141,6 @@ C4Container
     Rel(api_core, blob_storage, "Uploads attachments")
     Rel(api_core, search_index, "Indexes semantic patterns")
     Rel(api_core, service_bus, "Queues batch jobs")
-    Rel(api_core, signalr, "Streams real-time updates")
 
     Rel(api_core, zoho, "Creates CRM records")
     Rel(api_core, openai, "Processes with AI")
@@ -165,7 +163,6 @@ C4Component
         Component(cache_mgr, "Cache Manager", "Python Class", "Manages Redis caching with C³ algorithm")
         Component(db_enhancer, "Database Enhancer", "Python Class", "Handles PostgreSQL operations with pgvector")
         Component(batch_processor, "Batch Processor", "Python Class", "Processes multiple emails in single context")
-        Component(streaming_endpoints, "Streaming Endpoints", "WebSocket Handler", "Real-time processing updates")
         Component(security_config, "Security Config", "Python Module", "API keys, authentication, rate limiting")
         Component(business_rules, "Business Rules", "Python Module", "Deal formatting, source determination logic")
         Component(integrations, "Integrations", "Python Module", "External API clients (Zoho, OpenAI, etc.)")
@@ -184,7 +181,6 @@ C4Component
     Rel(main_api, langgraph_mgr, "Initiates processing workflow")
     Rel(main_api, cache_mgr, "Checks/stores cache entries")
     Rel(main_api, batch_processor, "Handles batch requests")
-    Rel(main_api, streaming_endpoints, "Manages WebSocket connections")
     Rel(main_api, security_config, "Validates authentication")
 
     Rel(langgraph_mgr, business_rules, "Applies formatting rules")
@@ -342,10 +338,8 @@ graph TB
                 SEARCH[["🔍 AI Search<br/>wellintakesearch0903<br/>━━━━━━━━━━━━━━━━<br/>• Basic Tier<br/>• 1 Replica<br/>• 1 Partition<br/>• Semantic Search<br/>• Vector Index"]]
             end
 
-            subgraph "📡 Messaging & Real-time"
+            subgraph "📡 Messaging Services"
                 SB[["📬 Service Bus<br/>wellintakebus0903<br/>━━━━━━━━━━━━━━━━<br/>• Standard Tier<br/>• email-batch Queue<br/>• 1GB Queue Size<br/>• Sessions Enabled<br/>• Dead Letter Queue"]]
-
-                SR[["📡 SignalR Service<br/>wellintakesignalr0903<br/>━━━━━━━━━━━━━━━━<br/>• Free Tier<br/>• 20 Connections<br/>• 20K Messages/day<br/>• WebSocket<br/>• Server Mode"]]
             end
 
             subgraph "🔐 Security & Monitoring"
@@ -400,7 +394,6 @@ graph TB
     CA ==>|Store| BLOB
     CA ==>|Index| SEARCH
     CA ==>|Queue| SB
-    CA ==>|Stream| SR
     CA ==>|Secrets| KV
     CA ==>|Monitor| AI
     AS ==>|CDN| FD
@@ -426,7 +419,7 @@ graph TB
 
     class CA,AS,ACR compute
     class PG,REDIS,BLOB,SEARCH data
-    class SB,SR messaging
+    class SB messaging
     class KV,AI,FD security
     class GH_MAIN,GH_CACHE,DOCKER,HELM cicd
     class OPENAI,FIRECRAWL,APOLLO_API,ZOHO_API external
@@ -601,7 +594,7 @@ For complete detailed architecture diagrams, see **[ARCHITECTURE.md](ARCHITECTUR
 
 > **📊 View Complete C4 Architecture Diagrams in [ARCHITECTURE.md](ARCHITECTURE.md)**
 > 
-> The system uses a sophisticated 3-node LangGraph pipeline with intelligent model selection, caching, and real-time processing capabilities.
+> The system uses a sophisticated 3-node LangGraph pipeline with intelligent model selection, caching, and fast REST API processing.
 
 ### 🚀 Advanced CI/CD Pipeline with Intelligent Deployment
 
@@ -622,14 +615,14 @@ Features our patent-pending C³ (Conformal Counterfactual Cache) system:
 - **90% cost reduction** through intelligent caching
 - **92% cache hit rate** with pattern recognition
 - **Multi-tier TTL** strategy for email classification
-- **Real-time analytics** and optimization recommendations
+- **Analytics** and optimization recommendations
 
-### 📊 Real-time Monitoring & Analytics Architecture
+### 📊 Monitoring & Analytics Architecture
 
 > **View complete monitoring architecture in [ARCHITECTURE.md](ARCHITECTURE.md#system-health-dashboard)**
 
 Comprehensive observability with Application Insights:
-- **Real-time metrics** tracking and visualization
+- **Metrics** tracking and visualization
 - **Cost optimization** with budget alerts
 - **Performance monitoring** across all services
 - **Custom dashboards** for business KPIs
@@ -641,7 +634,7 @@ Comprehensive observability with Application Insights:
 End-to-end email processing pipeline:
 - **<10s processing** from Outlook to Zoho CRM
 - **Parallel batch processing** via Service Bus
-- **Real-time streaming** with SignalR WebSocket
+- **REST API** with efficient JSON responses
 - **Intelligent routing** with VoIT orchestration
 
 ### 🏗️ Azure Resource Organization & Infrastructure
@@ -683,11 +676,7 @@ End-to-end email processing pipeline:
     - Batch processing queue management
     - Multi-email context processing
     - Message routing and retry logic
-    
-  - `wellintakesignalr0903` - Azure SignalR Service
-    - Real-time streaming communication
-    - WebSocket connections for live updates
-    
+
   - `wellintakesearch0903` - Azure AI Search
     - Semantic pattern learning
     - Company template storage
@@ -719,6 +708,26 @@ End-to-end email processing pipeline:
 | ALL | `/cdn/*` | CDN management (alias for /api/cdn/*) | Automatic |
 | GET | `/proxy/health` | Backend API health check | None |
 | GET | `/manifest.xml` | Outlook Add-in manifest | None |
+
+### Outlook Add-in Static Files
+
+The system serves Outlook Add-in files from both root (`/`) and `/addin/` paths for compatibility:
+
+| Method | Endpoints | Description | Content-Type |
+|--------|-----------|-------------|--------------|
+| GET | `/manifest.xml`<br/>`/addin/manifest.xml` | Outlook Add-in manifest | application/xml |
+| GET | `/commands.html`<br/>`/addin/commands.html` | Commands UI page | text/html |
+| GET | `/taskpane.html`<br/>`/addin/taskpane.html` | Task pane UI | text/html |
+| GET | `/commands.js`<br/>`/addin/commands.js` | Command handlers | application/javascript |
+| GET | `/taskpane.js`<br/>`/addin/taskpane.js` | Task pane logic | application/javascript |
+| GET | `/config.js`<br/>`/addin/config.js` | Configuration | application/javascript |
+| GET | `/app.js`<br/>`/addin/app.js` | Main application | application/javascript |
+| GET | `/apollo.js`<br/>`/addin/apollo.js` | Apollo integration | application/javascript |
+| GET | `/icon-16.png`<br/>`/addin/icon-16.png` | 16px icon | image/png |
+| GET | `/icon-32.png`<br/>`/addin/icon-32.png` | 32px icon | image/png |
+| GET | `/icon-80.png`<br/>`/addin/icon-80.png` | 80px icon | image/png |
+
+> **Note**: Both URL patterns are supported to ensure compatibility with different deployment scenarios and CDN configurations.
 
 ### Container Apps API Endpoints (via Proxy)
 
@@ -895,9 +904,6 @@ AZURE_REDIS_CONNECTION_STRING=rediss://:access_key@wellintakecache0903.redis.cac
 # Azure Service Bus
 AZURE_SERVICE_BUS_CONNECTION_STRING=Endpoint=sb://wellintakebus0903.servicebus.windows.net/;...
 
-# Azure SignalR
-AZURE_SIGNALR_CONNECTION_STRING=Endpoint=https://wellintakesignalr0903.service.signalr.net;...
-
 # Azure AI Search
 AZURE_SEARCH_ENDPOINT=https://wellintakesearch0903.search.windows.net
 AZURE_SEARCH_KEY=your_search_admin_key
@@ -918,7 +924,7 @@ PROXY_RATE_LIMIT=100
 | **LangGraph Processing** | < 3s | 2-3s | ✅ |
 | **Cost per Email** | < $0.01 | $0.003 | ✅ |
 | **Batch Processing** | > 1000/hr | 1500/hr | ✅ |
-| **WebSocket Latency** | < 200ms | 180ms | ✅ |
+| **API Latency** | < 200ms | 180ms | ✅ |
 | **Database Query** | < 100ms | 45ms | ✅ |
 | **Blob Upload** | < 500ms | 320ms | ✅ |
 
@@ -1117,8 +1123,28 @@ az containerapp ingress traffic set \
 
 ## 📝 Changelog
 
+### v3.6.0 (September 16, 2025) - 🏗️ REST-Only Architecture & Add-in Routing
+- **🔄 Architecture Simplification** - Removed all WebSocket/SignalR infrastructure, now pure REST API
+- **📡 Removed Components**:
+  - Azure SignalR Service (`wellintakesignalr0903`) - No longer needed
+  - WebSocket streaming endpoints - Replaced with efficient REST responses
+  - SignalR Manager and Streaming Endpoints modules - Removed from codebase
+- **🆕 Add-in Endpoint Aliases** - Added `/addin/` path support for all static files:
+  - Both `/manifest.xml` and `/addin/manifest.xml` now work
+  - All JavaScript, HTML, and icon files accessible from both paths
+  - Improves compatibility with different CDN configurations
+- **🔧 Container App Updates**:
+  - Updated registry from `wellintakeregistry` to `wellintakeacr0903`
+  - Fixed deployment with explicit revision suffixes
+  - Purged CDN cache after deployment
+- **📚 Documentation Updates**:
+  - Updated all architectural diagrams to reflect REST-only design
+  - Removed WebSocket/SignalR references from documentation
+  - Updated deployment commands with correct registry names
+- **🚀 Performance** - REST API maintains sub-200ms latency without WebSocket overhead
+
 ### v3.5.0 (September 16, 2025) - 🚀 Apollo.io Integration
-- **🚀 Apollo.io Contact Enrichment** - Integrated Apollo People Match API for real-time contact data enhancement
+- **🚀 Apollo.io Contact Enrichment** - Integrated Apollo People Match API for contact data enhancement
 - **🔧 Configuration Management** - Added Apollo API key support in config_manager.py with Azure Key Vault integration
 - **⚡ Email Processing Enhancement** - Enhanced email pipeline with Apollo enrichment after AI extraction
 - **🛡️ Error Handling** - Comprehensive error handling with graceful degradation when Apollo API unavailable
@@ -1159,7 +1185,7 @@ az containerapp ingress traffic set \
 ### v3.1.0 (September 9, 2025)
 - ✅ **Redis Cache System Operational** - Fixed connection issues, 90% performance improvement
 - 🔧 **Azure Service Configuration** - Updated all service names to actual deployed resources
-- 🚀 **Infrastructure Optimization** - Service Bus, SignalR, AI Search fully integrated
+- 🚀 **Infrastructure Optimization** - Service Bus, AI Search fully integrated
 - 📊 **Cache Analytics** - 66% hit rate with intelligent email pattern recognition
 - 🔐 **Security Enhancements** - Consolidated API key management and validation
 

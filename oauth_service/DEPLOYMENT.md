@@ -38,7 +38,7 @@ ZOHO_CLIENT_SECRET=your-zoho-client-secret
 ZOHO_REFRESH_TOKEN=your-zoho-refresh-token
 
 # Proxy Configuration
-MAIN_API_URL=https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
+MAIN_API_URL=https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
 MAIN_API_KEY=your-api-key
 PROXY_TIMEOUT=30
 PROXY_RATE_LIMIT=100

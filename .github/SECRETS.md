@@ -62,7 +62,7 @@ Value: well-intake-api
 Once all secrets are configured:
 1. Any push to `main` branch will trigger automatic deployment
 2. Monitor the Actions tab for deployment progress
-3. Check deployment at: https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/health
+3. Check deployment at: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
 
 ### 🔒 Security Notes
 

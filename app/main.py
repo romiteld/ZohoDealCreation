@@ -439,7 +439,6 @@ ALLOWED_ORIGINS = [
     "https://wellintakewebui78196327.z13.web.core.windows.net",
     
     # Azure Container Apps domains
-    "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io",
     "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io",
     
     # Microsoft Office domains
@@ -476,8 +475,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                        "/addin/manifest.xml", "/addin/commands.html", "/addin/commands.js",
                        "/addin/taskpane.html", "/addin/taskpane.js", "/addin/config.js",
                        "/addin/icon-16.png", "/addin/icon-32.png", "/addin/icon-64.png", "/addin/icon-80.png", "/addin/icon-128.png",
-                       "/apollo-styles.css", "/apollo-websocket.js", "/signalr.min.js",
-                       "/addin/signalr.min.js"]  # Apollo integration files
+                       "/apollo-styles.css"]  # Apollo integration files
         if not any(request.url.path.startswith(path) for path in add_in_paths):
             # Only set X-Frame-Options for non-add-in endpoints
             response.headers["X-Frame-Options"] = "SAMEORIGIN"
@@ -499,7 +497,7 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://appsforoffice.microsoft.com https://*.office.com https://ajax.aspnetcdn.com https://*.azurefd.net; "
                 "style-src 'self' 'unsafe-inline' https://*.office.com; "
                 "img-src 'self' data: https://*.office.com https://*.microsoft.com https://*.azurecontainerapps.io; "
-                "connect-src 'self' wss://*.azurecontainerapps.io https://*.azurecontainerapps.io https://*.office.com https://*.service.signalr.net wss://*.service.signalr.net https://*.azurefd.net; "
+                "connect-src 'self' https://*.azurecontainerapps.io https://*.office.com https://*.azurefd.net; "
                 "frame-src 'self' https://*.office.com https://*.office365.com https://*.microsoft.com https://telemetryservice.firstpartyapps.oaspapps.com; "
                 "frame-ancestors https://outlook.office.com https://outlook.office365.com https://*.outlook.com https://outlook.officeppe.com https://*.microsoft.com https://*.office.com;"
             )
@@ -835,12 +833,11 @@ async def get_learning_insights(domain: Optional[str] = None, days_back: int = 3
                     "message": "Learning insights temporarily unavailable"
                 }
 
-        try:
-            insights = await search_manager.get_learning_insights(
+        insights = await search_manager.get_learning_insights(
             email_domain=domain,
             days_back=days_back
         )
-        
+
         # Enhance with pattern matching effectiveness metrics
         if search_manager:
             try:
@@ -3900,6 +3897,8 @@ async def websocket_queue_endpoint(websocket: WebSocket, user_id: str):
     """WebSocket endpoint for real-time email queue updates"""
     await websocket_endpoint(websocket, user_id)
 
+# Apollo WebSocket endpoints removed - now using REST API only
+
 @app.get("/taskpane.html")
 async def get_taskpane():
     """Serve Outlook Add-in task pane"""
@@ -3942,37 +3941,7 @@ async def get_apollo_styles():
     logger.error(f"apollo-styles.css not found. Tried paths: {possible_paths}")
     raise HTTPException(status_code=404, detail=f"Apollo styles not found. Tried: {possible_paths}")
 
-@app.get("/apollo-websocket.js")
-async def get_apollo_websocket():
-    """Serve Apollo WebSocket integration JavaScript"""
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "addin", "apollo-websocket.js"),
-        os.path.join("/app", "addin", "apollo-websocket.js"),
-        os.path.join(os.getcwd(), "addin", "apollo-websocket.js"),
-    ]
-
-    for js_path in possible_paths:
-        if os.path.exists(js_path):
-            return FileResponse(js_path, media_type="application/javascript")
-
-    logger.error(f"apollo-websocket.js not found. Tried paths: {possible_paths}")
-    raise HTTPException(status_code=404, detail=f"Apollo WebSocket not found. Tried: {possible_paths}")
-
-@app.get("/signalr.min.js")
-async def get_signalr():
-    """Serve SignalR client library"""
-    possible_paths = [
-        os.path.join(os.path.dirname(__file__), "..", "addin", "signalr.min.js"),
-        os.path.join("/app", "addin", "signalr.min.js"),
-        os.path.join(os.getcwd(), "addin", "signalr.min.js"),
-    ]
-
-    for js_path in possible_paths:
-        if os.path.exists(js_path):
-            return FileResponse(js_path, media_type="application/javascript")
-
-    logger.error(f"signalr.min.js not found. Tried paths: {possible_paths}")
-    raise HTTPException(status_code=404, detail=f"SignalR client library not found. Tried: {possible_paths}")
+# Apollo WebSocket and SignalR endpoints removed - now using REST API only
 
 # Voice UI API Endpoints
 @app.post("/api/voice/process", dependencies=[Depends(verify_api_key)])
@@ -4891,6 +4860,43 @@ async def get_icon(size: int):
     # Log which paths were tried for debugging
     logger.error(f"Icon {size} not found. Tried paths: {possible_paths}")
     raise HTTPException(status_code=404, detail=f"Icon {size} not found. Tried: {possible_paths}")
+
+# ========================= Addin Path Aliases =========================
+
+@app.get("/addin/manifest.xml")
+async def get_addin_manifest(request: Request):
+    """Serve Outlook Add-in manifest from /addin/ path"""
+    return await get_manifest(request)
+
+@app.get("/addin/commands.js")
+async def get_addin_commands():
+    """Serve Outlook Add-in JavaScript from /addin/ path"""
+    return await get_commands()
+
+@app.get("/addin/commands.html")
+async def get_addin_commands_html():
+    """Serve Outlook Add-in HTML from /addin/ path"""
+    return await get_commands_html()
+
+@app.get("/addin/config.js")
+async def get_addin_config_js():
+    """Serve Outlook Add-in configuration JavaScript from /addin/ path"""
+    return await get_config_js()
+
+@app.get("/addin/taskpane.html")
+async def get_addin_taskpane():
+    """Serve Outlook Add-in task pane from /addin/ path"""
+    return await get_taskpane()
+
+@app.get("/addin/taskpane.js")
+async def get_addin_taskpane_js():
+    """Serve Outlook Add-in task pane JavaScript from /addin/ path"""
+    return await get_taskpane_js()
+
+@app.get("/addin/icon-{size}.png")
+async def get_addin_icon(size: int):
+    """Serve icon files for Outlook Add-in from /addin/ path"""
+    return await get_icon(size)
 
 
 # ========================= TalentWell Service Routes =========================

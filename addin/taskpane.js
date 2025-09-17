@@ -314,6 +314,9 @@ async function initializeTaskpane() {
         // Natural language corrections
         document.getElementById('btnApplyCorrections').addEventListener('click', applyNaturalLanguageCorrections);
         document.getElementById('btnSuggestFixes').addEventListener('click', showSuggestedFixes);
+
+        // Apollo enrichment button
+        document.getElementById('btnApolloEnrich').addEventListener('click', handleApolloEnrichment);
         
         // Custom fields
         document.getElementById('btnAddField').addEventListener('click', showAddFieldModal);
@@ -1062,12 +1065,12 @@ function populateForm(data) {
     calculateAndShowExtractionConfidence(data);
 
     // ============ APOLLO ENHANCEMENT ============
-    // Check if we should enhance with Apollo data
-    if (window.apolloWebSocketManager && shouldEnhanceWithApollo(data)) {
-        console.log('🚀 Initiating Apollo enrichment...');
-        enhanceWithApolloData(data);
+    // Apollo enrichment is now available via the "Enrich" button
+    // Auto-enrichment disabled to give users control
+    if (shouldEnhanceWithApollo(data)) {
+        console.log('✅ Apollo enrichment available - use the Enrich button to enhance data');
     } else {
-        console.log('⚡ Skipping Apollo enrichment - insufficient identifiers or disabled');
+        console.log('⚡ Apollo enrichment requires email address');
     }
 }
 
@@ -1840,11 +1843,36 @@ function showDuplicate(result) {
             ${result.deal_id ? `Deal ID: ${result.deal_id}` : ''}
             ${result.contact_id ? ` | Contact ID: ${result.contact_id}` : ''}
         </small>
+        <div style="margin-top: 10px;">
+            <strong>💡 Tip:</strong> You can still use the <b>Enrich</b> button to update the existing record with additional information from Apollo.
+        </div>
     `;
     warningMessage.style.display = 'block';
     warningMessage.style.backgroundColor = '#fff3cd';
     warningMessage.style.borderColor = '#ffc107';
     warningMessage.style.color = '#856404';
+
+    // Highlight the Apollo Enrich button for duplicate records
+    const enrichButton = document.getElementById('btnApolloEnrich');
+    if (enrichButton) {
+        enrichButton.style.animation = 'pulse 2s infinite';
+        enrichButton.classList.remove('btn-outline-success');
+        enrichButton.classList.add('btn-success');
+
+        // Add pulsing animation style if not already present
+        if (!document.getElementById('apolloPulseStyle')) {
+            const style = document.createElement('style');
+            style.id = 'apolloPulseStyle';
+            style.innerHTML = `
+                @keyframes pulse {
+                    0% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0.7); }
+                    70% { box-shadow: 0 0 0 10px rgba(40, 167, 69, 0); }
+                    100% { box-shadow: 0 0 0 0 rgba(40, 167, 69, 0); }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+    }
 
     document.getElementById('btnClose').style.display = 'block';
 }
@@ -2939,90 +2967,248 @@ function addConfidenceIndicator(confidence) {
 function shouldEnhanceWithApollo(data) {
     // Check if we have at least one strong identifier for Apollo search
     const hasEmail = data.candidateEmail || data.candidate_email || data.email;
-    const hasName = data.candidateName || data.candidate_name || 
+    const hasName = data.candidateName || data.candidate_name ||
                    (data.contactFirstName || data.contactLastName);
     const hasCompany = data.firmName || data.firm_name || data.company_name;
-    
+
     // Need at least email + (name OR company) for effective Apollo search
     const hasMinimumIdentifiers = hasEmail && (hasName || hasCompany);
-    
-    // Check if Apollo WebSocket is connected
-    const apolloConnected = window.apolloWebSocketManager?.isConnected;
-    
+
     console.log('Apollo enhancement check:', {
         hasEmail: !!hasEmail,
-        hasName: !!hasName, 
+        hasName: !!hasName,
         hasCompany: !!hasCompany,
-        hasMinimumIdentifiers,
-        apolloConnected
+        hasMinimumIdentifiers
     });
-    
-    return hasMinimumIdentifiers && apolloConnected;
+
+    // Return true if we have minimum identifiers (removed WebSocket dependency)
+    return hasMinimumIdentifiers;
 }
 
 /**
- * Enhance form data with Apollo intelligence using WebSocket streaming
+ * Enhance form data with Apollo intelligence using REST API
  * @param {Object} data - Current extracted data
+ * @returns {Object} - Enhanced data from Apollo
  */
-async function enhanceWithApolloData(data) {
+async function enrichWithApolloREST(data) {
     try {
         // Show Apollo enrichment progress
         showApolloEnrichmentProgress();
-        
-        // Prepare Apollo search parameters
-        const apolloSearchParams = {
-            // Primary identifiers
-            email: data.candidateEmail || data.candidate_email || data.email,
-            name: data.candidateName || data.candidate_name || 
-                  `${data.contactFirstName || ''} ${data.contactLastName || ''}`.trim(),
-            
-            // Company information
-            company_domain: extractDomainFromEmail(data.candidateEmail || data.candidate_email || data.email),
-            company_name: data.firmName || data.firm_name || data.company_name,
-            
-            // Professional context
-            job_title: data.jobTitle || data.job_title,
-            location: data.location || data.candidateLocation,
-            
-            // Additional context from email
-            email_subject: currentEmailData?.subject,
-            sender_domain: currentEmailData?.from?.emailAddress?.split('@')[1]
-        };
+        updateApolloProgress(20, 'Preparing Apollo search...');
 
-        console.log('🔍 Apollo search parameters:', apolloSearchParams);
+        // Extract email from various possible fields
+        const email = data.candidateEmail || data.candidate_email || data.email;
 
-        // Request Apollo enrichment through WebSocket
-        const enrichmentId = await window.apolloWebSocketManager.requestApolloEnrichment(
-            apolloSearchParams,
-            {
-                includePhone: true,
-                includeLinkedIn: true, 
-                includeCompanyIntel: true,
-                includeDeepEnrichment: true,
-                maxResults: 5,
-                confidenceThreshold: 0.7
-            }
-        );
-
-        if (enrichmentId) {
-            console.log('✅ Apollo enrichment initiated:', enrichmentId);
-            // The WebSocket manager will handle streaming responses
-            // and automatically update the form fields
-        } else {
-            console.warn('⚠️ Apollo enrichment failed to start');
+        if (!email) {
+            console.log('No email available for Apollo enrichment');
             hideApolloEnrichmentProgress();
+            showNotification('Email required for Apollo enrichment', 'warning');
+            return null;
         }
+
+        console.log('🔍 Apollo REST enrichment for email:', email);
+        updateApolloProgress(40, 'Searching Apollo database...');
+
+        // Call Apollo REST API endpoint
+        const response = await fetch(`${API_BASE_URL}/api/apollo/enrich`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
+            },
+            body: JSON.stringify({
+                email: email,
+                name: data.candidateName || data.candidate_name ||
+                      `${data.contactFirstName || ''} ${data.contactLastName || ''}`.trim(),
+                company_name: data.firmName || data.firm_name || data.company_name,
+                job_title: data.jobTitle || data.job_title,
+                location: data.location || data.candidateLocation
+            })
+        });
+
+        if (!response.ok) {
+            throw new Error(`Apollo API error: ${response.status}`);
+        }
+
+        const enrichedData = await response.json();
+        console.log('✅ Apollo enrichment successful:', enrichedData);
+
+        updateApolloProgress(60, 'Processing enriched data...');
+
+        // Update form fields with enriched data
+        if (enrichedData.person) {
+            updateApolloProgress(80, 'Updating contact information...');
+            updateFieldsWithApolloData(enrichedData.person);
+        }
+
+        if (enrichedData.company) {
+            updateApolloProgress(90, 'Updating company information...');
+            updateCompanyFieldsWithApolloData(enrichedData.company);
+        }
+
+        updateApolloProgress(100, 'Apollo enrichment complete!');
+
+        // Hide progress after a short delay
+        setTimeout(() => {
+            hideApolloEnrichmentProgress();
+        }, 2000);
+
+        return enrichedData;
 
     } catch (error) {
         console.error('❌ Apollo enrichment error:', error);
         hideApolloEnrichmentProgress();
-        
-        // Show error message to user
-        window.apolloWebSocketManager?.showEnrichmentStatus(
-            'Apollo enrichment temporarily unavailable', 
-            'warning'
-        );
+        showNotification('Apollo enrichment failed: ' + error.message, 'error');
+        return null;
     }
+}
+
+/**
+ * Update form fields with Apollo person data
+ * @param {Object} personData - Apollo person data
+ */
+function updateFieldsWithApolloData(personData) {
+    // Update contact fields if they have better data
+    if (personData.first_name && !document.getElementById('contactFirstName').value) {
+        document.getElementById('contactFirstName').value = personData.first_name;
+        showFieldEnhanced('contactFirstName', 'Apollo');
+    }
+
+    if (personData.last_name && !document.getElementById('contactLastName').value) {
+        document.getElementById('contactLastName').value = personData.last_name;
+        showFieldEnhanced('contactLastName', 'Apollo');
+    }
+
+    if (personData.phone_numbers?.length > 0 && !document.getElementById('candidatePhone').value) {
+        document.getElementById('candidatePhone').value = personData.phone_numbers[0];
+        showFieldEnhanced('candidatePhone', 'Apollo');
+    }
+
+    if (personData.title && !document.getElementById('jobTitle').value) {
+        document.getElementById('jobTitle').value = personData.title;
+        showFieldEnhanced('jobTitle', 'Apollo');
+    }
+
+    if (personData.city && !document.getElementById('contactCity').value) {
+        document.getElementById('contactCity').value = personData.city;
+        showFieldEnhanced('contactCity', 'Apollo');
+    }
+
+    if (personData.state && !document.getElementById('contactState').value) {
+        document.getElementById('contactState').value = personData.state;
+        showFieldEnhanced('contactState', 'Apollo');
+    }
+
+    // Update LinkedIn URL if available
+    if (personData.linkedin_url) {
+        const linkedinField = document.getElementById('linkedinUrl');
+        if (linkedinField && !linkedinField.value) {
+            linkedinField.value = personData.linkedin_url;
+            showFieldEnhanced('linkedinUrl', 'Apollo');
+        }
+    }
+}
+
+/**
+ * Update company fields with Apollo company data
+ * @param {Object} companyData - Apollo company data
+ */
+function updateCompanyFieldsWithApolloData(companyData) {
+    if (companyData.name && !document.getElementById('firmName').value) {
+        document.getElementById('firmName').value = companyData.name;
+        showFieldEnhanced('firmName', 'Apollo');
+    }
+
+    if (companyData.phone && !document.getElementById('companyPhone').value) {
+        document.getElementById('companyPhone').value = companyData.phone;
+        showFieldEnhanced('companyPhone', 'Apollo');
+    }
+
+    if (companyData.website_url && !document.getElementById('companyWebsite').value) {
+        document.getElementById('companyWebsite').value = companyData.website_url;
+        showFieldEnhanced('companyWebsite', 'Apollo');
+    }
+}
+
+/**
+ * Show that a field was enhanced by Apollo
+ * @param {string} fieldId - Field ID
+ * @param {string} source - Enhancement source
+ */
+function showFieldEnhanced(fieldId, source) {
+    const indicator = document.getElementById(fieldId + 'Indicator');
+    if (indicator) {
+        indicator.textContent = `${source} Enhanced`;
+        indicator.className = 'apollo-enriched-indicator';
+        indicator.style.display = 'inline-block';
+        indicator.style.background = 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)';
+        indicator.style.color = 'white';
+    }
+}
+
+/**
+ * Update Apollo enrichment progress
+ * @param {number} percentage - Progress percentage
+ * @param {string} message - Progress message
+ */
+function updateApolloProgress(percentage, message) {
+    const progressElement = document.getElementById('apolloEnrichmentProgress');
+    if (progressElement) {
+        const progressFill = progressElement.querySelector('.apollo-progress-fill');
+        const progressPercent = progressElement.querySelector('.apollo-progress-percentage');
+        const progressSteps = progressElement.querySelectorAll('.apollo-progress-step');
+
+        if (progressFill) progressFill.style.width = percentage + '%';
+        if (progressPercent) progressPercent.textContent = percentage + '%';
+
+        // Update active step based on percentage
+        const stepIndex = Math.floor((percentage / 100) * progressSteps.length);
+        progressSteps.forEach((step, i) => {
+            if (i <= stepIndex) {
+                step.classList.add('active');
+            } else {
+                step.classList.remove('active');
+            }
+        });
+    }
+}
+
+/**
+ * Legacy function for compatibility - redirects to REST version
+ * @param {Object} data - Current extracted data
+ */
+async function enhanceWithApolloData(data) {
+    return enrichWithApolloREST(data);
+}
+
+/**
+ * Handle Apollo enrichment button click
+ */
+async function handleApolloEnrichment() {
+    console.log('Apollo enrichment button clicked');
+
+    // Gather current form data
+    const currentData = {
+        candidateEmail: document.getElementById('candidateEmail')?.value || '',
+        candidateName: `${document.getElementById('contactFirstName')?.value || ''} ${document.getElementById('contactLastName')?.value || ''}`.trim(),
+        contactFirstName: document.getElementById('contactFirstName')?.value || '',
+        contactLastName: document.getElementById('contactLastName')?.value || '',
+        jobTitle: document.getElementById('jobTitle')?.value || '',
+        firmName: document.getElementById('firmName')?.value || '',
+        location: document.getElementById('location')?.value || '',
+        candidatePhone: document.getElementById('candidatePhone')?.value || '',
+        contactCity: document.getElementById('contactCity')?.value || '',
+        contactState: document.getElementById('contactState')?.value || ''
+    };
+
+    // Check if we have minimum data for enrichment
+    if (!currentData.candidateEmail) {
+        showNotification('Email address required for enrichment', 'warning');
+        return;
+    }
+
+    // Perform Apollo enrichment
+    await enrichWithApolloREST(currentData);
 }
 
 /**

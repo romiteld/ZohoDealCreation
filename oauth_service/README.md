@@ -41,7 +41,7 @@ ZOHO_REFRESH_TOKEN=...
 API_KEY=...
 
 # Optional proxy settings
-MAIN_API_URL=https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
+MAIN_API_URL=https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
 PROXY_TIMEOUT=30
 PROXY_RATE_LIMIT=100
 ```

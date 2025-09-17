@@ -188,6 +188,27 @@
         .btn-primary:hover {
             background: linear-gradient(135deg, #5a67d8 0%, #6b42a0 100%);
         }
+
+        .btn-outline-success {
+            color: #28a745;
+            border: 1px solid #28a745;
+            background: transparent;
+        }
+
+        .btn-outline-success:hover {
+            background: #28a745;
+            color: white;
+        }
+
+        .btn-success {
+            background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+            border: none;
+            color: white;
+        }
+
+        .btn-success:hover {
+            background: linear-gradient(135deg, #218838 0%, #1aa074 100%);
+        }
         
         .progress-container {
             display: none;
@@ -496,6 +517,9 @@
                     <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSuggestFixes">
                         <span class="icon">💡</span> Suggest Common Fixes
                     </button>
+                    <button type="button" class="btn btn-sm btn-outline-success" id="btnApolloEnrich">
+                        <span class="icon">🚀</span> Enrich
+                    </button>
                 </div>
                 <!-- Quick fix suggestions -->
                 <div id="quickFixes" class="mt-2" style="display: none;">
@@ -803,7 +827,6 @@
 
     <!-- Include the taskpane JavaScript -->
     <script src="config.js"></script>
-    <script src="apollo-websocket.js"></script>
     <script src="taskpane.js"></script>
 </body>
 </html>

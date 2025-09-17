@@ -10,7 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Core Stack
 - **LangGraph v0.2.74** - Workflow orchestration (replaced CrewAI)
-- **FastAPI** - Main API framework with WebSocket support
+- **FastAPI** - Main API framework with REST endpoints
 - **GPT-5 Model Tiers** - Intelligent selection (temperature=1 ALWAYS):
   - GPT-5-nano: $0.05/1M input (simple emails)
   - GPT-5-mini: $0.25/1M input (standard)
@@ -20,8 +20,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **PostgreSQL with pgvector** - 400K context window support, embeddings
 - **Azure Blob Storage** - Attachment storage
 - **Azure Service Bus** - Batch email processing (50 emails/batch)
-- **Azure SignalR/WebSocket** - Real-time streaming responses
-- **Azure AI Search** - Semantic pattern learning
+- **Azure AI Search** - Semantic pattern learning and company templates
+- **Apollo.io Integration** - Contact enrichment via REST API
 - **Azure Key Vault** - Secret management with rotation
 - **Application Insights** - Custom metrics and cost tracking
 
@@ -34,21 +34,19 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Azure Cost Optimizer** (`app/azure_cost_optimizer.py`): Model tier selection and budget tracking
 - **Service Bus Manager** (`app/service_bus_manager.py`): Batch queue management
 - **Batch Processor** (`app/batch_processor.py`): Multi-email single-context processing
-- **SignalR Manager** (`app/signalr_manager.py`): WebSocket streaming infrastructure
-- **Streaming Endpoints** (`app/streaming_endpoints.py`): Real-time API endpoints
 - **Azure AI Search Manager** (`app/azure_ai_search_manager.py`): Semantic search and learning
 - **Learning Analytics** (`app/learning_analytics.py`): A/B testing and accuracy tracking
 - **Monitoring** (`app/monitoring.py`): Application Insights integration
 - **Security Config** (`app/security_config.py`): Key Vault and API key management
 - **Business Rules** (`app/business_rules.py`): Deal name formatting, source determination
 - **Integrations** (`app/integrations.py`): Zoho API v8, Azure services
-- **Outlook Add-in** (`addin/`): Manifest with WebSocket support
+- **Outlook Add-in** (`addin/`): Manifest with REST API integration
 
 ### Outlook Add-in Components
 - **Manifest Files** (`addin/manifest.xml`, `addin/manifest.json`): Office add-in configuration
 - **Task Pane** (`addin/taskpane.html`, `addin/taskpane.js`): Main UI and functionality
 - **Commands** (`addin/commands.html`, `addin/commands.js`): Ribbon button handlers
-- **Apollo Integration** (`addin/apollo-websocket.js`): Real-time contact enrichment
+- **Apollo Integration** (`addin/apollo.js`): REST API contact enrichment
 - **App Logic** (`addin/app.js`): Core application functionality
 - **Configuration** (`addin/config.js`): Environment and API settings
 - **Static Assets** (`addin/icon-*.png`): Add-in icons and resources
@@ -140,11 +138,22 @@ python tests/firecrawl/test_firecrawl_v2_fire.py
 # Full deployment (DB migrations, Docker build, Azure deploy)
 ./scripts/deploy.sh
 
-# Quick Docker deployment
-docker build -t wellintakeregistry.azurecr.io/well-intake-api:latest .
-az acr login --name wellintakeregistry
-docker push wellintakeregistry.azurecr.io/well-intake-api:latest
-az containerapp update --name well-intake-api --resource-group TheWell-Infra-East --image wellintakeregistry.azurecr.io/well-intake-api:latest
+# Quick Docker deployment (use --no-cache for fresh builds)
+docker build -t wellintakeacr0903.azurecr.io/well-intake-api:latest . --no-cache
+az acr login --name wellintakeacr0903
+docker push wellintakeacr0903.azurecr.io/well-intake-api:latest
+
+# Force Container App to use new image with revision suffix
+az containerapp update --name well-intake-api --resource-group TheWell-Infra-East \
+  --image wellintakeacr0903.azurecr.io/well-intake-api:latest \
+  --revision-suffix "v$(date +%Y%m%d-%H%M%S)"
+
+# Purge CDN cache after deployment
+az afd endpoint purge --resource-group TheWell-Infra-East \
+  --profile-name well-intake-frontdoor \
+  --endpoint-name well-intake-api \
+  --domains well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net \
+  --content-paths "/*"
 
 # View logs
 az containerapp logs show --name well-intake-api --resource-group TheWell-Infra-East --follow
@@ -315,6 +324,12 @@ Check LangGraph is enabled: `USE_LANGGRAPH=true`
 - **API**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
 - **Health**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
 - **Manifest**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
+- **Add-in Files**: Both root (`/`) and `/addin/` paths serve static files:
+  - `/manifest.xml` or `/addin/manifest.xml`
+  - `/commands.js` or `/addin/commands.js`
+  - `/taskpane.js` or `/addin/taskpane.js`
+  - `/commands.html` or `/addin/commands.html`
+  - `/taskpane.html` or `/addin/taskpane.html`
 
 ## Recent Updates
 
@@ -336,7 +351,6 @@ Check LangGraph is enabled: `USE_LANGGRAPH=true`
 ✅ **Complete Azure Infrastructure Enhancement**
 - **PostgreSQL with pgvector**: 400K context window support, similarity search
 - **Azure Cache for Redis**: 90% cost reduction with intelligent caching
-- **Azure SignalR/WebSocket**: Real-time streaming (first token <200ms)
 - **Azure Service Bus**: Batch processing (50 emails per GPT-5 context)
 - **Azure AI Search**: Semantic pattern learning and company templates
 - **Model Tiering**: Automatic GPT-5-nano/mini/full selection based on complexity
@@ -378,6 +392,15 @@ TARGET_QUALITY=0.9     # Target quality score
 ```
 
 Target significant cost reductions through intelligent caching and adaptive reasoning.
+
+### 2025-09-16: Apollo WebSocket Removal & Static File Routes
+✅ **Simplified Architecture**
+- Removed all WebSocket/SignalR dependencies from backend
+- Apollo integration now uses REST API exclusively
+- Added `/addin/` endpoint aliases for all static files
+- Cleaned up Container App URLs (migrated from salmonsmoke to wittyocean)
+- Updated CSP headers to remove WebSocket connections
+- Both root (`/`) and `/addin/` paths now serve Outlook Add-in files
 
 ### 2025-08-26: LangGraph Migration
 ✅ **LangGraph Implementation**

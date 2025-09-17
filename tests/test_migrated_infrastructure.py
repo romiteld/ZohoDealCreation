@@ -37,7 +37,7 @@ load_dotenv(env_path)
 
 # Test configuration
 TEST_CONFIG = {
-    "container_app_url": os.getenv("CONTAINER_APP_URL", "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io"),
+    "container_app_url": os.getenv("CONTAINER_APP_URL", "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io"),
     "api_key": os.getenv("API_KEY"),
     "resource_group": "TheWell-Infra-Test",
     "location": "eastus",

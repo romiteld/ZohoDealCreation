@@ -104,13 +104,13 @@ az containerapp update \
 
 ### 1. Health Check
 ```bash
-curl https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/health
+curl https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
 ```
 
 ### 2. Test Zoom Integration
 ```bash
 # Test with a known meeting ID
-curl -X POST "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/api/vault-agent/ingest" \
+curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/vault-agent/ingest" \
   -H "X-API-Key: ${TALENTWELL_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -132,13 +132,13 @@ curl -X POST "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainer
 ### 4. Test Single-Candidate Email
 ```bash
 # Ingest candidate
-LOCATOR=$(curl -X POST "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/api/vault-agent/ingest" \
+LOCATOR=$(curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/vault-agent/ingest" \
   -H "X-API-Key: ${TALENTWELL_API_KEY}" \
   -H "Content-Type: application/json" \
   -d '{...candidate data...}' | jq -r '.locator')
 
 # Publish to email
-curl -X POST "https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io/api/vault-agent/publish" \
+curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/vault-agent/publish" \
   -H "X-API-Key: ${TALENTWELL_API_KEY}" \
   -H "Content-Type: application/json" \
   -d "{

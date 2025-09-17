@@ -166,7 +166,7 @@ Create `.env.local` with required configuration:
 ```bash
 # Core API
 API_KEY=your-secure-api-key
-CONTAINER_APP_URL=https://well-intake-api.salmonsmoke-78b2d936.eastus.azurecontainerapps.io
+CONTAINER_APP_URL=https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
 
 # Database
 DATABASE_URL=postgresql://user:pass@host:port/db
