@@ -1069,7 +1069,7 @@ function populateForm(data) {
     // Auto-enrichment disabled to give users control
     const apolloBtn = document.getElementById('btnApolloEnrich');
     if (shouldEnhanceWithApollo(data)) {
-        console.log('✅ Apollo enrichment available - use the Enrich button to enhance data');
+        console.log('✅ Apollo enrichment available - contact name found');
         // Always show Apollo button when enhancement is available
         if (apolloBtn) {
             apolloBtn.style.display = 'inline-block';
@@ -1084,7 +1084,7 @@ function populateForm(data) {
             }
         }
     } else {
-        console.log('⚡ Apollo enrichment requires email address');
+        console.log('⚡ Apollo enrichment requires a contact name');
         // Hide Apollo button when not applicable
         if (apolloBtn) {
             apolloBtn.style.display = 'none';
@@ -3002,24 +3002,24 @@ function addConfidenceIndicator(confidence) {
  * @returns {boolean} - True if Apollo enhancement should be performed
  */
 function shouldEnhanceWithApollo(data) {
-    // Check if we have at least one strong identifier for Apollo search
-    const hasEmail = data.candidateEmail || data.candidate_email || data.email;
+    // Check if we have a name - that's all we need for Apollo search
     const hasName = data.candidateName || data.candidate_name ||
-                   (data.contactFirstName || data.contactLastName);
-    const hasCompany = data.firmName || data.firm_name || data.company_name;
+                   (data.contactFirstName || data.contactLastName) ||
+                   data.first_name || data.last_name;
 
-    // Need at least email + (name OR company) for effective Apollo search
-    const hasMinimumIdentifiers = hasEmail && (hasName || hasCompany);
+    // Also check for email and company for logging purposes
+    const hasEmail = data.candidateEmail || data.candidate_email || data.email;
+    const hasCompany = data.firmName || data.firm_name || data.company_name;
 
     console.log('Apollo enhancement check:', {
         hasEmail: !!hasEmail,
         hasName: !!hasName,
         hasCompany: !!hasCompany,
-        hasMinimumIdentifiers
+        apolloAvailable: !!hasName
     });
 
-    // Return true if we have minimum identifiers (removed WebSocket dependency)
-    return hasMinimumIdentifiers;
+    // Apollo is available if we have a name
+    return !!hasName;
 }
 
 /**
