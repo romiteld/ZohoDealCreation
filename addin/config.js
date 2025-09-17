@@ -17,7 +17,7 @@ window.API_BASE_URL = 'https://well-intake-api.wittyocean-dfae0f9b.eastus.azurec
 // API Key - Should be injected during deployment or handled server-side
 // WARNING: Never hardcode API keys in client-side code
 // For now, using a placeholder that will be replaced during deployment
-window.API_KEY = '';
+window.API_KEY = 'e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384';
 
 // Note: Since browser JavaScript cannot directly access .env.local,
 // you need either:

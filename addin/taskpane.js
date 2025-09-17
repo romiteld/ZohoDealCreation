@@ -1067,10 +1067,29 @@ function populateForm(data) {
     // ============ APOLLO ENHANCEMENT ============
     // Apollo enrichment is now available via the "Enrich" button
     // Auto-enrichment disabled to give users control
+    const apolloBtn = document.getElementById('btnApolloEnrich');
     if (shouldEnhanceWithApollo(data)) {
         console.log('✅ Apollo enrichment available - use the Enrich button to enhance data');
+        // Always show Apollo button when enhancement is available
+        if (apolloBtn) {
+            apolloBtn.style.display = 'inline-block';
+            apolloBtn.classList.remove('d-none'); // Remove any Bootstrap hide classes
+            // Add a data attribute to track that Apollo should be visible
+            apolloBtn.setAttribute('data-apollo-available', 'true');
+
+            // Also show the corrections section if Apollo is available
+            const correctionsSection = document.getElementById('correctionsSection');
+            if (correctionsSection) {
+                correctionsSection.style.display = 'block';
+            }
+        }
     } else {
         console.log('⚡ Apollo enrichment requires email address');
+        // Hide Apollo button when not applicable
+        if (apolloBtn) {
+            apolloBtn.style.display = 'none';
+            apolloBtn.setAttribute('data-apollo-available', 'false');
+        }
     }
 }
 
@@ -2795,8 +2814,26 @@ function updateCorrectionsSection(extractedData) {
 
         console.log(`Corrections section shown for fields:`, lowConfidenceFields.map(f => f.fieldName));
     } else {
-        correctionsSection.style.display = 'none';
-        console.log('Corrections section hidden - all fields have high confidence');
+        // Check if Apollo button should still be visible
+        const apolloBtn = document.getElementById('btnApolloEnrich');
+        const apolloShouldBeVisible = apolloBtn &&
+                                     (apolloBtn.getAttribute('data-apollo-available') === 'true' ||
+                                      apolloBtn.style.display === 'inline-block');
+
+        if (apolloShouldBeVisible) {
+            // Keep corrections section visible for Apollo button
+            correctionsSection.style.display = 'block';
+            console.log('Corrections section shown for Apollo enrichment option');
+
+            // Ensure the Apollo button remains visible
+            if (apolloBtn) {
+                apolloBtn.style.display = 'inline-block';
+                apolloBtn.classList.remove('d-none');
+            }
+        } else {
+            correctionsSection.style.display = 'none';
+            console.log('Corrections section hidden - all fields have high confidence');
+        }
     }
 }
 
