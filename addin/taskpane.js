@@ -1722,15 +1722,7 @@ async function handleSendToZoho() {
                         pipeline: formData.pipeline,
                         closing_date: formData.closingDate,
                         description_of_reqs: formData.descriptionOfReqs
-                    },
-                    // Legacy fields for backward compatibility
-                    candidate_name: formData.candidateName,
-                    candidate_email: formData.candidateEmail,
-                    phone: formData.candidatePhone,
-                    job_title: formData.jobTitle,
-                    location: formData.location,
-                    company_name: formData.firmName,
-                    referrer_name: formData.referrerName
+                    }
                 },
                 // Include current Outlook user context for client extraction
                 user_context: getUserContext()
