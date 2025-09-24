@@ -1,0 +1,10 @@
+{
+  "sender_email": "notifications@calendly.com",
+  "sender_name": "Calendly",
+  "subject": "Tim Koski (tim.koski@everpar.com) has booked Recruiting Consult on Sep 24, 2025",
+  "body": "Event Details:\n\nRecruiting Consult\nInvitee: Tim Koski\nEmail: tim.koski@everpar.com\nPhone: +1 918-237-1276\nDate: September 24, 2025\nLocation: Tulsa\n\nMeeting Notes:\nLooking to expand our team in Tulsa. Currently planning to hire 2 lead advisors ASAP, with a third CSA position opening in 2026. We're also projecting to add two associate advisors in 2027 and another lead advisor in 2028.\n\nCompany: Everpar (from email domain)",
+  "attachments": [],
+  "dry_run": false,
+  "reply_to": "tim.koski@everpar.com",
+  "internet_message_id": "calendly-event-2025-09-24-tim-koski@calendly.com"
+}

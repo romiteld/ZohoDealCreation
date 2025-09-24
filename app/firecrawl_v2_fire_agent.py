@@ -660,8 +660,11 @@ class FirecrawlV2Enterprise:
         import re
 
         # Extract basic company information from markdown
+        # Extract actual company name from content instead of using URL
+        extracted_company_name = self._extract_company_name_from_content(markdown_content, company_name)
+
         company_data = {
-            "company_name": company_name,
+            "company_name": extracted_company_name,
             "description": "",
             "phone": "",
             "email": "",
@@ -675,12 +678,14 @@ class FirecrawlV2Enterprise:
         if not markdown_content:
             return company_data
 
-        # Look for phone numbers
+        # Look for phone numbers with context prioritization
         phone_pattern = r'(?:\+?1[-.\s]?)?\(?([0-9]{3})\)?[-.\s]?([0-9]{3})[-.\s]?([0-9]{4})'
-        phones = re.findall(phone_pattern, markdown_content)
-        if phones:
-            company_data["phone"] = f"({phones[0][0]}) {phones[0][1]}-{phones[0][2]}"
-            company_data["contact"]["phone"] = company_data["phone"]
+
+        # Find all phone numbers with surrounding context for better selection
+        company_phone = self._extract_company_phone(markdown_content, phone_pattern)
+        if company_phone:
+            company_data["phone"] = company_phone
+            company_data["contact"]["phone"] = company_phone
 
         # Look for email addresses
         email_pattern = r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b'
@@ -705,14 +710,152 @@ class FirecrawlV2Enterprise:
                 company_data["description"] = line[:200] + "..." if len(line) > 200 else line
                 break
 
-        # Look for address patterns
+        # Look for address patterns and extract city/state
         address_pattern = r'\d+[^,\n]*(?:Street|St|Avenue|Ave|Road|Rd|Boulevard|Blvd|Drive|Dr|Lane|Ln)[^,\n]*(?:,\s*[^,\n]+)*(?:,\s*[A-Z]{2})?(?:\s+\d{5})?'
         addresses = re.findall(address_pattern, markdown_content, re.IGNORECASE)
         if addresses:
             company_data["address"] = addresses[0]
             company_data["contact"]["address"] = company_data["address"]
 
+        # Extract city and state from content
+        city_state_data = self._extract_city_state_from_content(markdown_content)
+        if city_state_data:
+            company_data["contact"].update(city_state_data)
+
         return company_data
+
+    def _extract_company_name_from_content(self, markdown_content: str, fallback_url: str) -> str:
+        """Extract actual company name from website content"""
+        import re
+
+        # Try different patterns to find company name
+        patterns = [
+            # Look for title tags or h1 headers
+            r'(?i)(?:^|\n)#{1,2}\s*([^#\n]+?)(?:\s*-\s*(?:Home|Welcome|About))?(?:\n|$)',
+            # Look for "About [Company]" or "Welcome to [Company]"
+            r'(?i)(?:About|Welcome to)\s+([A-Z][^,.\n]*?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors))',
+            # Look for company name in context
+            r'(?i)([A-Z][^,.\n]*?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors))',
+            # Look for copyright notices
+            r'(?i)©.*?(\d{4}).*?([A-Z][^,.\n]*?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors))',
+        ]
+
+        for pattern in patterns:
+            matches = re.findall(pattern, markdown_content)
+            if matches:
+                # Take the first match and clean it up
+                if isinstance(matches[0], tuple):
+                    company_name = matches[0][-1].strip()  # Take last group from tuple
+                else:
+                    company_name = matches[0].strip()
+
+                # Clean up the name
+                company_name = re.sub(r'\s+', ' ', company_name)  # Normalize whitespace
+                company_name = company_name.strip('.,!?')  # Remove trailing punctuation
+
+                if len(company_name) > 3 and len(company_name) < 100:  # Reasonable length
+                    return company_name
+
+        # Fallback: try to extract from URL
+        if fallback_url.startswith('http'):
+            from urllib.parse import urlparse
+            domain = urlparse(fallback_url).netloc
+            domain = domain.replace('www.', '').replace('.com', '').replace('.net', '').replace('.org', '')
+            return domain.title()
+
+        return fallback_url
+
+    def _extract_company_phone(self, markdown_content: str, phone_pattern: str) -> str:
+        """Extract company phone number with context prioritization"""
+        import re
+
+        # Split content into lines for context analysis
+        lines = markdown_content.split('\n')
+        phone_candidates = []
+
+        for i, line in enumerate(lines):
+            phones = re.findall(phone_pattern, line)
+            if phones:
+                # Get surrounding context (2 lines before and after)
+                context_start = max(0, i-2)
+                context_end = min(len(lines), i+3)
+                context = ' '.join(lines[context_start:context_end]).lower()
+
+                for phone_tuple in phones:
+                    formatted_phone = f"({phone_tuple[0]}) {phone_tuple[1]}-{phone_tuple[2]}"
+
+                    # Score based on context keywords
+                    score = 0
+
+                    # Prioritize main company contact info
+                    if any(keyword in context for keyword in ['contact', 'office', 'main', 'headquarters', 'corporate']):
+                        score += 10
+                    if any(keyword in context for keyword in ['phone', 'call', 'tel']):
+                        score += 5
+                    if any(keyword in context for keyword in ['sales', 'support', 'customer']):
+                        score += 3
+
+                    # Deprioritize personal/individual contacts
+                    if any(keyword in context for keyword in ['mobile', 'cell', 'personal', 'direct']):
+                        score -= 5
+                    if any(keyword in context for keyword in ['fax', 'toll-free', '800-', '888-', '877-']):
+                        score -= 2
+
+                    phone_candidates.append((formatted_phone, score, i))
+
+        # Return highest scoring phone number
+        if phone_candidates:
+            phone_candidates.sort(key=lambda x: (-x[1], x[2]))  # Sort by score desc, then line number asc
+            return phone_candidates[0][0]
+
+        return ""
+
+    def _extract_city_state_from_content(self, markdown_content: str) -> dict:
+        """Extract city and state from content using multiple patterns"""
+        import re
+
+        # Common US state abbreviations for validation
+        us_states = {
+            'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+            'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+            'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+            'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+            'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
+        }
+
+        patterns = [
+            # Pattern 1: City, State ZIP format
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\s*\d{5}',
+            # Pattern 2: City, State format
+            r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b',
+            # Pattern 3: Located in City, State
+            r'(?i)(?:located|based|headquartered)\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b',
+            # Pattern 4: City State with no comma (less reliable)
+            r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+([A-Z]{2})\b(?=\s|$)',
+        ]
+
+        candidates = []
+
+        for pattern in patterns:
+            matches = re.findall(pattern, markdown_content)
+            for match in matches:
+                city, state = match[0].strip(), match[1].strip().upper()
+
+                # Validate state abbreviation
+                if state in us_states and len(city) > 2 and len(city) < 50:
+                    # Score based on context and pattern reliability
+                    score = 1
+                    if 'headquarter' in markdown_content.lower() or 'located' in markdown_content.lower():
+                        score += 2
+                    candidates.append((city, state, score))
+
+        # Return highest scoring candidate
+        if candidates:
+            candidates.sort(key=lambda x: -x[2])  # Sort by score descending
+            city, state, _ = candidates[0]
+            return {"city": city, "state": state}
+
+        return {}
 
 
 def test_fire_agent():

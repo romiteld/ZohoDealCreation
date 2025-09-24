@@ -71,9 +71,10 @@ class FirecrawlV2Agent:
                 logger.info(f"🌐 Using company URL: {company_url}")
 
                 # Extract company data using Firecrawl v2
+                # Pass the URL directly so the system can extract the actual company name from content
                 logger.info("📞 Calling enterprise.research_company...")
                 company_result = self.enterprise.research_company(
-                    company_name=company_domain,
+                    company_name=company_url,  # Use full URL so system can extract actual company name
                     enable_web_search=True
                 )
                 logger.info(f"📋 Company research result: {company_result}")

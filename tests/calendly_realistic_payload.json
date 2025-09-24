@@ -1,0 +1,9 @@
+{
+  "sender_email": "notifications@calendly.com",
+  "sender_name": "Calendly",
+  "subject": "New Event: Tim Koski - Recruiting Consult",
+  "body": "A new event has been scheduled.\n\nEvent Type:\nRecruiting Consult\n\nInvitee:\nTim Koski\ntim.koski@everpar.com\n\nInvitee Phone Number:\n+1 918-237-1276\n\nEvent Date/Time:\n11:00am - 11:30am (America/Chicago) on Wednesday, September 24, 2025\n\nLocation:\nThis is a phone call. The Well will call the invitee at the phone number provided.\n\nInvitee Time Zone:\nAmerica/Chicago\n\nQuestions:\n\nPlease share more about the opportunity you have available:\nLooking to hire 2 lead advisors in the Tulsa market ASAP. Planning to add a third CSA in 2026, two associate advisors in 2027, and another lead advisor in 2028.\n\nView event in Calendly: https://calendly.com/scheduled_events/evt_abc123\n\nNeed to make changes to this event?\nCancel: https://calendly.com/cancellations/evt_abc123\nReschedule: https://calendly.com/reschedulings/evt_abc123\n\nPowered by Calendly.com",
+  "attachments": [],
+  "reply_to": "tim.koski@everpar.com",
+  "internet_message_id": "evt_abc123@calendly.com"
+}
