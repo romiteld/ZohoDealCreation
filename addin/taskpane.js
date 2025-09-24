@@ -650,7 +650,12 @@ async function extractAndPreview() {
                     companyOwner: getString(company.detail || extracted?.credit_person_name || extracted?.referrer_name),
                     referrerName: getString(extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName),
                     referrerEmail: getString(extracted?.referrer_email || extracted?.referrerEmail || currentEmailData?.from?.emailAddress),
-                    notes: getString(extracted?.notes || deal.description_of_reqs),
+                    notes: getString(extracted?.notes),
+                    // NEW: Map deal fields from backend structured data
+                    descriptionOfReqs: getString(deal.description_of_reqs || extracted?.description_of_requirements),
+                    pipeline: getString(deal.pipeline) || 'Recruitment',
+                    closingDate: getString(deal.closing_date),
+                    whoGetsCredit: getString(company.who_gets_credit || extracted?.who_gets_credit),
                     calendlyUrl: getString(extracted?.calendly_url || extracted?.calendlyUrl),
                     source: getString(deal.source || extracted?.source || extracted?.Source) || 'Email Inbound',
                     sourceDetail: getString(deal.source_detail || extracted?.source_detail)
@@ -1055,17 +1060,32 @@ function populateForm(data) {
     // Auto-generate deal name when all required fields are filled
     updateDealName();
 
-    // Smart defaults for Pipeline and Closing Date
-    setValue('pipeline', 'Recruitment'); // Default pipeline - matches Steve's template
+    // Use backend pipeline data if available, otherwise default
+    if (data.pipeline) {
+        setValueWithConfidence('pipeline', data.pipeline, data);
+    } else {
+        setValue('pipeline', 'Recruitment'); // Default pipeline
+    }
 
-    // Set closing date to today + 60 days
-    const closingDate = new Date();
-    closingDate.setDate(closingDate.getDate() + 60);
-    setValue('closingDate', closingDate.toISOString().split('T')[0]);
+    // Use backend closing date if available, otherwise default to today + 60 days
+    if (data.closingDate) {
+        setValueWithConfidence('closingDate', data.closingDate, data);
+    } else {
+        const closingDate = new Date();
+        closingDate.setDate(closingDate.getDate() + 60);
+        setValue('closingDate', closingDate.toISOString().split('T')[0]);
+    }
 
-    // Who Gets Credit - Pre-fill with logged-in user as BD Rep
-    setValue('whoGetsCredit', 'BD Rep');
-    setValue('creditDetail', getCurrentUserName()); // Will implement this function
+    // NEW: Set Description of Requirements from backend
+    setValueWithConfidence('descriptionOfReqs', data.descriptionOfReqs || '', data);
+
+    // Who Gets Credit - Use backend data if available
+    if (data.whoGetsCredit) {
+        setValueWithConfidence('whoGetsCredit', data.whoGetsCredit, data);
+    } else {
+        setValue('whoGetsCredit', 'BD Rep');
+    }
+    setValue('creditDetail', data.companyOwner || getCurrentUserName()); // Use backend data or current user
 
     // Set source detail based on extracted data
     const sourceDetail = data.referrerName || data.referrer_name ||
@@ -1073,7 +1093,7 @@ function populateForm(data) {
                         currentEmailData?.from?.displayName || '';
     setValueWithConfidence('sourceDetail', sourceDetail, data);
 
-    // Additional Information
+    // Additional Information - Notes are separate from description of requirements
     setValueWithConfidence('notes', data.notes || '', data);
 
     // Build comprehensive notes from extracted data
@@ -1677,8 +1697,33 @@ async function handleSendToZoho() {
                 attachments: attachmentData,
                 // Send original AI extraction for learning
                 ai_extraction: currentExtractedData || {},
-                // Send user corrections to learn from
+                // Send user corrections in structured 3-record format
                 user_corrections: {
+                    company_record: {
+                        company_name: formData.firmName,
+                        phone: formData.companyPhone,
+                        website: formData.companyWebsite,
+                        detail: formData.creditDetail,
+                        source: formData.companySource,
+                        source_detail: formData.sourceDetail,
+                        who_gets_credit: formData.whoGetsCredit
+                    },
+                    contact_record: {
+                        first_name: formData.contactFirstName,
+                        last_name: formData.contactLastName,
+                        email: formData.candidateEmail,
+                        phone: formData.candidatePhone,
+                        city: formData.contactCity,
+                        state: formData.contactState
+                    },
+                    deal_record: {
+                        source: formData.source,
+                        deal_name: formData.dealName,
+                        pipeline: formData.pipeline,
+                        closing_date: formData.closingDate,
+                        description_of_reqs: formData.descriptionOfReqs
+                    },
+                    // Legacy fields for backward compatibility
                     candidate_name: formData.candidateName,
                     candidate_email: formData.candidateEmail,
                     phone: formData.candidatePhone,
@@ -1871,6 +1916,7 @@ function getFormData() {
         dealName: document.getElementById('dealName').value.trim(),
         pipeline: document.getElementById('pipeline').value,
         closingDate: document.getElementById('closingDate').value,
+        descriptionOfReqs: document.getElementById('descriptionOfReqs').value.trim(),
 
         // Who Gets Credit
         whoGetsCredit: document.getElementById('whoGetsCredit').value,
@@ -3522,24 +3568,40 @@ async function enrichWithFirecrawl(data, researchDomain) {
 
                 // Update company fields
                 if (company.phone) {
-                    updateFieldValue('companyPhone', company.phone);
-                    console.log('Updated company phone:', company.phone);
+                    const phoneField = document.getElementById('companyPhone');
+                    if (phoneField) {
+                        phoneField.value = company.phone;
+                        showFieldEnhanced('companyPhone', 'Firecrawl');
+                        console.log('Updated company phone:', company.phone);
+                    }
                 }
 
                 if (company.website) {
-                    updateFieldValue('companyWebsite', company.website);
-                    console.log('Updated company website:', company.website);
+                    const websiteField = document.getElementById('companyWebsite');
+                    if (websiteField) {
+                        websiteField.value = company.website;
+                        showFieldEnhanced('companyWebsite', 'Firecrawl');
+                        console.log('Updated company website:', company.website);
+                    }
                 }
 
                 if (company.description) {
-                    updateFieldValue('companyDescription', company.description);
-                    console.log('Updated company description');
+                    const descField = document.getElementById('companyDescription');
+                    if (descField) {
+                        descField.value = company.description;
+                        showFieldEnhanced('companyDescription', 'Firecrawl');
+                        console.log('Updated company description');
+                    }
                 }
 
                 // Update location from headquarters
                 if (company.headquarters) {
-                    updateFieldValue('companyLocation', company.headquarters);
-                    console.log('Updated company location:', company.headquarters);
+                    const locationField = document.getElementById('companyLocation');
+                    if (locationField) {
+                        locationField.value = company.headquarters;
+                        showFieldEnhanced('companyLocation', 'Firecrawl');
+                        console.log('Updated company location:', company.headquarters);
+                    }
                 }
             }
 
@@ -3550,18 +3612,30 @@ async function enrichWithFirecrawl(data, researchDomain) {
                 console.log('Updating contact fields with Firecrawl data:', contact);
 
                 if (contact.phone) {
-                    updateFieldValue('candidatePhone', contact.phone);
-                    console.log('Updated contact phone:', contact.phone);
+                    const phoneField = document.getElementById('candidatePhone');
+                    if (phoneField) {
+                        phoneField.value = contact.phone;
+                        showFieldEnhanced('candidatePhone', 'Firecrawl');
+                        console.log('Updated contact phone:', contact.phone);
+                    }
                 }
 
                 if (contact.location) {
-                    updateFieldValue('location', contact.location);
-                    console.log('Updated contact location:', contact.location);
+                    const locationField = document.getElementById('location');
+                    if (locationField) {
+                        locationField.value = contact.location;
+                        showFieldEnhanced('location', 'Firecrawl');
+                        console.log('Updated contact location:', contact.location);
+                    }
                 }
 
                 if (contact.linkedin_url) {
-                    updateFieldValue('linkedinUrl', contact.linkedin_url);
-                    console.log('Updated LinkedIn URL:', contact.linkedin_url);
+                    const linkedinField = document.getElementById('linkedinUrl');
+                    if (linkedinField) {
+                        linkedinField.value = contact.linkedin_url;
+                        showFieldEnhanced('linkedinUrl', 'Firecrawl');
+                        console.log('Updated LinkedIn URL:', contact.linkedin_url);
+                    }
                 }
             }
 
