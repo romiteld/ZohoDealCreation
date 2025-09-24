@@ -1539,8 +1539,18 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         if request.user_corrections:
             # User has already reviewed and corrected the data
             logger.info("Using user-provided corrections directly")
-            from app.models import ExtractedData
-            extracted_data = ExtractedData(**request.user_corrections)
+            from app.models import ExtractedData, CompanyRecord, ContactRecord, DealRecord
+            
+            # Properly handle structured user_corrections with nested records
+            company_record = CompanyRecord(**request.user_corrections.get("company_record", {}))
+            contact_record = ContactRecord(**request.user_corrections.get("contact_record", {}))
+            deal_record = DealRecord(**request.user_corrections.get("deal_record", {}))
+            
+            extracted_data = ExtractedData(
+                company_record=company_record,
+                contact_record=contact_record,
+                deal_record=deal_record
+            )
         else:
             # PHASE 1: Check Azure AI Search for similar patterns before processing
             similar_patterns = []
