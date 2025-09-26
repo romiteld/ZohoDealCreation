@@ -100,62 +100,43 @@ def generate_brandon_html(candidates, title="Your Curated Candidates"):
     <title>''' + title + '''</title>
     <style>
         body {
-            font-family: Arial, sans-serif;
-            font-size: 14px;
-            line-height: 1.5;
-            margin: 20px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            line-height: 1.6;
             color: #333;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
         }
-        .candidate {
-            margin-bottom: 30px;
-            padding: 15px;
-            background-color: #f9f9f9;
-            border-left: 4px solid #0066cc;
+        .email-container {
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            overflow: hidden;
+            padding: 20px;
         }
-        .candidate-header {
-            font-weight: bold;
-            margin-bottom: 10px;
+        p {
+            margin: 12px 0;
         }
-        .candidate-company {
-            margin-bottom: 8px;
+        ul {
+            margin: 10px 0 20px 0;
+            padding-left: 25px;
         }
-        .candidate-bullets {
-            margin: 10px 0;
-        }
-        .candidate-bullets ul {
-            margin: 5px 0;
-            padding-left: 20px;
-        }
-        .candidate-bullets li {
-            margin: 3px 0;
-        }
-        .availability-comp {
+        li {
             margin: 8px 0;
-            font-style: italic;
+        }
+        b {
+            font-weight: 600;
         }
         .ref-code {
             color: #666;
-            font-size: 12px;
-            margin-top: 10px;
-            font-weight: bold;
-        }
-        .header {
-            background-color: #0066cc;
-            color: white;
-            padding: 20px;
-            margin-bottom: 30px;
-        }
-        .header h1 {
-            margin: 0;
+            font-size: 14px;
+            margin-top: 5px;
         }
     </style>
 </head>
 <body>
-    <div class="header">
-        <h1>''' + title + '''</h1>
-        <p>Generated: ''' + datetime.now().strftime('%B %d, %Y') + '''</p>
-        <p>Total Candidates: ''' + str(len(candidates)) + '''</p>
-    </div>
+    <div class="email-container">
 ''']
 
     for candidate in candidates:
@@ -198,49 +179,41 @@ def generate_brandon_html(candidates, title="Your Curated Candidates"):
             if candidate.get('source') and len(bullets) < 3:
                 bullets.append(f"Source: {candidate['source']}")
 
-        # Format candidate HTML
+        # Format candidate HTML - Brandon's exact format
         html_parts.append(f'''
-        <div class="candidate">
-            <div class="candidate-header">
-                ‼️ {candidate['name']} | {candidate['title']}
-            </div>
-            <div class="candidate-company">
-                🔔 {candidate['company']} | {candidate.get('location', 'Location TBD')}
-            </div>
-            <div class="candidate-bullets">
-                <ul>''')
+<p>‼️ <b>{candidate['name']} Alert</b> 🔔<br>
+📍 <b>{candidate.get('location', 'Location TBD')}</b>''')
+
+        # Add mobility/remote preferences if available
+        mobility_parts = []
+        if candidate.get('is_mobile'):
+            mobility_parts.append("<b>Is Mobile</b>")
+        if candidate.get('remote_pref'):
+            mobility_parts.append("<b>Open to Remote</b>")
+        if candidate.get('hybrid_pref'):
+            mobility_parts.append("Hybrid Opportunities")
+        if mobility_parts:
+            html_parts.append(' (' + ' / '.join(mobility_parts) + ')')
+
+        html_parts.append('</p>\n<ul>')
 
         # Add bullets
         for bullet in bullets[:5]:  # Max 5 bullets
-            html_parts.append(f'''
-                    <li>{bullet}</li>''')
+            html_parts.append(f'\n<li>{bullet}</li>')
 
-        html_parts.append('''
-                </ul>
-            </div>''')
+        # Add availability and compensation as bullets if available
+        if candidate.get('when_available'):
+            html_parts.append(f"\n<li>Available: {candidate['when_available']}</li>")
+        if candidate.get('desired_comp'):
+            html_parts.append(f"\n<li>Desired comp: {candidate['desired_comp']}</li>")
 
-        # Add availability and compensation if available
-        if candidate.get('when_available') or candidate.get('desired_comp'):
-            html_parts.append('''
-            <div class="availability-comp">''')
-
-            if candidate.get('when_available'):
-                html_parts.append(f'''
-                📍 Available: {candidate['when_available']}''')
-
-            if candidate.get('desired_comp'):
-                html_parts.append(f'''
-                <br>📍 Compensation: {candidate['desired_comp']}''')
-
-            html_parts.append('''
-            </div>''')
+        html_parts.append('\n</ul>')
 
         # Add REAL TWAV number
-        html_parts.append(f'''
-            <div class="ref-code">Ref code: {candidate['twav_number']}</div>
-        </div>''')
+        html_parts.append(f'\n<p class="ref-code">Ref code: {candidate["twav_number"]}</p>\n')
 
     html_parts.append('''
+    </div>
 </body>
 </html>''')
 
@@ -281,25 +254,28 @@ async def main():
             f.write(all_html)
         logger.info(f"Generated Brandon_REAL_100_Candidates.html with {min(100, len(candidates))} real candidates")
 
-    # 2. 50 Advisors
+    # 2. Advisors (may be more than 50 if executives < 50)
+    # Ensure advisors + executives = 100 total
     if advisors:
+        # If we have fewer than 50 executives, take more advisors
+        advisors_to_take = 100 - len(executives) if len(executives) < 50 else 50
         advisors_html = generate_brandon_html(
-            advisors[:50],
+            advisors[:advisors_to_take],
             title=f"Financial Advisors - {datetime.now().strftime('%B %d, %Y')}"
         )
-        with open('Brandon_REAL_50_Advisors.html', 'w') as f:
+        with open('Brandon_REAL_Advisors.html', 'w') as f:
             f.write(advisors_html)
-        logger.info(f"Generated Brandon_REAL_50_Advisors.html with {min(50, len(advisors))} real advisors")
+        logger.info(f"Generated Brandon_REAL_Advisors.html with {min(advisors_to_take, len(advisors))} real advisors")
 
-    # 3. 50 Executives
+    # 3. Executives
     if executives:
         executives_html = generate_brandon_html(
-            executives[:50],
+            executives,  # Take all executives (no limit since we adjust advisors)
             title=f"Executives & Directors - {datetime.now().strftime('%B %d, %Y')}"
         )
-        with open('Brandon_REAL_50_Executives.html', 'w') as f:
+        with open('Brandon_REAL_Executives.html', 'w') as f:
             f.write(executives_html)
-        logger.info(f"Generated Brandon_REAL_50_Executives.html with {min(50, len(executives))} real executives")
+        logger.info(f"Generated Brandon_REAL_Executives.html with {len(executives)} real executives")
 
     # Log summary with actual TWAV numbers
     logger.info("\n=== REAL TWAV NUMBERS FROM ZOHO ===")
