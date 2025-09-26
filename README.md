@@ -34,6 +34,10 @@ An advanced email processing system that leverages **LangGraph workflows**, **GP
 - **📊 Manifest Analytics**: Track version adoption, cache performance, and error rates
 - **🌐 CDN Management**: Azure Front Door integration with cache purging capabilities
 - **🔀 Proxy Routing**: Flask-based routing with /api/* and /cdn/* endpoint support
+- **🎯 TalentWell Curator**: Weekly digest generation for financial advisors with Zoom transcript processing
+- **🔒 Vault Agent System**: C³/VoIT orchestration for candidate records with conformal guarantees
+- **📈 Financial Pattern Recognition**: AUM, production, growth metrics extraction from transcripts
+- **🎥 Zoom Integration**: Server-to-Server OAuth with VTT transcript processing
 
 ## 🏗️ Comprehensive Architecture Overview
 
@@ -167,6 +171,9 @@ C4Component
         Component(business_rules, "Business Rules", "Python Module", "Deal formatting, source determination logic")
         Component(integrations, "Integrations", "Python Module", "External API clients (Zoho, OpenAI, etc.)")
         Component(monitoring, "Monitoring", "Python Module", "Application Insights telemetry and metrics")
+        Component(talentwell, "TalentWell Curator", "Python Module", "Weekly digest generation for financial advisors")
+        Component(vault_agent, "Vault Agent", "Python Module", "C³/VoIT orchestration for candidate records")
+        Component(zoom_client, "Zoom Client", "Python Module", "Transcript fetching and processing")
     }
 
     ContainerDb(redis, "Redis Cache", "Key-value store")
@@ -177,6 +184,7 @@ C4Component
     System_Ext(openai_api, "OpenAI API", "AI processing service")
     System_Ext(firecrawl_api, "Firecrawl API", "Web scraping service")
     System_Ext(apollo_api, "Apollo.io API", "Contact enrichment")
+    System_Ext(zoom_api, "Zoom API", "Meeting transcripts")
 
     Rel(main_api, langgraph_mgr, "Initiates processing workflow")
     Rel(main_api, cache_mgr, "Checks/stores cache entries")
@@ -195,6 +203,11 @@ C4Component
     Rel(integrations, openai_api, "AI text processing")
     Rel(integrations, firecrawl_api, "Company research")
     Rel(integrations, apollo_api, "Contact enrichment")
+
+    Rel(talentwell, zoom_client, "Fetches transcripts")
+    Rel(talentwell, vault_agent, "C³/VoIT processing")
+    Rel(vault_agent, cache_mgr, "Cache orchestration")
+    Rel(zoom_client, zoom_api, "API calls")
 
     Rel(monitoring, main_api, "Collects metrics")
 
@@ -400,6 +413,8 @@ graph TB
         APOLLO_API[["🚀 Apollo.io API<br/>━━━━━━━━━━━━━━━━<br/>• People Match<br/>• Contact Data<br/>• Company Info<br/>• Email Finder<br/>• 100 credits/mo"]]
 
         ZOHO_API[["📊 Zoho CRM v8<br/>━━━━━━━━━━━━━━━━<br/>• REST API<br/>• OAuth 2.0<br/>• Bulk Operations<br/>• Webhooks<br/>• 5000 req/hr"]]
+
+        ZOOM[["🎥 Zoom API<br/>━━━━━━━━━━━━━━━━<br/>• Server-to-Server OAuth<br/>• Meeting Recordings<br/>• VTT Transcripts<br/>• 1-hour Token Expiry<br/>• Webhook Events"]]
     end
 
     subgraph "📊 Performance Metrics"
@@ -431,6 +446,7 @@ graph TB
     CA -.->|Scrape| FIRECRAWL
     CA -.->|Enrich| APOLLO_API
     CA -.->|CRM| ZOHO_API
+    CA -.->|Transcripts| ZOOM
 
     %% Metrics Collection
     CA -.->|Metrics| PERF
@@ -447,6 +463,7 @@ graph TB
 
     class CA,AS,ACR compute
     class PG,REDIS,BLOB,SEARCH data
+    class ZOOM external
     class SB messaging
     class KV,AI,FD security
     class GH_MAIN,GH_CACHE,DOCKER,HELM cicd
