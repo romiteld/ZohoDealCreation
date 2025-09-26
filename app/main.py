@@ -1545,11 +1545,40 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
             company_record = CompanyRecord(**request.user_corrections.get("company_record", {}))
             contact_record = ContactRecord(**request.user_corrections.get("contact_record", {}))
             deal_record = DealRecord(**request.user_corrections.get("deal_record", {}))
-            
+
+            # Populate legacy fields from structured records for backward compatibility
+            legacy_fields = {}
+            if contact_record:
+                if contact_record.first_name or contact_record.last_name:
+                    legacy_fields['candidate_name'] = f"{contact_record.first_name or ''} {contact_record.last_name or ''}".strip()
+                if contact_record.email:
+                    legacy_fields['email'] = contact_record.email
+                if contact_record.phone:
+                    legacy_fields['phone'] = contact_record.phone
+                if contact_record.city or contact_record.state:
+                    legacy_fields['location'] = f"{contact_record.city or ''}, {contact_record.state or ''}".strip(', ')
+
+            if company_record:
+                if company_record.company_name:
+                    legacy_fields['company_name'] = company_record.company_name
+                if company_record.website:
+                    legacy_fields['website'] = company_record.website
+                if company_record.detail:
+                    legacy_fields['referrer_name'] = company_record.detail
+
+            if deal_record:
+                if deal_record.deal_name:
+                    legacy_fields['job_title'] = deal_record.deal_name
+                if deal_record.source:
+                    legacy_fields['source'] = deal_record.source
+                if deal_record.source_detail:
+                    legacy_fields['source_detail'] = deal_record.source_detail
+
             extracted_data = ExtractedData(
                 company_record=company_record,
                 contact_record=contact_record,
-                deal_record=deal_record
+                deal_record=deal_record,
+                **legacy_fields
             )
         else:
             # PHASE 1: Check Azure AI Search for similar patterns before processing
@@ -2601,8 +2630,18 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         )
         
     except Exception as e:
-        logger.error(f"Error processing email: {str(e)}")
-        
+        import traceback
+
+        # Get full error details including stack trace
+        error_details = {
+            "error_type": type(e).__name__,
+            "error_message": str(e),
+            "traceback": traceback.format_exc(),
+            "correlation_id": correlation_id
+        }
+
+        logger.error(f"Error processing email: {json.dumps(error_details, indent=2)}")
+
         # Log failure to intake_audit for comprehensive tracking
         if hasattr(req.app.state, 'postgres_client') and req.app.state.postgres_client:
             try:
@@ -2651,15 +2690,36 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
             except Exception as storage_error:
                 logger.warning(f"Failed to store error audit log: {storage_error}")
         
-        # Return error with correlation_id if available
+        # Return detailed error with correlation_id if available
         correlation_id = locals().get('correlation_id')
+
+        # Prepare verbose error response for debugging
+        error_response = {
+            "error": str(e),
+            "error_type": type(e).__name__,
+            "correlation_id": correlation_id,
+            "message": "Transaction failed",
+            "details": None
+        }
+
+        # Add specific details for common errors
+        if "user_corrections" in str(e):
+            error_response["details"] = "Invalid user_corrections structure. Expected: {company_record: {...}, contact_record: {...}, deal_record: {...}}"
+        elif "NoneType" in str(e):
+            error_response["details"] = f"Missing required field or null value error: {str(e)[:200]}"
+        elif "closing_date" in str(e):
+            error_response["details"] = "Date format error. Use null for empty dates, not empty strings."
+        else:
+            # Include first 500 chars of traceback for unknown errors
+            error_response["details"] = traceback.format_exc()[:500] if 'traceback' in locals() else str(e)[:200]
+
         if correlation_id:
             raise HTTPException(
-                status_code=500, 
-                detail=f"Transaction failed: {str(e)}. Correlation ID: {correlation_id}"
+                status_code=500,
+                detail=error_response
             )
         else:
-            raise HTTPException(status_code=500, detail=str(e))
+            raise HTTPException(status_code=500, detail=error_response)
 
 @app.get("/intake/email/status/{extraction_id}", dependencies=[Depends(verify_api_key)])
 async def get_extraction_status(extraction_id: str, req: Request):

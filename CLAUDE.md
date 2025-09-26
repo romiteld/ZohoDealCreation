@@ -181,6 +181,147 @@ curl -X GET "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerap
   -H "X-API-Key: your-api-key"
 ```
 
+## TalentWell Curator & Vault Agent System
+
+### Overview
+The **TalentWell Curator** is a sophisticated system for generating weekly candidate digests for financial advisors, with comprehensive **Zoom transcript processing** and evidence extraction. It integrates with the **Vault Agent** for C³/VoIT orchestration.
+
+### Core Components
+
+#### TalentWell Curator (`app/jobs/talentwell_curator.py`)
+- **Weekly digest generation** for candidates with financial advisor focus
+- **Comprehensive Zoom transcript processing** with VTT format support
+- **Evidence-based bullet generation** (3-5 bullets minimum from real data sources)
+- **Redis caching** with 4-week deduplication
+- **AST template compilation** for HTML rendering
+- **Subject line bandit optimization** for email campaigns
+
+#### Vault Agent API (`app/api/vault_agent/routes.py`)
+- `POST /api/vault-agent/ingest` - Normalize and store candidate records
+- `POST /api/vault-agent/publish` - Apply C³+VoIT and publish to channels
+- `GET /api/vault-agent/status` - Check feature flags and configuration
+- **C³ cache integration** with conformal guarantees
+- **VoIT orchestration** for quality/cost optimization
+
+#### Evidence Extractor (`app/extract/evidence.py`)
+**Refactored from tech to financial advisor patterns**:
+```python
+class BulletCategory(Enum):
+    FINANCIAL_METRIC = "financial_metric"      # AUM, production, book size
+    GROWTH_ACHIEVEMENT = "growth_achievement"  # Growth metrics
+    CLIENT_METRIC = "client_metric"           # Client count, retention
+    PERFORMANCE_RANKING = "performance_ranking" # Rankings
+    LICENSES = "licenses"                     # Series 7/66, CFA, CFP
+    EXPERIENCE = "experience"                 # Years in financial services
+```
+
+#### Zoom Client (`app/zoom_client.py`)
+- **Server-to-Server OAuth** authentication
+- **Meeting recording** and **transcript fetching**
+- **VTT format transcript** processing
+- **Automatic token refresh** with 1-hour expiry
+
+### Data Flow Pipeline
+
+#### Zoom Transcript Processing
+1. **Fetch transcript**: `ZoomClient.fetch_zoom_transcript_for_meeting()`
+2. **Evidence extraction**: Parse financial metrics using regex patterns
+3. **Bullet generation**: Extract AUM, production, growth, clients from transcripts
+4. **Confidence scoring**: 0.95 for transcript evidence, 0.9 for CRM fields
+
+#### Financial Patterns Recognition
+```python
+# AUM/Book Size patterns from transcripts
+'aum': [
+    r'\$[\d,]+(?:\.\d+)?\s*(?:billion|B)\s*(?:AUM|aum|under management)',
+    r'manages?[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMK]',
+    r'(?:book|portfolio)[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMK]'
+]
+
+# Production patterns
+'production': [
+    r'\$[\d,]+(?:\.\d+)?\s*[BMK]?\s*(?:annual production|production)',
+    r'(?:production|revenue)[:\s]+\$[\d,]+(?:\.\d+)?\s*[BMK]'
+]
+
+# Growth patterns
+'growth': [
+    r'(?:grew|growth)[\s\w]*(?:from )?[~]?\$[\d,]+[\s\w]*(?:to )[~]?\$[\d,]+',
+    r'(?:increased?)[\s\w]*(?:AUM|assets)[\s\w]*(?:by )?\d+(?:\.\d+)?%'
+]
+```
+
+### Environment Variables
+```bash
+# Vault Agent Features
+FEATURE_C3=true              # Enable C³ cache
+FEATURE_VOIT=true            # Enable VoIT orchestration
+C3_DELTA=0.01               # Risk bound (1%)
+C3_EPS=3                    # Edit tolerance (characters)
+VOIT_BUDGET=5.0             # Processing budget
+TARGET_QUALITY=0.9          # Target quality score
+
+# Zoom Integration
+ZOOM_ACCOUNT_ID=xyz
+ZOOM_CLIENT_ID=xyz
+ZOOM_CLIENT_SECRET=xyz
+ZOOM_SECRET_TOKEN=xyz       # For webhook verification
+ZOOM_VERIFICATION_TOKEN=xyz # For webhook verification
+```
+
+### DigestCard Format (Brandon's Requirements)
+```python
+@dataclass
+class DigestCard:
+    deal_id: str
+    candidate_name: str
+    job_title: str
+    company: str
+    location: str
+    bullets: List[BulletPoint]           # 3-5 bullets from real data
+    transcript_url: Optional[str]        # Zoom transcript URL
+    evidence_score: float               # Average confidence score
+```
+
+### HTML Output Format
+**Critical**: Must match Brandon's format with emojis:
+- **‼️** for candidate name and title
+- **🔔** for company and location
+- **📍** for availability and compensation
+- **Plain text HTML** (not fancy cards)
+- **3-5 bullet points** extracted from transcripts, resumes, CRM data
+
+### Essential Testing Commands
+```bash
+# Test TalentWell curator
+python -m app.jobs.talentwell_curator --audience steve_perry --days 7
+
+# Test Zoom transcript fetching
+python -c "from app.zoom_client import ZoomClient; import asyncio; client = ZoomClient(); asyncio.run(client.fetch_meeting_recording('MEETING_ID'))"
+
+# Test vault agent ingestion
+curl -X POST "http://localhost:8000/api/vault-agent/ingest" \
+  -H "Content-Type: application/json" \
+  -H "X-API-Key: your-key" \
+  -d '{"source": "email", "payload": {...}}'
+
+# Test evidence extraction
+python tests/test_financial_advisor_extraction.py
+```
+
+### Data Sources Integration
+1. **Zoom Transcripts**: Primary source for financial metrics and achievements
+2. **CRM Fields**: `book_size_aum`, `production_12mo`, `professional_designations`
+3. **Resume Data**: Education, certifications, prior experience
+4. **Email Content**: Additional context and referrer information
+
+### Critical Business Rules
+- **No fake data**: Only extract bullets from verifiable sources
+- **Minimum 3 bullets**: Extract from transcripts, resumes, CRM if insufficient
+- **Financial focus**: Prioritize AUM, production, growth, client metrics
+- **Evidence linking**: Each bullet must trace back to source (transcript line, CRM field)
+- **Confidence scoring**: Transcript evidence = 0.95, CRM = 0.9, inferred = 0.7
+
 ## Critical Constraints
 
 ⚠️ **NEVER CHANGE** - System requirements that must not be modified:
@@ -473,3 +614,18 @@ Target significant cost reductions through intelligent caching and adaptive reas
   - Form population now prefers structured backend data over text parsing
 - **Data Flow**: LangGraph Research → Structured Records → Frontend Mapping → Form Population
 - **Impact**: Firecrawl v2 and Apollo.io research data now properly displays in Outlook Add-in forms
+
+### 2025-09-26: TalentWell Curator & Financial Advisor Processing
+✅ **Complete Financial Advisor Pipeline Implementation**
+- **Evidence Extraction Refactoring**: Converted from tech patterns (Python/Java/AWS) to financial advisor patterns (AUM/production/licenses)
+- **TalentWell Curator System**: Full weekly digest generation with Zoom transcript processing
+- **Vault Agent Integration**: C³/VoIT orchestration for candidate record management
+- **Financial Pattern Recognition**: Comprehensive regex patterns for AUM, production, growth, client metrics
+- **Zoom Server-to-Server OAuth**: Complete integration for transcript fetching and processing
+- **Brandon's HTML Format**: Emoji-based candidate cards (‼️🔔📍) with 3-5 bullet points from real data sources
+- **Key Components**:
+  - `app/jobs/talentwell_curator.py`: Core digest generation with evidence extraction
+  - `app/extract/evidence.py`: Financial advisor-specific pattern recognition
+  - `app/api/vault_agent/routes.py`: C³ cache and VoIT orchestration endpoints
+  - `app/zoom_client.py`: Complete Zoom API integration with VTT transcript support
+- **Critical Requirements**: No fake data, minimum 3 bullets from transcripts/resumes/CRM, financial metrics priority

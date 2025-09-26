@@ -1682,7 +1682,15 @@ async function handleSendToZoho() {
         
         // Send to backend
         await updateProgress(3, 'Sending to AI for processing...');
-        
+
+        // Debug: Log what we're about to send
+        console.log('Sending to backend with currentEmailData:', {
+            hasData: !!currentEmailData,
+            subject: currentEmailData?.subject,
+            bodyLength: currentEmailData?.body?.length || 0,
+            from: currentEmailData?.from
+        });
+
         const response = await fetch(`${API_BASE_URL}/intake/email`, {
             method: 'POST',
             headers: {
@@ -1692,36 +1700,37 @@ async function handleSendToZoho() {
             body: JSON.stringify({
                 sender_email: 'steve@emailthewell.com',  // Always use Steve's email
                 sender_name: 'Steve Perry',  // Always use Steve Perry
-                subject: currentEmailData.subject || '',
-                body: currentEmailData.body || '',
+                subject: currentEmailData?.subject || 'Manual Entry',
+                body: currentEmailData?.body || 'Manual data entry - no email body available',
                 attachments: attachmentData,
                 // Send original AI extraction for learning
                 ai_extraction: currentExtractedData || {},
                 // Send user corrections in structured 3-record format
                 user_corrections: {
                     company_record: {
-                        company_name: formData.firmName,
-                        phone: formData.companyPhone,
-                        website: formData.companyWebsite,
-                        detail: formData.creditDetail,
-                        source: formData.companySource,
-                        source_detail: formData.sourceDetail,
-                        who_gets_credit: formData.whoGetsCredit
+                        company_name: formData.firmName || null,
+                        phone: formData.companyPhone || null,
+                        website: formData.companyWebsite || null,
+                        detail: formData.creditDetail || null,
+                        source: formData.companySource || null,
+                        source_detail: formData.sourceDetail || null,
+                        who_gets_credit: formData.whoGetsCredit || null
                     },
                     contact_record: {
-                        first_name: formData.contactFirstName,
-                        last_name: formData.contactLastName,
-                        email: formData.candidateEmail,
-                        phone: formData.candidatePhone,
-                        city: formData.contactCity,
-                        state: formData.contactState
+                        first_name: formData.contactFirstName || null,
+                        last_name: formData.contactLastName || null,
+                        email: formData.candidateEmail || null,
+                        phone: formData.candidatePhone || null,
+                        city: formData.contactCity || null,
+                        state: formData.contactState || null
                     },
                     deal_record: {
-                        source: formData.source,
-                        deal_name: formData.dealName,
-                        pipeline: formData.pipeline,
-                        closing_date: formData.closingDate,
-                        description_of_reqs: formData.descriptionOfReqs
+                        source: formData.source || null,
+                        deal_name: formData.dealName || null,
+                        pipeline: formData.pipeline || null,
+                        closing_date: formData.closingDate || null,
+                        description_of_reqs: formData.descriptionOfReqs || null,
+                        source_detail: formData.sourceDetail || null
                     }
                 },
                 // Include current Outlook user context for client extraction
@@ -1734,7 +1743,32 @@ async function handleSendToZoho() {
         
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
-            throw new Error(error.detail || `Server error: ${response.status}`);
+
+            // Extract detailed error information
+            let errorMessage = `Server error: ${response.status}`;
+
+            if (error.detail) {
+                if (typeof error.detail === 'object') {
+                    // Detailed error object from our enhanced API
+                    errorMessage = error.detail.message || 'Transaction failed';
+
+                    if (error.detail.details) {
+                        errorMessage += `\n\nDetails: ${error.detail.details}`;
+                    }
+
+                    if (error.detail.correlation_id) {
+                        errorMessage += `\n\nCorrelation ID: ${error.detail.correlation_id}`;
+                    }
+
+                    // Log full error for debugging
+                    console.error('Detailed error from API:', error.detail);
+                } else {
+                    // Simple string error
+                    errorMessage = error.detail;
+                }
+            }
+
+            throw new Error(errorMessage);
         }
         
         const result = await response.json();
@@ -1742,7 +1776,7 @@ async function handleSendToZoho() {
         await updateProgress(6, 'Complete!');
 
         // Check if this was a duplicate
-        if (result.status === 'duplicate') {
+        if (result.status === 'duplicate' || result.status === 'duplicate_blocked') {
             showDuplicate(result);
         } else {
             // Show success message

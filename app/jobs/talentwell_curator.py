@@ -262,10 +262,10 @@ class TalentWellCurator:
         
         try:
             # Extract base information using Brandon's field mappings
-            candidate_name = deal.get('candidate_name', 'Unknown')
-            job_title = deal.get('job_title', 'Unknown')
-            company = deal.get('company_name', 'Unknown')
-            location = deal.get('location', 'Unknown')
+            candidate_name = deal.get('candidate_name', 'Unknown') or 'Unknown'
+            job_title = deal.get('job_title', 'Unknown') or 'Unknown'
+            company = deal.get('company_name', 'Unknown') or 'Unknown'
+            location = deal.get('location', 'Unknown') or 'Unknown'
             
             # Normalize location to metro area
             location = await self._normalize_location(location)
@@ -338,10 +338,30 @@ class TalentWellCurator:
                 transcript_text
             )
             
-            # Validate we have 2-5 bullets
-            if len(bullets) < 2:
-                logger.warning(f"Only {len(bullets)} bullets for candidate {candidate_name}, generating more")
-                bullets = await self._ensure_minimum_bullets(deal, bullets)
+            # CRITICAL: Ensure we have 3-5 bullets from ALL data sources
+            if len(bullets) < 3:
+                logger.warning(f"Only {len(bullets)} bullets for candidate {candidate_name}, extracting from ALL sources")
+
+                # First, try to extract more from transcript if available
+                if transcript_text:
+                    bullets = await self._extract_more_from_transcript(bullets, transcript_text, deal, voit_result.get('enhanced_data', {}))
+
+                # Extract from resume data if available
+                if len(bullets) < 3 and deal.get('resume_text'):
+                    bullets = await self._extract_from_resume(bullets, deal.get('resume_text'), deal)
+
+                # Still need more? Add from available CRM fields
+                if len(bullets) < 3:
+                    bullets = await self._ensure_minimum_bullets(deal, bullets)
+
+                # If STILL less than 3, add generic professional bullets
+                if len(bullets) < 3:
+                    if deal.get('location'):
+                        bullets.append(BulletPoint(
+                            text=f"Location: {deal['location']}",
+                            confidence=0.7,
+                            source="CRM"
+                        ))
             elif len(bullets) > 5:
                 bullets = bullets[:5]  # Take top 5
             
@@ -374,18 +394,18 @@ class TalentWellCurator:
     
     async def _get_metro_area(self, location: str) -> Optional[str]:
         """Get metro area for location from policy."""
-        if not self.redis_client:
+        if not self.redis_client or not location:
             return None
-            
+
         key = f"geo:metro:{location.lower().replace(' ', '_')}"
         value = await self.redis_client.get(key)
         return value.decode() if value else None
     
     async def _get_firm_type(self, company: str) -> Optional[str]:
         """Get firm type from policy."""
-        if not self.redis_client:
+        if not self.redis_client or not company:
             return None
-            
+
         key = f"policy:employers:{company.lower().replace(' ', '_')}"
         value = await self.redis_client.get(key)
         return value.decode() if value else None
@@ -592,63 +612,170 @@ class TalentWellCurator:
         enhanced_data: Dict[str, Any],
         transcript: Optional[str]
     ) -> List[BulletPoint]:
-        """Generate 2-5 hard skill bullets, no soft skills."""
+        """Generate 3-5 hard skill bullets from ALL available data sources."""
         bullets = []
-        
-        # Professional designations / licenses
+
+        # ONLY add experience if we have REAL data
+        years_exp = None
+        if deal.get('years_experience'):
+            years_exp = deal.get('years_experience')
+            bullets.append(BulletPoint(
+                text=f"Experience: {years_exp}",
+                confidence=0.95,
+                source="CRM"
+            ))
+        elif enhanced_data.get('years_experience'):
+            years_exp = enhanced_data.get('years_experience')
+            bullets.append(BulletPoint(
+                text=f"Experience: {years_exp}",
+                confidence=0.95,
+                source="Extraction"
+            ))
+
+        # Financial metrics take priority - format like Brandon's examples
+        # AUM (most important metric)
+        if deal.get('book_size_aum'):
+            bullets.append(BulletPoint(
+                text=f"AUM: {deal['book_size_aum']}",
+                confidence=0.95,
+                source="CRM"
+            ))
+        elif enhanced_data.get('aum_managed'):
+            bullets.append(BulletPoint(
+                text=f"AUM: {enhanced_data['aum_managed']}",
+                confidence=0.95,
+                source="Extraction"
+            ))
+
+        # Extract from ALL available CRM fields - we have this data!
+        # Current role (most candidates have this)
+        if deal.get('job_title') and deal['job_title'].strip() and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Current Role: {deal['job_title']}",
+                confidence=0.9,
+                source="CRM"
+            ))
+
+        # Company name (most candidates have this)
+        if deal.get('company_name') and deal['company_name'].strip() and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Current Firm: {deal['company_name']}",
+                confidence=0.9,
+                source="CRM"
+            ))
+
+        # Location (this is ALWAYS available)
+        if deal.get('location') and deal['location'].strip() and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Location: {deal['location']}",
+                confidence=0.9,
+                source="CRM"
+            ))
+
+        # Production metrics (third priority)
+        if deal.get('production_12mo'):
+            bullets.append(BulletPoint(
+                text=f"Production: {deal['production_12mo']}",
+                confidence=0.95,
+                source="CRM"
+            ))
+        elif enhanced_data.get('production_annual'):
+            bullets.append(BulletPoint(
+                text=f"Production: {enhanced_data['production_annual']}",
+                confidence=0.95,
+                source="Extraction"
+            ))
+
+        # Professional designations/licenses (combine for brevity)
+        licenses = enhanced_data.get('licenses_held', []) or []
+        designations = enhanced_data.get('designations', []) or []
+        prof_creds = licenses + designations
+
         if deal.get('professional_designations'):
             bullets.append(BulletPoint(
                 text=f"Licenses/Designations: {deal['professional_designations']}",
                 confidence=0.95,
                 source="CRM"
             ))
-        
-        # AUM/Book Size
-        if deal.get('book_size_aum'):
+        elif prof_creds and len(bullets) < 4:
+            # Format like "Series 7, 66, CFA charterholder"
             bullets.append(BulletPoint(
-                text=f"Book Size: {deal['book_size_aum']}",
+                text=f"Licenses/Designations: {', '.join(prof_creds[:4])}",  # Limit to avoid long lists
                 confidence=0.95,
-                source="CRM"
+                source="Extraction"
             ))
-        
-        # Production
-        if deal.get('production_12mo'):
+
+        # Client count (if available and bullets < 5)
+        if enhanced_data.get('client_count') and len(bullets) < 5:
             bullets.append(BulletPoint(
-                text=f"12-Month Production: {deal['production_12mo']}",
-                confidence=0.95,
-                source="CRM"
+                text=f"Clients: {enhanced_data['client_count']}",
+                confidence=0.9,
+                source="Extraction"
             ))
-        
-        # Extract from transcript if available
+
+        # Extract MORE financial metrics from transcript if available
         if transcript and len(bullets) < 5:
+            # First try the evidence extractor
             transcript_bullets = await self.evidence_extractor.extract_bullets(
                 {"transcript": transcript},
                 enhanced_data
             )
-            # Filter for hard skills only
+
+            # Add ALL financial-related bullets from transcript
+            financial_keywords = [
+                '$', 'million', 'billion', 'aum', 'production', 'revenue',
+                'clients', 'years', '%', 'portfolio', 'assets', 'book',
+                'series 7', 'series 66', 'series 65', 'cfa', 'cfp',
+                'top performer', 'president', 'club', 'ranking', 'growth',
+                'team', 'managing', 'billion', 'million', 'thousand'
+            ]
             for bullet in transcript_bullets:
-                if any(keyword in bullet.text.lower() for keyword in 
-                       ['$', 'million', 'billion', 'aum', 'clients', 'years', '%', 'portfolio']):
+                if any(keyword in bullet.text.lower() for keyword in financial_keywords):
                     bullets.append(bullet)
                     if len(bullets) >= 5:
                         break
-        
-        # When Available
+
+            # If still not enough, do direct transcript mining
+            if len(bullets) < 3 and transcript:
+                direct_bullets = await self._mine_transcript_directly(transcript, enhanced_data)
+                for bullet in direct_bullets:
+                    if len(bullets) < 5:
+                        bullets.append(bullet)
+
+        # Availability (if space available)
         if deal.get('when_available') and len(bullets) < 5:
             bullets.append(BulletPoint(
                 text=f"Available: {deal['when_available']}",
                 confidence=0.9,
                 source="CRM"
             ))
-        
-        # Desired Comp
+        elif enhanced_data.get('availability_timeframe') and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Available: {enhanced_data['availability_timeframe']}",
+                confidence=0.9,
+                source="Extraction"
+            ))
+
+        # Compensation expectations (lowest priority)
         if deal.get('desired_comp') and len(bullets) < 5:
             bullets.append(BulletPoint(
-                text=f"Desired Compensation: {deal['desired_comp']}",
+                text=f"Compensation: {deal['desired_comp']}",
                 confidence=0.9,
                 source="CRM"
             ))
-        
+        elif enhanced_data.get('compensation_range') and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Compensation: {enhanced_data['compensation_range']}",
+                confidence=0.9,
+                source="Extraction"
+            ))
+
+        # CRITICAL: Never add fake data - only return what we actually have
+        # If we have less than 3 real bullets, that's acceptable per user requirement
+        # If we have more than 5, take the top 5
+        if len(bullets) > 5:
+            bullets = bullets[:5]
+
         return bullets
     
     async def _ensure_minimum_bullets(
@@ -656,27 +783,228 @@ class TalentWellCurator:
         deal: Dict[str, Any],
         existing_bullets: List[BulletPoint]
     ) -> List[BulletPoint]:
-        """Ensure we have at least 2 bullets."""
+        """
+        CRITICAL: Only add real data, never fake data per user requirement.
+        Return whatever bullets we have - even if less than the target.
+        Only add bullets if we have actual verified data from CRM.
+        """
         bullets = list(existing_bullets)
-        
-        # Add generic hard skills if needed
-        if len(bullets) < 2:
-            if deal.get('job_title'):
+
+        # Add education if available and we need more bullets
+        if len(bullets) < 5:
+            education = deal.get('education') or enhanced_data.get('education')
+            if education and education.strip():
                 bullets.append(BulletPoint(
-                    text=f"Current Role: {deal['job_title']}",
+                    text=f"Education: {education}",
                     confidence=0.8,
                     source="CRM"
                 ))
-        
-        if len(bullets) < 2:
-            if deal.get('company_name'):
+
+        # Add industry focus if available
+        if len(bullets) < 5:
+            industry = deal.get('industry_focus') or enhanced_data.get('industry')
+            if industry and industry.strip():
                 bullets.append(BulletPoint(
-                    text=f"Current Firm: {deal['company_name']}",
+                    text=f"Industry Focus: {industry}",
                     confidence=0.8,
                     source="CRM"
                 ))
-        
+
+        # Add location only if we have real location data (important for compliance/licensing)
+        if len(bullets) < 5:
+            location = None
+            if deal.get('location') and deal['location'].strip():
+                location = deal['location']
+            elif deal.get('contact_city') and deal['contact_city'].strip():
+                city = deal['contact_city']
+                state = deal.get('contact_state', '').strip()
+                location = f"{city}, {state}".strip(', ') if state else city
+
+            if location and location != ', ':
+                bullets.append(BulletPoint(
+                    text=f"Location: {location}",
+                    confidence=0.7,
+                    source="CRM"
+                ))
+
+        # NEVER pad with fake data - return what we have
         return bullets
+
+    async def _extract_more_from_transcript(
+        self,
+        existing_bullets: List[BulletPoint],
+        transcript: str,
+        deal: Dict[str, Any],
+        enhanced_data: Dict[str, Any]
+    ) -> List[BulletPoint]:
+        """Extract additional bullets from transcript to reach minimum 3."""
+        bullets = list(existing_bullets)
+
+        if not transcript:
+            return bullets
+
+        # Mine the transcript for financial advisor specific info
+        transcript_lower = transcript.lower()
+
+        # Look for years of experience mentioned in transcript
+        import re
+        years_pattern = r'(\d+)\s*(?:years?|yrs?)\s*(?:of\s*)?(?:experience|in\s*the\s*industry|in\s*finance|in\s*advisory)'
+        years_matches = re.findall(years_pattern, transcript_lower)
+        if years_matches and len(bullets) < 5:
+            years = max([int(y) for y in years_matches])
+            if years > 0:
+                bullets.append(BulletPoint(
+                    text=f"Experience: {years}+ years in financial services",
+                    confidence=0.85,
+                    source="Transcript"
+                ))
+
+        # Look for specific achievements or metrics in transcript
+        achievement_patterns = [
+            (r'\$(\d+(?:\.\d+)?)\s*([BMK])', "manages ${}{} in client assets"),
+            (r'top\s*(\d+)%', "Top {}% performer"),
+            (r'grew\s*(?:book|assets|aum)?\s*(?:by\s*)?(\d+)%', "Grew book by {}%"),
+            (r'(\d+)\+?\s*clients?', "{} client relationships")
+        ]
+
+        for pattern, template in achievement_patterns:
+            matches = re.findall(pattern, transcript_lower)
+            if matches and len(bullets) < 5:
+                if isinstance(matches[0], tuple):
+                    text = template.format(*matches[0])
+                else:
+                    text = template.format(matches[0])
+                bullets.append(BulletPoint(
+                    text=text,
+                    confidence=0.8,
+                    source="Transcript"
+                ))
+
+        # Extract specialties mentioned in transcript
+        specialties = []
+        specialty_keywords = [
+            'retirement planning', 'wealth management', 'estate planning',
+            '401k', 'pension', 'insurance', 'annuities', 'portfolio management',
+            'tax planning', 'financial planning', 'investment advisory'
+        ]
+
+        for specialty in specialty_keywords:
+            if specialty in transcript_lower and len(bullets) < 5:
+                specialties.append(specialty.title())
+
+        if specialties and len(bullets) < 5:
+            bullets.append(BulletPoint(
+                text=f"Specialties: {', '.join(specialties[:3])}",
+                confidence=0.75,
+                source="Transcript"
+            ))
+
+        return bullets[:5]  # Never exceed 5
+
+    async def _mine_transcript_directly(
+        self,
+        transcript: str,
+        enhanced_data: Dict[str, Any]
+    ) -> List[BulletPoint]:
+        """Direct mining of transcript for financial advisor information."""
+        bullets = []
+
+        if not transcript:
+            return bullets
+
+        # Use regex to find specific financial patterns
+        import re
+
+        # AUM/Book size patterns
+        aum_patterns = [
+            r'\$(\d+(?:\.\d+)?)\s*([BMK])\s*(?:AUM|aum|under management|book)',
+            r'manage[sd]?\s*\$(\d+(?:\.\d+)?)\s*([BMK])',
+            r'book\s*(?:of|size)?\s*\$(\d+(?:\.\d+)?)\s*([BMK])'
+        ]
+
+        for pattern in aum_patterns:
+            matches = re.findall(pattern, transcript, re.IGNORECASE)
+            if matches:
+                amount, unit = matches[0]
+                unit_map = {'B': 'billion', 'M': 'million', 'K': 'thousand'}
+                bullets.append(BulletPoint(
+                    text=f"AUM: ${amount}{unit_map.get(unit.upper(), unit)}",
+                    confidence=0.9,
+                    source="Transcript"
+                ))
+                break
+
+        # Production patterns
+        prod_patterns = [
+            r'production\s*(?:of|is)?\s*\$(\d+(?:\.\d+)?)\s*([BMK])',
+            r'\$(\d+(?:\.\d+)?)\s*([BMK])\s*(?:in\s*)?production'
+        ]
+
+        for pattern in prod_patterns:
+            matches = re.findall(pattern, transcript, re.IGNORECASE)
+            if matches and len(bullets) < 5:
+                amount, unit = matches[0]
+                bullets.append(BulletPoint(
+                    text=f"Production: ${amount}{unit}",
+                    confidence=0.85,
+                    source="Transcript"
+                ))
+                break
+
+        # Team size
+        team_pattern = r'team\s*of\s*(\d+)|(\d+)\s*(?:person|people|member)\s*team'
+        team_matches = re.findall(team_pattern, transcript, re.IGNORECASE)
+        if team_matches and len(bullets) < 5:
+            team_size = max([int(t[0] if t[0] else t[1]) for t in team_matches])
+            if team_size > 0:
+                bullets.append(BulletPoint(
+                    text=f"Leads team of {team_size}",
+                    confidence=0.8,
+                    source="Transcript"
+                ))
+
+        return bullets
+
+    async def _extract_from_resume(self, existing_bullets: List[BulletPoint], resume_text: str, deal: Dict[str, Any]) -> List[BulletPoint]:
+        """Extract bullets from resume text."""
+        bullets = list(existing_bullets)
+
+        if not resume_text:
+            return bullets
+
+        import re
+
+        # Extract skills from resume
+        skill_patterns = [
+            r'series\s*(\d+)',  # Series licenses
+            r'(CFA|CFP|CPA|ChFC|CLU|CIMA|CPWA)',  # Professional designations
+            r'\$(\d+(?:\.\d+)?)\s*([BMK])(?:illion|illion)?',  # Dollar amounts
+            r'(\d+)\+?\s*years?\s*(?:of\s*)?experience',  # Years of experience
+        ]
+
+        for pattern in skill_patterns:
+            if len(bullets) >= 5:
+                break
+            matches = re.findall(pattern, resume_text, re.IGNORECASE)
+            if matches:
+                if 'series' in pattern.lower():
+                    for match in matches[:2]:  # Take max 2 series licenses
+                        if len(bullets) < 5:
+                            bullets.append(BulletPoint(
+                                text=f"Licensed: Series {match}",
+                                confidence=0.85,
+                                source="Resume"
+                            ))
+                elif 'CFA' in pattern:
+                    designations = list(set(matches))[:3]  # Unique designations
+                    if designations and len(bullets) < 5:
+                        bullets.append(BulletPoint(
+                            text=f"Designations: {', '.join(designations)}",
+                            confidence=0.85,
+                            source="Resume"
+                        ))
+
+        return bullets[:5]
 
 
 # Export curator instance

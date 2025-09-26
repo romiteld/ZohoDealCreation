@@ -60,10 +60,22 @@ class DealRecord(BaseModel):
     description_of_reqs: Optional[str] = Field(None, description="Description of requirements/needs")
 
 class ExtractedData(BaseModel):
-    """Main extracted data structure with Steve's 3-record format"""
+    """Main extracted data structure with Steve's 3-record format and financial advisor enhancements"""
     company_record: Optional[CompanyRecord] = Field(None, description="Company information")
     contact_record: Optional[ContactRecord] = Field(None, description="Contact information")
     deal_record: Optional[DealRecord] = Field(None, description="Deal information")
+
+    # Financial Advisor specific fields
+    aum_managed: Optional[str] = Field(None, description="Assets Under Management (e.g., $180M, $1.2B)")
+    production_annual: Optional[str] = Field(None, description="Annual production/revenue (e.g., $650K, $1.5M)")
+    client_count: Optional[str] = Field(None, description="Number of clients managed (e.g., 180 clients)")
+    licenses_held: Optional[List[str]] = Field(None, description="Professional licenses (e.g., Series 7, Series 66)")
+    designations: Optional[List[str]] = Field(None, description="Professional designations (e.g., CFA, CFP, CPWA)")
+    years_experience: Optional[str] = Field(None, description="Years of experience in financial services")
+    availability_timeframe: Optional[str] = Field(None, description="When available (e.g., Immediately, 30 days notice)")
+    compensation_range: Optional[str] = Field(None, description="Desired compensation range (e.g., $425K-$500K)")
+    book_transferable: Optional[str] = Field(None, description="Percentage of book transferable (e.g., 85% transferable)")
+    specializations: Optional[List[str]] = Field(None, description="Areas of specialization (e.g., High-net-worth, Estate planning)")
 
     # Legacy fields for backward compatibility - will be deprecated
     candidate_name: Optional[str] = Field(None, description="DEPRECATED: Use contact_record.first_name + last_name")

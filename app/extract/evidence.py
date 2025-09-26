@@ -23,14 +23,16 @@ class EvidenceType(Enum):
 
 class BulletCategory(Enum):
     """Categories of bullet points with evidence requirements"""
-    HARD_SKILL = "hard_skill"           # Requires transcript evidence
-    SOFT_SKILL = "soft_skill"           # Requires transcript evidence
-    EDUCATION = "education"             # Can use CRM or transcript
-    EXPERIENCE = "experience"           # Can use CRM or transcript
-    COMPENSATION = "compensation"       # CRM field preferred
-    AVAILABILITY = "availability"       # CRM field preferred
-    MOBILITY = "mobility"               # CRM field preferred
-    LICENSES = "licenses"               # Requires evidence
+    FINANCIAL_METRIC = "financial_metric"  # AUM, production, book size
+    GROWTH_ACHIEVEMENT = "growth_achievement"  # Growth metrics and achievements
+    CLIENT_METRIC = "client_metric"  # Client count, retention, relationships
+    PERFORMANCE_RANKING = "performance_ranking"  # Rankings and performance metrics
+    LICENSES = "licenses"  # Series licenses, designations
+    EDUCATION = "education"  # Degrees, certifications
+    EXPERIENCE = "experience"  # Years of experience, roles
+    COMPENSATION = "compensation"  # Salary expectations
+    AVAILABILITY = "availability"  # Start date, notice period
+    MOBILITY = "mobility"  # Location, relocation preferences
 
 
 @dataclass
@@ -56,20 +58,24 @@ class BulletPoint:
     evidence_type: Optional[EvidenceType] = None
     source_snippet: Optional[str] = None
     crm_field: Optional[str] = None
+    source: Optional[str] = None  # Added to support talentwell_curator
     
     def has_valid_evidence(self) -> bool:
         """Check if bullet has required evidence"""
         if not self.required_evidence:
             return True
-        
-        # Hard/soft skills must have transcript evidence
-        if self.category in [BulletCategory.HARD_SKILL, BulletCategory.SOFT_SKILL]:
+
+        # Financial metrics and achievements must have transcript evidence
+        if self.category in [BulletCategory.FINANCIAL_METRIC,
+                             BulletCategory.GROWTH_ACHIEVEMENT,
+                             BulletCategory.PERFORMANCE_RANKING,
+                             BulletCategory.CLIENT_METRIC]:
             return any(e.source_type == "transcript" for e in self.evidence)
-        
+
         # Licenses must have some evidence
         if self.category == BulletCategory.LICENSES:
             return len(self.evidence) > 0
-        
+
         return True
     
     def to_dict(self) -> Dict[str, Any]:
@@ -87,77 +93,146 @@ class EvidenceExtractor:
     """Extract and link evidence to bullet points"""
     
     def __init__(self):
-        self.skill_patterns = {
-            'hard': [
-                r'(python|java|javascript|c\+\+|sql|react|angular|vue)',
-                r'(aws|azure|gcp|docker|kubernetes)',
-                r'(machine learning|data science|ai|ml)',
-                r'(database|postgresql|mysql|mongodb)',
-                r'(api|rest|graphql|microservices)'
+        # Financial metrics patterns
+        self.financial_patterns = {
+            'aum': [
+                r'\$[\d,]+(?:\.\d+)?\s*(?:billion|b|B)\s*(?:RIA|AUM|aum|in assets|under management)?',
+                r'\$[\d,]+(?:\.\d+)?\s*(?:million|m|M|MM)\s*(?:RIA|AUM|aum|in assets|under management)?',
+                r'\$[\d,]+(?:\.\d+)?\s*(?:thousand|k|K)\s*(?:RIA|AUM|aum|in assets|under management)?',
+                r'(?:AUM|aum|assets under management|book size)[:\s]+\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?',
+                r'(?:manages?|managing|oversee[sn]?|responsible for)[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?',
+                r'(?:book|portfolio)[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?',
+                r'(?:built|founded|grew|raised)[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?\s*(?:RIA|firm|assets|AUM)'
             ],
-            'soft': [
-                r'(leadership|management|team)',
-                r'(communication|presentation|interpersonal)',
-                r'(problem.?solving|analytical|critical thinking)',
-                r'(collaboration|teamwork|cross.?functional)'
+            'production': [
+                r'\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?\s*(?:annual production|production|in production)',
+                r'(?:production|revenue|generated)[:\s]+\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?',
+                r'(?:produces?|producing|generated?)[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?\s*(?:annually|per year)?'
+            ],
+            'growth': [
+                r'(?:grew|growth|increased?|expanded?)[\s\w]*(?:from )?[~]?\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?[\s\w]*(?:to )[~]?\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?',
+                r'(?:growing|grew|growth|increased?|expanded?)[\s\w]*(?:AUM|aum|assets|book|production)[\s\w]*(?:from|to|by)[\s\w]*[~]?[\$\d,]+(?:\.\d+)?\s*[BMKbmk]?',
+                r'(?:increased?|grew|expanded?)[\s\w]*(?:AUM|aum|assets|book|production)[\s\w]*(?:by )?\d+(?:\.\d+)?%',
+                r'\d+[%x]\s*(?:growth|increase|expansion)',
+                r'(?:doubled|tripled|quadrupled)[\s\w]*(?:AUM|aum|assets|book|production|client base)',
+                r'(?:scaled|scaling)[\s\w]*(?:from )?[~]?\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?[\s\w]*(?:to )[~]?\$[\d,]+(?:\.\d+)?\s*[BMKbmk]?'
             ]
         }
-        
+
+        # Performance and ranking patterns
+        self.ranking_patterns = [
+            r'#\d+(?:\s*[-–—]\s*\d+)?\s*(?:nationally|in nation|in the nation|across firm|company.?wide)',
+            r'(?:ranked|ranking)\s*(?:#)?\d+(?:\s*[-–—]\s*\d+)?',
+            r'(?:top\s*)?\d+(?:%|percent)\s*(?:performer|producer|advisor)',
+            r'(?:top|best)\s*(?:tier|percentile|performer|producer)',
+            r'(?:president\'?s club|circle of champions|chairman\'?s club)',
+            r'(?:close rate|conversion rate|win rate)[:\s]+\d+(?:\.\d+)?%'
+        ]
+
+        # Client metrics patterns
+        self.client_patterns = [
+            r'\d+\+?\s*(?:clients?|relationships?|households?|families)',
+            r'(?:serve[sd]?|serving|manages?|managing)[\s\w]*\d+\+?\s*(?:clients?|relationships?)',
+            r'\d+(?:\.\d+)?%\s*(?:retention|client retention|renewal rate)',
+            r'(?:retention rate|renewal rate)[:\s]+\d+(?:\.\d+)?%',
+            r'\d+\+?\s*(?:HNW|UHNW|high.?net.?worth|ultra.?high)\s*(?:clients?|individuals?|families)'
+        ]
+
+        # License and certification patterns
         self.license_patterns = [
-            r'(series \d+|sie|finra)',
-            r'(cfa|cfp|chfc|clu|cpwa)',
-            r'(licensed|certification|certified)',
-            r'(registered|registration)'
+            r'(?:series|sie)\s*\d+(?:[,\s]+\d+)*',
+            r'(?:CFA|CFP|ChFC|CLU|CPWA|CTFA|CIMA|WMCP|AAMS|AIF)(?:\s*(?:charter|charterholder|certification|certified))?',
+            r'(?:holds?|holding|have|earned?)[\s\w]*(?:series|CFA|CFP|ChFC|CLU|CPWA)\s*\w+',
+            r'(?:licensed?|licensing|certification|certified)\s*(?:in|for|as)[\s\w]+',
+            r'(?:life\s*(?:and|&)\s*health|property\s*(?:and|&)\s*casualty)\s*(?:license|licensed)',
+            r'(?:passed all \d levels|level [IVX123] (?:passed|candidate))'
         ]
     
     def extract_from_transcript(self, transcript: str) -> List[Evidence]:
-        """Extract evidence from interview transcript"""
+        """Extract evidence from interview transcript or email content"""
         evidence_list = []
-        
+
         if not transcript:
             return evidence_list
-        
-        # Split into sentences for snippet extraction
-        sentences = re.split(r'[.!?]+', transcript)
-        
+
+        # Split into sentences for snippet extraction (avoid splitting on decimal numbers)
+        # First, protect decimal numbers in dollar amounts
+        protected_text = re.sub(r'(\$[\d,]+)\.(\d+)([BMKbmk]?)', r'\1DECIMAL\2\3', transcript)
+        sentences = re.split(r'[.!?]+', protected_text)
+        # Restore decimal points
+        sentences = [re.sub(r'DECIMAL', '.', s) for s in sentences]
+
         for i, sentence in enumerate(sentences):
-            sentence_lower = sentence.lower().strip()
-            if not sentence_lower:
+            sentence_clean = sentence.strip()
+            if not sentence_clean:
                 continue
-            
-            # Check for hard skills
-            for pattern in self.skill_patterns['hard']:
-                if re.search(pattern, sentence_lower):
+
+            # Check for AUM/Book Size metrics
+            for pattern in self.financial_patterns['aum']:
+                if re.search(pattern, sentence_clean, re.IGNORECASE):
                     evidence_list.append(Evidence(
                         source_type="transcript",
                         source_id=f"transcript_line_{i}",
-                        snippet=sentence.strip(),
-                        confidence=0.9
-                    ))
-                    break
-            
-            # Check for soft skills
-            for pattern in self.skill_patterns['soft']:
-                if re.search(pattern, sentence_lower):
-                    evidence_list.append(Evidence(
-                        source_type="transcript",
-                        source_id=f"transcript_line_{i}",
-                        snippet=sentence.strip(),
-                        confidence=0.8
-                    ))
-                    break
-            
-            # Check for licenses
-            for pattern in self.license_patterns:
-                if re.search(pattern, sentence_lower):
-                    evidence_list.append(Evidence(
-                        source_type="transcript",
-                        source_id=f"transcript_line_{i}",
-                        snippet=sentence.strip(),
+                        snippet=sentence_clean,
                         confidence=0.95
                     ))
                     break
-        
+
+            # Check for production metrics
+            for pattern in self.financial_patterns['production']:
+                if re.search(pattern, sentence_clean, re.IGNORECASE):
+                    evidence_list.append(Evidence(
+                        source_type="transcript",
+                        source_id=f"transcript_line_{i}",
+                        snippet=sentence_clean,
+                        confidence=0.95
+                    ))
+                    break
+
+            # Check for growth metrics
+            for pattern in self.financial_patterns['growth']:
+                if re.search(pattern, sentence_clean, re.IGNORECASE):
+                    evidence_list.append(Evidence(
+                        source_type="transcript",
+                        source_id=f"transcript_line_{i}",
+                        snippet=sentence_clean,
+                        confidence=0.95
+                    ))
+                    break
+
+            # Check for performance rankings
+            for pattern in self.ranking_patterns:
+                if re.search(pattern, sentence_clean, re.IGNORECASE):
+                    evidence_list.append(Evidence(
+                        source_type="transcript",
+                        source_id=f"transcript_line_{i}",
+                        snippet=sentence_clean,
+                        confidence=0.9
+                    ))
+                    break
+
+            # Check for client metrics
+            for pattern in self.client_patterns:
+                if re.search(pattern, sentence_clean, re.IGNORECASE):
+                    evidence_list.append(Evidence(
+                        source_type="transcript",
+                        source_id=f"transcript_line_{i}",
+                        snippet=sentence_clean,
+                        confidence=0.9
+                    ))
+                    break
+
+            # Check for licenses and certifications
+            for pattern in self.license_patterns:
+                if re.search(pattern, sentence_clean, re.IGNORECASE):
+                    evidence_list.append(Evidence(
+                        source_type="transcript",
+                        source_id=f"transcript_line_{i}",
+                        snippet=sentence_clean,
+                        confidence=0.95
+                    ))
+                    break
+
         return evidence_list
     
     def extract_from_crm(self, crm_data: Dict[str, Any]) -> List[Evidence]:
@@ -187,30 +262,42 @@ class EvidenceExtractor:
     
     def categorize_bullet(self, text: str) -> BulletCategory:
         """Categorize a bullet point based on its content"""
-        text_lower = text.lower()
-        
-        # Check for specific categories
-        if any(re.search(p, text_lower) for p in self.skill_patterns['hard']):
-            return BulletCategory.HARD_SKILL
-        
-        if any(re.search(p, text_lower) for p in self.skill_patterns['soft']):
-            return BulletCategory.SOFT_SKILL
-        
-        if any(re.search(p, text_lower) for p in self.license_patterns):
+        # Check for growth achievements FIRST (highest priority)
+        if any(re.search(p, text, re.IGNORECASE) for p in self.financial_patterns.get('growth', [])):
+            return BulletCategory.GROWTH_ACHIEVEMENT
+
+        # Check for performance rankings
+        if any(re.search(p, text, re.IGNORECASE) for p in self.ranking_patterns):
+            return BulletCategory.PERFORMANCE_RANKING
+
+        # Check for client metrics
+        if any(re.search(p, text, re.IGNORECASE) for p in self.client_patterns):
+            return BulletCategory.CLIENT_METRIC
+
+        # Check for other financial metrics (AUM, production)
+        if any(re.search(p, text, re.IGNORECASE) for p in self.financial_patterns.get('aum', [])):
+            return BulletCategory.FINANCIAL_METRIC
+        if any(re.search(p, text, re.IGNORECASE) for p in self.financial_patterns.get('production', [])):
+            return BulletCategory.FINANCIAL_METRIC
+
+        # Check for licenses and certifications
+        if any(re.search(p, text, re.IGNORECASE) for p in self.license_patterns):
             return BulletCategory.LICENSES
-        
-        if re.search(r'(salary|compensation|pay|earnings|bonus)', text_lower):
+
+        # Check for other categories
+        text_lower = text.lower()
+        if re.search(r'(salary|compensation|pay|earnings|bonus|OTE|base)', text_lower):
             return BulletCategory.COMPENSATION
-        
-        if re.search(r'(available|start|begin|notice)', text_lower):
+
+        if re.search(r'(available|start|begin|notice|immediately)', text_lower):
             return BulletCategory.AVAILABILITY
-        
-        if re.search(r'(relocate|move|location|remote|hybrid)', text_lower):
+
+        if re.search(r'(relocate|move|location|remote|hybrid|mobile)', text_lower):
             return BulletCategory.MOBILITY
-        
-        if re.search(r'(degree|university|college|education|study)', text_lower):
+
+        if re.search(r'(degree|university|college|education|MBA|BS|BA|study)', text_lower):
             return BulletCategory.EDUCATION
-        
+
         return BulletCategory.EXPERIENCE
     
     def calculate_confidence(self, bullet: str, evidence: List[Evidence]) -> float:
@@ -306,8 +393,10 @@ class EvidenceExtractor:
             
             # Determine if evidence is required
             required = category in [
-                BulletCategory.HARD_SKILL,
-                BulletCategory.SOFT_SKILL,
+                BulletCategory.FINANCIAL_METRIC,
+                BulletCategory.GROWTH_ACHIEVEMENT,
+                BulletCategory.PERFORMANCE_RANKING,
+                BulletCategory.CLIENT_METRIC,
                 BulletCategory.LICENSES
             ]
             
@@ -355,11 +444,19 @@ class EvidenceExtractor:
         if candidate_data.get('availability'):
             bullets.append(f"Available to start: {candidate_data['availability']}")
         
-        # Extract skills from transcript if available
+        # Extract financial achievements from transcript if available
         if transcript:
-            skills = self._extract_skills_from_text(transcript)
-            for skill in skills[:5]:  # Top 5 skills
-                bullets.append(f"Experienced in {skill}")
+            achievements = self._extract_skills_from_text(transcript)
+            for achievement in achievements[:5]:  # Top 5 achievements
+                # Format achievement as proper bullet point
+                if achievement.startswith('manages'):
+                    bullets.append(achievement.capitalize())
+                elif achievement.startswith('production'):
+                    bullets.append(f"Annual {achievement}")
+                elif achievement.startswith('ranked'):
+                    bullets.append(achievement.capitalize())
+                else:
+                    bullets.append(achievement.capitalize())
         
         # Licenses and certifications
         if candidate_data.get('licenses'):
@@ -369,26 +466,54 @@ class EvidenceExtractor:
         return bullets
     
     def _extract_skills_from_text(self, text: str) -> List[str]:
-        """Extract skill mentions from text"""
-        skills = set()
-        text_lower = text.lower()
-        
-        # Hard skills
-        for pattern in self.skill_patterns['hard']:
-            matches = re.findall(pattern, text_lower)
-            skills.update(matches)
-        
-        # Soft skills (limit to avoid too many generic ones)
-        soft_count = 0
-        for pattern in self.skill_patterns['soft']:
-            if soft_count >= 2:  # Max 2 soft skills
-                break
-            matches = re.findall(pattern, text_lower)
-            if matches:
-                skills.add(matches[0])
-                soft_count += 1
-        
-        return list(skills)
+        """Extract financial achievements and metrics from text"""
+        achievements = []
+
+        # Extract AUM/book size metrics
+        for pattern in self.financial_patterns['aum']:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches[:2]:  # Limit to top 2 AUM metrics
+                if isinstance(match, tuple):
+                    achievement = ' '.join(str(m) for m in match if m)
+                else:
+                    achievement = str(match)
+                if achievement and achievement not in achievements:
+                    achievements.append(f"manages {achievement}")
+
+        # Extract production metrics
+        for pattern in self.financial_patterns['production']:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches[:1]:  # Limit to top production metric
+                if isinstance(match, tuple):
+                    achievement = ' '.join(str(m) for m in match if m)
+                else:
+                    achievement = str(match)
+                if achievement and achievement not in achievements:
+                    achievements.append(f"production: {achievement}")
+
+        # Extract growth achievements
+        for pattern in self.financial_patterns['growth']:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches[:1]:  # Limit to top growth metric
+                if isinstance(match, tuple):
+                    achievement = ' '.join(str(m) for m in match if m)
+                else:
+                    achievement = str(match)
+                if achievement and achievement not in achievements:
+                    achievements.append(achievement)
+
+        # Extract rankings
+        for pattern in self.ranking_patterns:
+            matches = re.findall(pattern, text, re.IGNORECASE)
+            for match in matches[:1]:  # Limit to top ranking
+                if isinstance(match, tuple):
+                    achievement = ' '.join(str(m) for m in match if m)
+                else:
+                    achievement = str(match)
+                if achievement and achievement not in achievements:
+                    achievements.append(f"ranked {achievement}")
+
+        return achievements[:5]  # Return top 5 achievements
     
     def filter_bullets_by_confidence(self, bullets: List[BulletPoint], 
                                     min_confidence: float = 0.6) -> List[BulletPoint]:

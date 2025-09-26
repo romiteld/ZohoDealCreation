@@ -91,7 +91,7 @@ class EmailProcessingState(TypedDict):
 
 
 class ExtractionOutput(BaseModel):
-    """Structured output for extraction step - Steve's 3-record template"""
+    """Structured output for extraction step - Steve's 3-record template with financial advisor enhancements"""
 
     # Company Record fields
     company_name: Optional[str] = Field(default=None, description="Official company name ONLY")
@@ -119,6 +119,18 @@ class ExtractionOutput(BaseModel):
     pipeline: Optional[str] = Field(default="Sales Pipeline", description="Pipeline name (default: Sales Pipeline)")
     estimated_closing_date: Optional[str] = Field(default=None, description="Estimated closing date (YYYY-MM-DD format, typically 2-4 months out)")
     description_of_requirements: Optional[str] = Field(default=None, description="Description of requirements/needs")
+
+    # Financial Advisor specific fields
+    aum_managed: Optional[str] = Field(default=None, description="Assets Under Management (e.g., $180M, $1.2B)")
+    production_annual: Optional[str] = Field(default=None, description="Annual production/revenue (e.g., $650K, $1.5M)")
+    client_count: Optional[str] = Field(default=None, description="Number of clients managed (e.g., 180 clients)")
+    licenses_held: Optional[List[str]] = Field(default=None, description="Professional licenses (e.g., Series 7, Series 66, Series 65)")
+    designations: Optional[List[str]] = Field(default=None, description="Professional designations (e.g., CFA, CFP, CPWA, ChFC)")
+    years_experience: Optional[str] = Field(default=None, description="Years of experience in financial services")
+    availability_timeframe: Optional[str] = Field(default=None, description="When available (e.g., Immediately, 30 days notice, Q1 2025)")
+    compensation_range: Optional[str] = Field(default=None, description="Desired compensation range (e.g., $425K-$500K, $650K+ total)")
+    book_transferable: Optional[str] = Field(default=None, description="Percentage of book transferable (e.g., 85% transferable)")
+    specializations: Optional[List[str]] = Field(default=None, description="Areas of specialization (e.g., High-net-worth, Estate planning, Alternative investments)")
 
     # Legacy fields for backward compatibility
     candidate_name: Optional[str] = Field(default=None, description="DEPRECATED: Use first_name + last_name")
@@ -1072,7 +1084,7 @@ class EmailProcessingWorkflow:
             logger.info(f"Using enhanced prompt with historical corrections for domain: {sender_domain}")
         else:
             # Default system prompt
-            system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis.
+            system_prompt = f"""You are a Senior Data Analyst specializing in recruitment email analysis with expertise in financial advisor placements.
             Extract key recruitment details into THREE SEPARATE RECORD TYPES following Steve's template structure.
 
             YOUR TASK: Extract data into Company Record, Contact Record, and Deal Record fields:
@@ -1107,6 +1119,19 @@ class EmailProcessingWorkflow:
             - pipeline: Always "Sales Pipeline" unless specified otherwise
             - estimated_closing_date: Estimate 2-4 months out (YYYY-MM-DD format)
             - description_of_requirements: Brief description of needs
+
+            === FINANCIAL ADVISOR SPECIFIC FIELDS ===
+            CRITICAL: Extract these financial metrics when dealing with advisor/wealth manager candidates:
+            - aum_managed: Assets Under Management (e.g., "$180M", "$1.2B", "$350 million")
+            - production_annual: Annual production/revenue (e.g., "$650K", "$1.5M production", "$425K base + bonus")
+            - client_count: Number of clients (e.g., "180 clients", "250 households")
+            - licenses_held: Professional licenses as LIST (e.g., ["Series 7", "Series 66", "Series 65", "Insurance"])
+            - designations: Professional certifications as LIST (e.g., ["CFA", "CFP", "CPWA", "ChFC"])
+            - years_experience: Years in financial services (e.g., "15 years", "10+ years")
+            - availability_timeframe: When available (e.g., "Immediately", "30 days notice", "Q1 2025")
+            - compensation_range: Desired compensation (e.g., "$425K-$500K", "$650K+ total", "$380K")
+            - book_transferable: Percentage of book transferable (e.g., "85% transferable", "90% portable")
+            - specializations: Areas of expertise as LIST (e.g., ["High-net-worth", "Estate planning", "Alternative investments", "401k plans"])
 
             SOURCE DETERMINATION RULES:
             - If email mentions referrer/forwarded → "Referral" + referrer name in source_detail
@@ -1341,6 +1366,27 @@ class EmailProcessingWorkflow:
             for field, limit in field_limits.items():
                 if field in result:
                     cleaned_result[field] = clean_field(result.get(field), field, limit)
+
+            # Add financial advisor specific fields
+            financial_fields = [
+                'aum_managed', 'production_annual', 'client_count',
+                'years_experience', 'availability_timeframe', 'compensation_range',
+                'book_transferable'
+            ]
+            for field in financial_fields:
+                if field in result and result[field]:
+                    cleaned_result[field] = clean_field(result.get(field), field, 100)
+
+            # Handle list fields (licenses, designations, specializations)
+            list_fields = ['licenses_held', 'designations', 'specializations']
+            for field in list_fields:
+                if field in result and result[field]:
+                    if isinstance(result[field], list):
+                        cleaned_result[field] = result[field]
+                    elif isinstance(result[field], str):
+                        # Convert string to list if needed
+                        items = [item.strip() for item in result[field].split(',')]
+                        cleaned_result[field] = items
 
             # Special handling for Calendly emails - extract recruiting goals if not in notes
             if 'calendly' in state['email_content'].lower():
@@ -2086,12 +2132,23 @@ class EmailProcessingWorkflow:
             description_of_reqs=extracted.get('description_of_requirements') or extracted.get('notes')
         )
 
-        # Convert to ExtractedData model with Steve's structure
+        # Convert to ExtractedData model with Steve's structure and financial advisor fields
         try:
             final_output = ExtractedData(
                 company_record=company_record,
                 contact_record=contact_record,
                 deal_record=deal_record,
+                # Financial advisor specific fields from extraction
+                aum_managed=extracted.get('aum_managed'),
+                production_annual=extracted.get('production_annual'),
+                client_count=extracted.get('client_count'),
+                licenses_held=extracted.get('licenses_held'),
+                designations=extracted.get('designations'),
+                years_experience=extracted.get('years_experience'),
+                availability_timeframe=extracted.get('availability_timeframe'),
+                compensation_range=extracted.get('compensation_range'),
+                book_transferable=extracted.get('book_transferable'),
+                specializations=extracted.get('specializations'),
                 # Keep legacy fields for backward compatibility
                 candidate_name=full_name.strip() or validated_data.get('candidate_name'),
                 job_title=job_title or validated_data.get('job_title'),

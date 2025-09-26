@@ -183,12 +183,25 @@
       "WebFetch(domain:well-zoho-oauth-v2.azurewebsites.net)",
       "Bash(az postgres flexible-server update:*)",
       "WebFetch(domain:www.zoho.com)",
-      "WebFetch(domain:help.zoho.com)"
+      "WebFetch(domain:help.zoho.com)",
+      "Bash(az login:*)",
+      "Bash(# 1. Check Container App is running the latest image\necho \"\"=== 1. VERIFY CONTAINER APP STATUS ===\"\"\naz containerapp show --name well-intake-api --resource-group TheWell-Infra-East --query \"\"{image:properties.template.containers[0].image, revision:properties.latestRevisionName, replicas:properties.runningRevision.replicas, state:properties.runningRevision.trafficWeight}\"\" -o table\n\necho \"\"\"\"\necho \"\"=== 2. CHECK HEALTH ENDPOINT ===\"\"\ncurl -s https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health | python -m json.tool | grep -E \"\"(status|timestamp|api|zoho|redis)\"\" | head -10)",
+      "Bash(# 3. Verify the backend is serving the CORRECT taskpane.html with cache-busting\necho \"\"=== 3. VERIFY BACKEND SERVES CORRECT HTML ===\"\"\ncurl -s \"\"https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/addin/taskpane.html\"\" | grep -E \"\"taskpane\\.js\\?v=\"\" | head -3\n\necho \"\"\"\"\necho \"\"=== 4. VERIFY BACKEND SERVES CORRECT JS STRUCTURE ===\"\"\n# Check if the JS file has the correct 3-record structure\ncurl -s \"\"https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/addin/taskpane.js?v=fix-20250924\"\" | grep -A 5 \"\"user_corrections:\"\" | grep -E \"\"(company_record|contact_record|deal_record)\"\" | head -10)",
+      "Bash(# 5. Test that backend accepts the correct structure\necho \"\"=== 5. VERIFY BACKEND ACCEPTS 3-RECORD STRUCTURE ===\"\"\n# Create a test with correct structure\ncat > /tmp/test_correct_structure.json << ''EOF''\n{\n  \"\"email_content\"\": \"\"Structure test only\"\",\n  \"\"user_corrections\"\": {\n    \"\"company_record\"\": {\n      \"\"company_name\"\": \"\"Test Corp\"\"\n    },\n    \"\"contact_record\"\": {\n      \"\"first_name\"\": \"\"Test\"\",\n      \"\"last_name\"\": \"\"User\"\"\n    },\n    \"\"deal_record\"\": {\n      \"\"deal_name\"\": \"\"Test Deal\"\"\n    }\n  }\n}\nEOF\n\n# Test with DRY_RUN header to avoid creating records\ncurl -s -X POST \"\"https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/intake/email\"\" \\\n  -H \"\"X-API-Key: ${API_KEY}\"\" \\\n  -H \"\"X-Dry-Run: true\"\" \\\n  -H \"\"Content-Type: application/json\"\" \\\n  -d @/tmp/test_correct_structure.json \\\n  -w \"\"\\nHTTP Status: %{http_code}\\n\"\" | tail -5)",
+      "Bash(# 6. Analyze what the browser is actually requesting vs what backend provides\necho \"\"=== 6. BROWSER vs BACKEND ANALYSIS ===\"\"\necho \"\"\"\"\necho \"\"BROWSER IS LOADING:\"\"\necho \"\"  - taskpane.js?v=indicators-20250917-2 (OLD - Sept 17)\"\"\necho \"\"\"\"\necho \"\"BACKEND IS SERVING:\"\"\necho \"\"  - taskpane.js?v=fix-20250924 (NEW - Sept 24)\"\"\necho \"\"\"\"\necho \"\"=== 7. CHECK CONTAINER LOGS FOR RECENT ERRORS ===\"\"\naz containerapp logs show --name well-intake-api --resource-group TheWell-Infra-East --tail 30 | grep -E \"\"(500|ERROR|Exception|user_corrections)\"\" | tail -10)",
+      "Bash(# 8. Final verification - check what exact error the backend is throwing\necho \"\"=== 8. BACKEND ERROR ANALYSIS ===\"\"\necho \"\"\"\"\necho \"\"When browser sends OLD format with flat user_corrections:\"\"\necho ''  {candidate_name, candidate_email, phone, job_title, location, company_name, referrer_name}''\necho \"\"\"\"\necho \"\"Backend expects NEW format with 3-record structure:\"\"\necho ''  {company_record: {...}, contact_record: {...}, deal_record: {...}}''\necho \"\"\"\"\necho \"\"=== 9. PROOF THIS IS PURE CACHE ISSUE ===\"\"\necho \"\"\"\"\necho \"\"✅ Backend Container App: Running latest image (cache-fix-20250923-231818)\"\"\necho \"\"✅ Backend Health: All services operational\"\"\necho \"\"✅ Backend HTML: Serves taskpane.js?v=fix-20250924\"\"\necho \"\"✅ Backend JS: Contains correct 3-record structure\"\"\necho \"\"✅ Backend Code: Fixed to handle structured user_corrections\"\"\necho \"\"\"\"\necho \"\"❌ Browser: Loading taskpane.js?v=indicators-20250917-2 (OLD)\"\"\necho \"\"❌ Browser: Sending flat user_corrections structure\"\"\necho \"\"❌ Result: 500 error because backend expects 3-record structure\"\"\necho \"\"\"\"\necho \"\"CONCLUSION: 100% Office Add-in cache issue\"\")",
+      "Bash(az:*)",
+      "Bash(while read rg)",
+      "Bash(do echo \"Resource Group: $rg\")",
+      "Bash(while read name)",
+      "Bash(do if [ ! -z \"$name\" ])",
+      "Bash(then echo \"  Account: $name\")",
+      "Bash(fi)"
     ],
     "deny": [],
+    "ask": [],
     "additionalDirectories": [
       "/home/romiteld/zoho"
-    ],
-    "ask": []
+    ]
   }
 }
