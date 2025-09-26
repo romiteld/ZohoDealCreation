@@ -116,7 +116,7 @@ class ExtractionOutput(BaseModel):
     deal_source: Optional[str] = Field(default=None, description="Deal source (should match company_source)")
     position_title: Optional[str] = Field(default=None, description="Position they're looking for (job title)")
     position_location: Optional[str] = Field(default=None, description="Location for the position (city, state, or Nationwide)")
-    pipeline: Optional[str] = Field(default="Sales Pipeline", description="Pipeline name (default: Sales Pipeline)")
+    pipeline: Optional[str] = Field(default="Sales Pipeline", description="Pipeline name (ALWAYS use 'Sales Pipeline')")
     estimated_closing_date: Optional[str] = Field(default=None, description="Estimated closing date (YYYY-MM-DD format, typically 2-4 months out)")
     description_of_requirements: Optional[str] = Field(default=None, description="Description of requirements/needs")
 
@@ -1116,7 +1116,7 @@ class EmailProcessingWorkflow:
             - deal_source: Same as company_source
             - position_title: Job position sought (e.g., "Advisors", "Sales Leader")
             - position_location: Position location (e.g., "Nationwide", "Newport Beach, CA")
-            - pipeline: Always "Sales Pipeline" unless specified otherwise
+            - pipeline: ALWAYS use "Sales Pipeline" (this is the only pipeline)
             - estimated_closing_date: Estimate 2-4 months out (YYYY-MM-DD format)
             - description_of_requirements: Brief description of needs
 
@@ -2126,7 +2126,7 @@ class EmailProcessingWorkflow:
         deal_record = DealRecord(
             source=extracted.get('deal_source') or source,
             deal_name=deal_name,
-            pipeline=extracted.get('pipeline') or "Sales Pipeline",
+            pipeline="Sales Pipeline",  # ALWAYS use Sales Pipeline as the only pipeline
             closing_date=extracted.get('estimated_closing_date'),
             source_detail=extracted.get('source_detail') or source_detail,
             description_of_reqs=extracted.get('description_of_requirements') or extracted.get('notes')

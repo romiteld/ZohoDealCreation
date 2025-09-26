@@ -716,11 +716,15 @@ class FirecrawlV2Enterprise:
         if addresses:
             company_data["address"] = addresses[0]
             company_data["contact"]["address"] = company_data["address"]
+            # Store for city/state extraction
+            self._last_extracted_address = company_data["address"]
 
-        # Extract city and state from content
+        # Extract city and state from content (including the address we just found)
         city_state_data = self._extract_city_state_from_content(markdown_content)
         if city_state_data:
             company_data["contact"].update(city_state_data)
+            # Also add city/state at the top level for LangGraph research node
+            company_data.update(city_state_data)
 
         return company_data
 
@@ -823,15 +827,48 @@ class FirecrawlV2Enterprise:
             'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY'
         }
 
+        # First try to extract from the address we found
+        if hasattr(self, '_last_extracted_address'):
+            # Look for patterns like "801 N Brand Blvd Suite 1400, Glendale, CA 91203"
+            address_city_state = re.search(r',\s*([^,]+),\s*([A-Z]{2})\s*\d{5}', self._last_extracted_address)
+            if address_city_state:
+                city = address_city_state.group(1).strip()
+                state = address_city_state.group(2).strip()
+                if state in us_states:
+                    logger.info(f"✅ Extracted city/state from address: {city}, {state}")
+                    return {"city": city, "state": state}
+
+            # If we have a partial address, look for city/state near it in the content
+            if self._last_extracted_address and len(self._last_extracted_address) > 10:
+                # Search for the address in content and look for city/state nearby
+                address_escaped = re.escape(self._last_extracted_address)
+                # Look for city/state within 100 characters after the address
+                nearby_pattern = f'{address_escaped}[^\\n]{{0,100}}([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*),\\s*([A-Z]{{2}})\\s*\\d{{5}}'
+                nearby_match = re.search(nearby_pattern, markdown_content)
+                if nearby_match:
+                    city = nearby_match.group(1).strip()
+                    state = nearby_match.group(2).strip()
+                    if state in us_states:
+                        logger.info(f"✅ Found city/state near address: {city}, {state}")
+                        return {"city": city, "state": state}
+
         patterns = [
-            # Pattern 1: City, State ZIP format
+            # Pattern 1: Complete address with city, state: "Suite 1400 Glendale, CA 91203"
+            r'(?:Suite|Ste|Floor|Fl)?\s*\d+\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\s*\d{5}',
+            # Pattern 2: City, State ZIP format (most reliable)
             r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\s*\d{5}',
-            # Pattern 2: City, State format
+            # Pattern 3: Look for "Glendale, CA" or "Los Angeles, California" near common location keywords
+            r'(?i)(?:office|location|address|headquarters?|branch|facility)[\s:]*(?:is)?[\s\w]*?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})',
+            # Pattern 4: City, State format with proper capitalization
             r'([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b',
-            # Pattern 3: Located in City, State
+            # Pattern 5: Located in City, State
             r'(?i)(?:located|based|headquartered)\s+in\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b',
-            # Pattern 4: City State with no comma (less reliable)
-            r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\s+([A-Z]{2})\b(?=\s|$)',
+            # Pattern 6: Address continuation pattern "Blvd Glendale, CA"
+            r'(?:Blvd|Boulevard|Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Way|Place|Plaza|Court|Ct)\s+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b',
+            # Pattern 7: Contact information section with city/state
+            r'(?i)(?:contact|visit|find us|location)[\s\S]{0,50}([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\s*\d{5}',
+            # Pattern 8: Footer or copyright with location
+            r'(?i)(?:©|\(c\)|copyright)[\s\S]{0,50}([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*),\s*([A-Z]{2})\b',
         ]
 
         candidates = []
@@ -843,11 +880,16 @@ class FirecrawlV2Enterprise:
 
                 # Validate state abbreviation
                 if state in us_states and len(city) > 2 and len(city) < 50:
-                    # Score based on context and pattern reliability
-                    score = 1
-                    if 'headquarter' in markdown_content.lower() or 'located' in markdown_content.lower():
-                        score += 2
-                    candidates.append((city, state, score))
+                    # Skip if city looks like a street type
+                    if city.lower() not in ['street', 'avenue', 'road', 'boulevard', 'drive', 'lane', 'suite', 'floor']:
+                        # Score based on context and pattern reliability
+                        score = 1
+                        if 'headquarter' in markdown_content.lower() or 'located' in markdown_content.lower():
+                            score += 2
+                        # Boost score for complete address patterns
+                        if 'Pattern 1' in str(pattern) or 'Pattern 2' in str(pattern):
+                            score += 3
+                        candidates.append((city, state, score))
 
         # Return highest scoring candidate
         if candidates:

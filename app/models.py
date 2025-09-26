@@ -54,7 +54,7 @@ class DealRecord(BaseModel):
     """Deal Record fields matching Steve's template"""
     source: Optional[str] = Field(None, description="Deal source (e.g., Conference/Trade Show)")
     deal_name: Optional[str] = Field(None, description="Formatted deal name (e.g., Advisors (Nationwide) Capital Investment Advisors)")
-    pipeline: Optional[str] = Field(None, description="Pipeline name (e.g., Sales Pipeline)")
+    pipeline: Optional[str] = Field("Sales Pipeline", description="Pipeline name (ALWAYS 'Sales Pipeline')")
     closing_date: Optional[str] = Field(None, description="Estimated closing date (YYYY-MM-DD)")
     source_detail: Optional[str] = Field(None, description="Source detail (e.g., FutureProof 2026)")
     description_of_reqs: Optional[str] = Field(None, description="Description of requirements/needs")

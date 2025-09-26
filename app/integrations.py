@@ -1229,7 +1229,7 @@ class ZohoApiClient(ZohoClient):
                     job_title = getattr(extracted_data, 'job_title', None)
                     location = getattr(extracted_data, 'location', None)
                     deal_name = format_deal_name(job_title, location, company_name, use_steve_format=True)
-                pipeline = deal_record.pipeline or "Sales Pipeline"
+                pipeline = "Sales Pipeline"  # ALWAYS use Sales Pipeline as the only pipeline
                 closing_date = deal_record.closing_date
                 description = deal_record.description_of_reqs
 

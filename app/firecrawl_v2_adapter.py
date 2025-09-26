@@ -92,6 +92,8 @@ class FirecrawlV2Agent:
                         "phone": company_data.get("contact", {}).get("phone"),
                         "email": company_data.get("contact", {}).get("email"),
                         "address": company_data.get("contact", {}).get("address"),
+                        "city": company_data.get("contact", {}).get("city") or company_data.get("city"),
+                        "state": company_data.get("contact", {}).get("state") or company_data.get("state"),
                         "linkedin_url": company_data.get("linkedin_url"),
                         "website": company_url,
 
@@ -143,6 +145,8 @@ class FirecrawlV2Agent:
                                     "phone": person_data.get("phone"),
                                     "linkedin_url": person_data.get("linkedin_url"),
                                     "location": person_data.get("location"),
+                                    "city": person_data.get("city") or company_data.get("contact", {}).get("city") or company_data.get("city"),
+                                    "state": person_data.get("state") or company_data.get("contact", {}).get("state") or company_data.get("state"),
                                     "bio": person_data.get("bio")
                                 }
                                 logger.info(f"✅ Successfully enriched person data for {sender_name}")

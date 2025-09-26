@@ -3629,6 +3629,25 @@ async function enrichWithFirecrawl(data, researchDomain) {
                         console.log('Updated company location:', company.headquarters);
                     }
                 }
+
+                // Update city and state from company data
+                if (company.city) {
+                    const cityField = document.getElementById('contactCity');
+                    if (cityField && !cityField.value) {  // Only update if empty
+                        cityField.value = company.city;
+                        showFieldEnhanced('contactCity', 'Firecrawl');
+                        console.log('Updated city from company:', company.city);
+                    }
+                }
+
+                if (company.state) {
+                    const stateField = document.getElementById('contactState');
+                    if (stateField && !stateField.value) {  // Only update if empty
+                        stateField.value = company.state;
+                        showFieldEnhanced('contactState', 'Firecrawl');
+                        console.log('Updated state from company:', company.state);
+                    }
+                }
             }
 
             // Update contact information
@@ -3652,6 +3671,25 @@ async function enrichWithFirecrawl(data, researchDomain) {
                         locationField.value = contact.location;
                         showFieldEnhanced('location', 'Firecrawl');
                         console.log('Updated contact location:', contact.location);
+                    }
+                }
+
+                // Update city and state from contact data (higher priority than company)
+                if (contact.city) {
+                    const cityField = document.getElementById('contactCity');
+                    if (cityField) {
+                        cityField.value = contact.city;
+                        showFieldEnhanced('contactCity', 'Firecrawl');
+                        console.log('Updated city from contact:', contact.city);
+                    }
+                }
+
+                if (contact.state) {
+                    const stateField = document.getElementById('contactState');
+                    if (stateField) {
+                        stateField.value = contact.state;
+                        showFieldEnhanced('contactState', 'Firecrawl');
+                        console.log('Updated state from contact:', contact.state);
                     }
                 }
 
