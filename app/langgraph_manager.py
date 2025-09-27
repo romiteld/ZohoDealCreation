@@ -1874,6 +1874,82 @@ class EmailProcessingWorkflow:
 
             logger.info(f"Research completed with Firecrawl: {research_result}")
 
+            # 🚀 NEW: Enhanced enrichment with Serper API for location data
+            try:
+                from app.enhanced_enrichment_service import enhanced_enrichment_service
+
+                if enhanced_enrichment_service.is_enabled():
+                    logger.info("🔍 Using Serper API for enhanced location extraction")
+
+                    # Prepare data for enhanced enrichment
+                    extracted_data = state.get('extraction_result', {})
+
+                    # Make sure we have the contact and company records
+                    if not isinstance(extracted_data, dict):
+                        extracted_data = {}
+
+                    if 'contact_record' not in extracted_data:
+                        extracted_data['contact_record'] = {}
+                    if 'company_record' not in extracted_data:
+                        extracted_data['company_record'] = {}
+
+                    # Update with latest research data
+                    extracted_data['contact_record'].update({
+                        'first_name': candidate_name.split()[0] if candidate_name and ' ' in candidate_name else candidate_name,
+                        'last_name': candidate_name.split()[-1] if candidate_name and ' ' in candidate_name else '',
+                        'email': candidate_email or '',
+                        'phone': research_result.get('phone', '')
+                    })
+
+                    extracted_data['company_record'].update({
+                        'company_name': research_result.get('company_name', company_guess or ''),
+                        'website': research_result.get('website', candidate_website or ''),
+                        'phone': research_result.get('phone', '')
+                    })
+
+                    # Run enhanced enrichment
+                    enhanced_data = await enhanced_enrichment_service.enrich_extracted_data(extracted_data)
+
+                    # Extract location data from search results
+                    if enhanced_data.get('company_record'):
+                        company_record = enhanced_data['company_record']
+
+                        # Check for headquarters/location info
+                        if company_record.get('headquarters'):
+                            location = company_record['headquarters']
+                            # Parse city and state from location string
+                            import re
+                            location_parts = location.split(',')
+                            if len(location_parts) >= 2:
+                                city = location_parts[0].strip()
+                                state_part = location_parts[1].strip()
+                                # Extract state code if present
+                                state_match = re.search(r'\b([A-Z]{2})\b', state_part)
+                                if state_match:
+                                    state = state_match.group(1)
+                                    research_result['city'] = city
+                                    research_result['state'] = state
+                                    logger.info(f"✅ Extracted location from Serper: {city}, {state}")
+
+                        # Update with any additional enriched data
+                        if company_record.get('contact_phone'):
+                            research_result['phone'] = company_record['contact_phone']
+                        if company_record.get('contact_email'):
+                            research_result['contact_email'] = company_record['contact_email']
+                        if company_record.get('linkedin_company_url'):
+                            research_result['linkedin_url'] = company_record['linkedin_company_url']
+                        if company_record.get('industry_hint'):
+                            research_result['industry'] = company_record['industry_hint']
+                        if company_record.get('estimated_size'):
+                            research_result['company_size'] = company_record['estimated_size']
+
+                        # Mark as Serper-enhanced
+                        research_result['serper_enriched'] = True
+                        logger.info(f"✅ Serper enrichment completed: Added location and company details")
+
+            except Exception as e:
+                logger.warning(f"Enhanced enrichment with Serper failed: {e}, continuing with existing data")
+
             return {
                 "company_research": research_result,
                 "messages": [{"role": "assistant", "content": f"Researched: {research_result}"}]
