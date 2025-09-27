@@ -307,9 +307,15 @@ async function initializeTaskpane() {
         console.log('Email item is available');
         
         // Set up event listeners
-        document.getElementById('btnSend').addEventListener('click', handleSendToZoho);
+        document.getElementById('btnSend').addEventListener('click', () => handleSendToZoho(false));
         document.getElementById('btnCancel').addEventListener('click', handleCancel);
         document.getElementById('btnClose').addEventListener('click', handleClose);
+
+        // Test mode button
+        const btnTestMode = document.getElementById('btnTestMode');
+        if (btnTestMode) {
+            btnTestMode.addEventListener('click', () => handleSendToZoho(true));
+        }
         
         // Natural language corrections
         document.getElementById('btnApplyCorrections').addEventListener('click', applyNaturalLanguageCorrections);
@@ -504,7 +510,7 @@ async function extractAndPreview() {
                     sender_name: currentEmailData.from?.displayName || '',
                     subject: currentEmailData.subject || '',
                     body: currentEmailData.body || '',
-                    dry_run: false,  // Create Zoho records when extracting
+                    dry_run: isTestMode,  // If test mode, don't create Zoho records
                     user_context: getUserContext()  // Include current Outlook user context
                 })
             };
@@ -1654,7 +1660,7 @@ function showPreviewForm() {
 /**
  * Handle Send to Zoho button click
  */
-async function handleSendToZoho() {
+async function handleSendToZoho(isTestMode = false) {
     try {
         // Validate required fields
         if (!validateForm()) {
@@ -1736,12 +1742,14 @@ async function handleSendToZoho() {
                     }
                 },
                 // Include current Outlook user context for client extraction
-                user_context: getUserContext()
+                user_context: getUserContext(),
+                // Test mode flag
+                dry_run: isTestMode
             })
         });
         
         await updateProgress(4, 'Checking for duplicates...');
-        await updateProgress(5, 'Creating Zoho records...');
+        await updateProgress(5, isTestMode ? 'Running test extraction...' : 'Creating Zoho records...');
         
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
@@ -1780,6 +1788,9 @@ async function handleSendToZoho() {
         // Check if this was a duplicate
         if (result.status === 'duplicate' || result.status === 'duplicate_blocked') {
             showDuplicate(result);
+        } else if (isTestMode) {
+            // Show test mode success
+            showTestSuccess(result);
         } else {
             // Show success message
             showSuccess(result);
@@ -2037,6 +2048,46 @@ function showDuplicate(result) {
     }
 
     document.getElementById('btnClose').style.display = 'block';
+}
+
+/**
+ * Show test mode success message
+ */
+function showTestSuccess(result) {
+    const previewForm = document.getElementById('previewForm');
+    const successMessage = document.getElementById('successMessage');
+
+    // Build test success message
+    let message = `
+        <div class="success-content">
+            <h3>✅ Test Extraction Successful!</h3>
+            <p><strong>This was a TEST RUN - No records were created in Zoho CRM</strong></p>
+            <p>Extracted Data:</p>
+            <ul>
+                ${result.deal_name ? `<li>Deal: ${result.deal_name}</li>` : ''}
+                ${result.extracted?.contact_record?.first_name ? `<li>Contact: ${result.extracted.contact_record.first_name} ${result.extracted.contact_record.last_name || ''}</li>` : ''}
+                ${result.extracted?.company_record?.company_name ? `<li>Company: ${result.extracted.company_record.company_name}</li>` : ''}
+            </ul>
+            <p style="margin-top: 20px;">
+                <em>Click "Send to Zoho CRM" to create actual records, or "Test Extract Only" to test again.</em>
+            </p>
+        </div>
+    `;
+
+    successMessage.innerHTML = message;
+    successMessage.style.display = 'block';
+
+    // Hide form and show both buttons
+    previewForm.style.display = 'none';
+    document.getElementById('btnSend').style.display = 'block';
+    const btnTestMode = document.getElementById('btnTestMode');
+    if (btnTestMode) btnTestMode.style.display = 'block';
+    document.getElementById('btnCancel').style.display = 'none';
+
+    // Reset button state
+    const btnSend = document.getElementById('btnSend');
+    btnSend.disabled = false;
+    btnSend.innerHTML = 'Send to Zoho CRM';
 }
 
 /**

@@ -133,13 +133,40 @@ python tests/firecrawl/test_firecrawl_sdk.py
 python tests/firecrawl/test_firecrawl_v2_fire.py
 ```
 
+### Code Quality
+```bash
+# Format code
+black app/                    # Auto-format Python code
+isort app/                    # Sort imports
+
+# Lint code
+flake8 app/                   # Style checking
+pylint app/                   # Code analysis
+mypy app/                     # Type checking
+
+# Security checks
+bandit -r app/                # Security vulnerability scan
+safety check                  # Dependency vulnerability scan
+```
+
+### Database Operations
+```bash
+# Run migrations
+alembic upgrade head          # Apply all migrations
+alembic revision --autogenerate -m "Description"  # Create new migration
+
+# Database maintenance
+python scripts/cleanup_old_records.py   # Clean old records
+python scripts/vacuum_database.py       # Optimize database
+```
+
 ### Deployment
 ```bash
 # Full deployment (DB migrations, Docker build, Azure deploy)
 ./scripts/deploy.sh
 
 # Quick Docker deployment (use --no-cache for fresh builds)
-docker build -t wellintakeacr0903.azurecr.io/well-intake-api:latest . --no-cache
+docker build -t wellintakeacr0903.azurecr.io/well-intake-api:latest .
 az acr login --name wellintakeacr0903
 docker push wellintakeacr0903.azurecr.io/well-intake-api:latest
 
@@ -155,11 +182,15 @@ az afd endpoint purge --resource-group TheWell-Infra-East \
   --domains well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net \
   --content-paths "/*"
 
+# Alternative: Use API endpoint for CDN purge
+curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/cdn/purge" \
+  -H "Content-Type: application/json" -d '{"paths": ["/*"]}'
+
 # View logs
 az containerapp logs show --name well-intake-api --resource-group TheWell-Infra-East --follow
 
-# GitHub Actions deployment (preferred)
-# Push to main branch triggers deploy-production.yml workflow
+# GitHub Actions deployment (preferred but currently disabled)
+# Push to main branch would trigger deploy-production.yml workflow
 # Manual workflow dispatch available in GitHub Actions tab
 ```
 
@@ -179,166 +210,13 @@ curl -X GET "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerap
 # Test VoIT status
 curl -X GET "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/vault-agent/status" \
   -H "X-API-Key: your-api-key"
-```
 
-## TalentWell Curator & Vault Agent System
-
-### Overview
-The **TalentWell Curator** is a sophisticated system for generating weekly candidate digests for financial advisors, with comprehensive **Zoom transcript processing** and evidence extraction. It integrates with the **Vault Agent** for C³/VoIT orchestration.
-
-### Core Components
-
-#### TalentWell Curator (`app/jobs/talentwell_curator.py`)
-- **Weekly digest generation** for candidates with financial advisor focus
-- **Comprehensive Zoom transcript processing** with VTT format support
-- **Evidence-based bullet generation** (3-5 bullets minimum from real data sources)
-- **Redis caching** with 4-week deduplication
-- **AST template compilation** for HTML rendering
-- **Subject line bandit optimization** for email campaigns
-
-#### Vault Agent API (`app/api/vault_agent/routes.py`)
-- `POST /api/vault-agent/ingest` - Normalize and store candidate records
-- `POST /api/vault-agent/publish` - Apply C³+VoIT and publish to channels
-- `GET /api/vault-agent/status` - Check feature flags and configuration
-- **C³ cache integration** with conformal guarantees
-- **VoIT orchestration** for quality/cost optimization
-
-#### Evidence Extractor (`app/extract/evidence.py`)
-**Refactored from tech to financial advisor patterns**:
-```python
-class BulletCategory(Enum):
-    FINANCIAL_METRIC = "financial_metric"      # AUM, production, book size
-    GROWTH_ACHIEVEMENT = "growth_achievement"  # Growth metrics
-    CLIENT_METRIC = "client_metric"           # Client count, retention
-    PERFORMANCE_RANKING = "performance_ranking" # Rankings
-    LICENSES = "licenses"                     # Series 7/66, CFA, CFP
-    EXPERIENCE = "experience"                 # Years in financial services
-```
-
-#### Zoom Client (`app/zoom_client.py`)
-- **Server-to-Server OAuth** authentication
-- **Meeting recording** and **transcript fetching**
-- **VTT format transcript** processing
-- **Automatic token refresh** with 1-hour expiry
-
-### Data Flow Pipeline
-
-#### Zoom Transcript Processing
-1. **Fetch transcript**: `ZoomClient.fetch_zoom_transcript_for_meeting()`
-2. **Evidence extraction**: Parse financial metrics using regex patterns
-3. **Bullet generation**: Extract AUM, production, growth, clients from transcripts
-4. **Confidence scoring**: 0.95 for transcript evidence, 0.9 for CRM fields
-
-#### Financial Patterns Recognition
-```python
-# AUM/Book Size patterns from transcripts
-'aum': [
-    r'\$[\d,]+(?:\.\d+)?\s*(?:billion|B)\s*(?:AUM|aum|under management)',
-    r'manages?[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMK]',
-    r'(?:book|portfolio)[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMK]'
-]
-
-# Production patterns
-'production': [
-    r'\$[\d,]+(?:\.\d+)?\s*[BMK]?\s*(?:annual production|production)',
-    r'(?:production|revenue)[:\s]+\$[\d,]+(?:\.\d+)?\s*[BMK]'
-]
-
-# Growth patterns
-'growth': [
-    r'(?:grew|growth)[\s\w]*(?:from )?[~]?\$[\d,]+[\s\w]*(?:to )[~]?\$[\d,]+',
-    r'(?:increased?)[\s\w]*(?:AUM|assets)[\s\w]*(?:by )?\d+(?:\.\d+)?%'
-]
-```
-
-### Environment Variables
-```bash
-# Vault Agent Features
-FEATURE_C3=true              # Enable C³ cache
-FEATURE_VOIT=true            # Enable VoIT orchestration
-C3_DELTA=0.01               # Risk bound (1%)
-C3_EPS=3                    # Edit tolerance (characters)
-VOIT_BUDGET=5.0             # Processing budget
-TARGET_QUALITY=0.9          # Target quality score
-
-# Zoom Integration
-ZOOM_ACCOUNT_ID=xyz
-ZOOM_CLIENT_ID=xyz
-ZOOM_CLIENT_SECRET=xyz
-ZOOM_SECRET_TOKEN=xyz       # For webhook verification
-ZOOM_VERIFICATION_TOKEN=xyz # For webhook verification
-```
-
-### DigestCard Format (Brandon's Requirements)
-```python
-@dataclass
-class DigestCard:
-    deal_id: str
-    candidate_name: str
-    job_title: str
-    company: str
-    location: str
-    bullets: List[BulletPoint]           # 3-5 bullets from real data
-    transcript_url: Optional[str]        # Zoom transcript URL
-    evidence_score: float               # Average confidence score
-```
-
-### HTML Output Format
-**Critical**: Must match Brandon's format with emojis:
-- **‼️** for candidate name and title
-- **🔔** for company and location
-- **📍** for availability and compensation
-- **Plain text HTML** (not fancy cards)
-- **3-5 bullet points** extracted from transcripts, resumes, CRM data
-
-### Essential Testing Commands
-```bash
 # Test TalentWell curator
 python -m app.jobs.talentwell_curator --audience steve_perry --days 7
 
 # Test Zoom transcript fetching
 python -c "from app.zoom_client import ZoomClient; import asyncio; client = ZoomClient(); asyncio.run(client.fetch_meeting_recording('MEETING_ID'))"
-
-# Test vault agent ingestion
-curl -X POST "http://localhost:8000/api/vault-agent/ingest" \
-  -H "Content-Type: application/json" \
-  -H "X-API-Key: your-key" \
-  -d '{"source": "email", "payload": {...}}'
-
-# Test evidence extraction
-python tests/test_financial_advisor_extraction.py
 ```
-
-### Data Sources Integration
-1. **Zoom Transcripts**: Primary source for financial metrics and achievements
-2. **CRM Fields**: `book_size_aum`, `production_12mo`, `professional_designations`
-3. **Resume Data**: Education, certifications, prior experience
-4. **Email Content**: Additional context and referrer information
-
-### Critical Business Rules
-- **No fake data**: Only extract bullets from verifiable sources
-- **Minimum 3 bullets**: Extract from transcripts, resumes, CRM if insufficient
-- **Financial focus**: Prioritize AUM, production, growth, client metrics
-- **Evidence linking**: Each bullet must trace back to source (transcript line, CRM field)
-- **Confidence scoring**: Transcript evidence = 0.95, CRM = 0.9, inferred = 0.7
-
-## Critical Constraints
-
-⚠️ **NEVER CHANGE** - System requirements that must not be modified:
-- **AI Model**: Always use `gpt-5` with `temperature=1`
-- **Owner Assignment**: Use `ZOHO_DEFAULT_OWNER_EMAIL` environment variable, never hardcode IDs
-- **Zoho API**: Use v8 endpoints (not v6)
-- **Field Names**: Use `Source` (not `Lead_Source`), `Source_Detail` for referrer names
-
-### Outlook Add-in Constraints
-⚠️ **Office Add-in Specific Requirements**:
-- **Manifest ID**: Never change the add-in ID `d2422753-f7f6-4a4a-9e1e-7512f37a50e5`
-- **CDN URLs**: Always use Azure Front Door CDN URLs for production manifests
-- **CSP Headers**: All external domains must be included in Content Security Policy
-- **HTTPS Only**: All add-in resources must be served over HTTPS
-- **Versioning**: Auto-increment manifest version on deployment (handled by CI/CD)
-- **Icon Requirements**: Must provide 16px, 32px, and 80px PNG icons
-- **App Domains**: All API endpoints must be listed in `<AppDomains>` section
 
 ## LangGraph Workflow
 
@@ -414,6 +292,25 @@ Pattern: `"[Job Title] ([Location]) - [Firm Name]"`
 3. Has Calendly → "Website Inbound"
 4. Default → "Email Inbound"
 
+## Critical Constraints
+
+⚠️ **NEVER CHANGE** - System requirements that must not be modified:
+- **AI Model**: Always use `gpt-5` with `temperature=1`
+- **Owner Assignment**: Use `ZOHO_DEFAULT_OWNER_EMAIL` environment variable, never hardcode IDs
+- **Zoho API**: Use v8 endpoints (not v6)
+- **Field Names**: Use `Source` (not `Lead_Source`), `Source_Detail` for referrer names
+- **Pipeline**: Always lock to "Sales Pipeline" only
+
+### Outlook Add-in Constraints
+⚠️ **Office Add-in Specific Requirements**:
+- **Manifest ID**: Never change the add-in ID `d2422753-f7f6-4a4a-9e1e-7512f37a50e5`
+- **CDN URLs**: Always use Azure Front Door CDN URLs for production manifests
+- **CSP Headers**: All external domains must be included in Content Security Policy
+- **HTTPS Only**: All add-in resources must be served over HTTPS
+- **Versioning**: Auto-increment manifest version on deployment (handled by CI/CD)
+- **Icon Requirements**: Must provide 16px, 32px, and 80px PNG icons
+- **App Domains**: All API endpoints must be listed in `<AppDomains>` section
+
 ## Environment Variables
 
 Required in `.env.local`:
@@ -430,6 +327,7 @@ OPENAI_MODEL=gpt-5  # DO NOT CHANGE
 DATABASE_URL=postgresql://...
 AZURE_STORAGE_CONNECTION_STRING=...
 AZURE_CONTAINER_NAME=email-attachments
+AZURE_REDIS_CONNECTION_STRING=rediss://:password@hostname:port
 
 # Zoho
 ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth.azurewebsites.net
@@ -437,54 +335,56 @@ ZOHO_DEFAULT_OWNER_EMAIL=daniel.romitelli@emailthewell.com
 
 # APIs
 FIRECRAWL_API_KEY=fc-...
+APOLLO_API_KEY=...
+
+# Zoom Integration
+ZOOM_ACCOUNT_ID=xyz
+ZOOM_CLIENT_ID=xyz
+ZOOM_CLIENT_SECRET=xyz
+
+# Vault Agent Features
+FEATURE_C3=true              # Enable C³ cache
+FEATURE_VOIT=true            # Enable VoIT orchestration
+C3_DELTA=0.01               # Risk bound (1%)
+VOIT_BUDGET=5.0             # Processing budget
+TARGET_QUALITY=0.9          # Target quality score
 ```
 
-## API Workflow
+## TalentWell Curator System
 
-1. Receive email at `/intake/email`
-2. **Check Redis cache for similar email patterns**
-3. Upload attachments to Azure Blob
-4. Process with LangGraph (2-3 seconds) or use cached result
-5. **Cache extraction results for future use**
-6. Apply business rules
-7. Check PostgreSQL for duplicates
-8. Create/update Zoho records
-9. Store in PostgreSQL
-10. Return Zoho IDs
+### Overview
+The **TalentWell Curator** generates weekly candidate digests for financial advisors with Zoom transcript processing and evidence extraction.
 
-## Redis Caching (NEW)
+### Financial Patterns Recognition
+```python
+# AUM/Book Size patterns from transcripts
+'aum': [
+    r'\$[\d,]+(?:\.\d+)?\s*(?:billion|B)\s*(?:AUM|aum|under management)',
+    r'manages?[\s\w]*\$[\d,]+(?:\.\d+)?\s*[BMK]'
+]
 
-### Configuration
-Add to `.env.local`:
-```bash
-AZURE_REDIS_CONNECTION_STRING=rediss://:password@hostname:port
+# Production patterns
+'production': [
+    r'\$[\d,]+(?:\.\d+)?\s*[BMK]?\s*(?:annual production|production)',
+    r'(?:production|revenue)[:\s]+\$[\d,]+(?:\.\d+)?\s*[BMK]'
+]
 ```
 
-### Cost Benefits
-- **GPT-5-mini**: $0.25/1M tokens (new requests)
-- **Cached inputs**: $0.025/1M tokens (90% savings)
-- **Response time**: <100ms for cached vs 2-3s for new
+### DigestCard Format Requirements
+- **‼️** for candidate name and title
+- **🔔** for company and location
+- **📍** for availability and compensation
+- **3-5 bullet points** extracted from transcripts, resumes, CRM data
+- **No fake data**: Only extract bullets from verifiable sources
 
-### Cache Endpoints
-- `GET /cache/status` - View metrics and optimization recommendations
-- `POST /cache/invalidate` - Clear cache entries (optional pattern)
-- `POST /cache/warmup` - Pre-load common email patterns
+## Production URLs
 
-### Caching Strategy
-- **24-hour TTL** for standard emails
-- **48-hour TTL** for referral emails
-- **7-day TTL** for recruiter templates
-- **90-day TTL** for common patterns
+- **API**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
+- **Health**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
+- **Manifest**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
+- **Add-in Files**: Both root (`/`) and `/addin/` paths serve static files
 
-### Email Classification
-Automatically classifies and optimizes caching for:
-- Referral emails (highest cache priority)
-- Recruiter outreach (template detection)
-- Direct applications
-- Follow-up emails
-- Batch recruitment
-
-## Common Issues
+## Common Issues & Solutions
 
 ### "temperature must be 1" Error
 Always use `temperature=1` for GPT-5-mini calls
@@ -498,134 +398,39 @@ Ensure API_KEY in `.env.local` and load with `load_dotenv('.env.local')`
 ### Slow Processing
 Check LangGraph is enabled: `USE_LANGGRAPH=true`
 
-## Production URLs
-
-- **API**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
-- **Health**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/health
-- **Manifest**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/manifest.xml
-- **Add-in Files**: Both root (`/`) and `/addin/` paths serve static files:
-  - `/manifest.xml` or `/addin/manifest.xml`
-  - `/commands.js` or `/addin/commands.js`
-  - `/taskpane.js` or `/addin/taskpane.js`
-  - `/commands.html` or `/addin/commands.html`
-  - `/taskpane.html` or `/addin/taskpane.html`
-
-## Recent Updates
-
-### 2025-09-09: CDN Proxy Routing Fix
-✅ **Fixed Flask Proxy CDN Management Routes**
-- **Issue**: CDN endpoints returning 404 through proxy despite working directly on backend
-- **Root Cause**: Conflict between IIS web.config URL rewrites and Flask routing
-- **Solution**: Removed IIS `/api/*` rewrite rule, let Flask handle all API routing
-- **New Routes**:
-  - `/api/cdn/*` → Backend `/api/cdn/*` (CDN management)
-  - `/cdn/*` → Backend `/api/cdn/*` (Alias route for convenience)
-- **Endpoints Now Working**:
-  - `GET /api/cdn/status` - CDN configuration and metrics
-  - `POST /api/cdn/purge` - Purge specific paths from CDN cache
-  - `GET /cdn/status` - Alias for CDN status
-  - `POST /cdn/purge` - Alias for CDN purge
-
-### 2025-08-29: GPT-5-mini 400K Context Optimization
-✅ **Complete Azure Infrastructure Enhancement**
-- **PostgreSQL with pgvector**: 400K context window support, similarity search
-- **Azure Cache for Redis**: 90% cost reduction with intelligent caching
-- **Azure Service Bus**: Batch processing (50 emails per GPT-5 context)
-- **Azure AI Search**: Semantic pattern learning and company templates
-- **Model Tiering**: Automatic GPT-5-nano/mini/full selection based on complexity
-- **Enterprise Security**: Key Vault integration, API key rotation, rate limiting
-- **Application Insights**: Custom metrics, cost tracking, performance monitoring
-
-### Performance Improvements
-- **Speed**: 20x faster batch processing, <1s for cached patterns
-- **Cost**: 60-95% reduction through caching and intelligent model selection  
-- **Scale**: Process thousands of emails/hour with Service Bus
-- **Reliability**: Zero-downtime deployments, automatic retries
-
-### 2025-09-09: C³ and VoIT Features
-✅ **Conformal Counterfactual Cache (C³) and Value-of-Insight Tree (VoIT)**
-- **C³ Cache**: Risk-bounded caching with conformal guarantees
-  - `C3_DELTA=0.01`: 1% stale-risk tolerance  
-  - `C3_EPS=3`: Edit distance tolerance in characters
-  - Stores embeddings in Redis, computes cosine distance locally
-  - Automatic calibration via conformal quantiles
-- **VoIT Orchestration**: Budget-aware reasoning depth controller
-  - `VOIT_BUDGET=5.0`: Effort units for processing
-  - `TARGET_QUALITY=0.9`: Target quality score
-  - Dynamically selects between GPT-5-nano/mini/full
-  - Optimizes quality vs cost vs latency tradeoff
-- **Vault Agent API**: Canonical record management
-  - `POST /api/vault-agent/ingest`: Normalize and store records
-  - `POST /api/vault-agent/publish`: Apply C³+VoIT and publish to channels
-  - `GET /api/vault-agent/status`: Check feature flags and config
-
-### Environment Variables (Azure Container Apps)
+### Docker Permission Issues in WSL2
 ```bash
-# C³ Configuration
-FEATURE_C3=true         # Enable C³ cache
-FEATURE_VOIT=true       # Enable VoIT orchestration
-C3_DELTA=0.01          # Risk bound (1%)
-C3_EPS=3               # Edit tolerance (characters)
-VOIT_BUDGET=5.0        # Processing budget
-TARGET_QUALITY=0.9     # Target quality score
+sudo usermod -aG docker $USER
+newgrp docker  # Or restart terminal
 ```
 
-Target significant cost reductions through intelligent caching and adaptive reasoning.
+### Container App Not Updating
+Force revision with unique suffix:
+```bash
+az containerapp update --name well-intake-api \
+  --resource-group TheWell-Infra-East \
+  --image wellintakeacr0903.azurecr.io/well-intake-api:latest \
+  --revision-suffix "v$(date +%Y%m%d-%H%M%S)"
+```
 
-### 2025-09-16: Apollo WebSocket Removal & Static File Routes
-✅ **Simplified Architecture**
-- Removed all WebSocket/SignalR dependencies from backend
-- Apollo integration now uses REST API exclusively
-- Added `/addin/` endpoint aliases for all static files
-- Cleaned up Container App URLs (migrated from salmonsmoke to wittyocean)
-- Updated CSP headers to remove WebSocket connections
-- Both root (`/`) and `/addin/` paths now serve Outlook Add-in files
+## Recent Critical Fixes (2025-09-27)
 
-### 2025-08-26: LangGraph Migration
-✅ **LangGraph Implementation**
-- Replaced CrewAI with LangGraph v0.2.74
-- Eliminated ChromaDB/SQLite issues
-- Reduced processing: 45s → 2-3s
-- Docker image v10 on Container Apps
+### City/State Preservation Fix
+- **Issue**: City/state fields were being stripped during data cleaning
+- **Solution**: Added modern fields to `field_limits` in `langgraph_manager.py:1333`
+- **Files**: `app/langgraph_manager.py`, `addin/taskpane.js`
 
-### 2025-09-17: Firecrawl v2 Web Search Client Complete Implementation
-✅ **Full Firecrawl v2 Integration with Web Search Client**
-- **Web Search Client Button**: Added to Outlook Add-in taskpane with progress indicator
-- **Progress Tracking**: 5-step progress indicator (Web Crawl → Data Extract → Company Intel → Contact Enrich → AI Analysis)
-- **API Endpoint Fix**: Corrected Firecrawl API from `/v2` to `/v1` endpoint
-- **Enhanced Data Extraction**: Regex-based parsing of company phone, email, address, LinkedIn from scraped content
-- **Graceful Fallbacks**: Switched from Extract API to Scrape API to work within token limitations
-- **Container Deployment**: Successfully deployed as revision `complete-20250917-053434`
-- **Key Components**:
-  - `app/firecrawl_v2_fire_agent.py`: Core FIRE-1 agent with company research capabilities
-  - `app/firecrawl_v2_adapter.py`: LangGraph interface adapter for workflow integration
-  - `addin/taskpane.js`: Frontend integration with progress indicator and form population
-  - `/api/firecrawl/enrich`: Backend REST endpoint for company enrichment
+### Pipeline Lock Fix
+- **Issue**: Pipeline dropdown allowed wrong values
+- **Solution**: Changed to readonly input locked to "Sales Pipeline"
+- **File**: `addin/taskpane.html:644`
 
-### 2025-09-17: Frontend Data Mapping Architecture Fix
-✅ **Critical Frontend Bug Fixes**
-- **Issue**: Frontend ignored structured backend data from Firecrawl/Apollo research
-- **Root Cause**: Outlook Add-in mapping only used legacy flat fields, not new structured records
-- **Solution**: Enhanced `taskpane.js` data mapper to use `ExtractedData` structured format
-- **Key Changes**:
-  - Fixed ternary operator precedence bug in location parsing (single cities no longer duplicate to state)
-  - Added mapping for `contact_record.city/state` from backend research
-  - Added mapping for `company_record.phone/website/detail` from Firecrawl/Apollo enrichment
-  - Form population now prefers structured backend data over text parsing
-- **Data Flow**: LangGraph Research → Structured Records → Frontend Mapping → Form Population
-- **Impact**: Firecrawl v2 and Apollo.io research data now properly displays in Outlook Add-in forms
+### Referrer Contamination Fix
+- **Issue**: Internal emails triggering referral source
+- **Solution**: Filter metadata emails in `business_rules.py:68`
+- **Domains**: `@emailthewell.com`, `@thewell.com`
 
-### 2025-09-26: TalentWell Curator & Financial Advisor Processing
-✅ **Complete Financial Advisor Pipeline Implementation**
-- **Evidence Extraction Refactoring**: Converted from tech patterns (Python/Java/AWS) to financial advisor patterns (AUM/production/licenses)
-- **TalentWell Curator System**: Full weekly digest generation with Zoom transcript processing
-- **Vault Agent Integration**: C³/VoIT orchestration for candidate record management
-- **Financial Pattern Recognition**: Comprehensive regex patterns for AUM, production, growth, client metrics
-- **Zoom Server-to-Server OAuth**: Complete integration for transcript fetching and processing
-- **Brandon's HTML Format**: Emoji-based candidate cards (‼️🔔📍) with 3-5 bullet points from real data sources
-- **Key Components**:
-  - `app/jobs/talentwell_curator.py`: Core digest generation with evidence extraction
-  - `app/extract/evidence.py`: Financial advisor-specific pattern recognition
-  - `app/api/vault_agent/routes.py`: C³ cache and VoIT orchestration endpoints
-  - `app/zoom_client.py`: Complete Zoom API integration with VTT transcript support
-- **Critical Requirements**: No fake data, minimum 3 bullets from transcripts/resumes/CRM, financial metrics priority
+### Zoho Deduplication Fix
+- **Issue**: Search queries failing without parentheses
+- **Solution**: Added parentheses to search criteria in `integrations.py`
+- **Pattern**: `(Website:equals:{website})`
