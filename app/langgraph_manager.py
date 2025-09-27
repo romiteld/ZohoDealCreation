@@ -1638,6 +1638,18 @@ class EmailProcessingWorkflow:
                 use_ultra_enrichment = False
                 logger.warning(f"⚠️ Firecrawl v2 Fire Agent not available: {e}")
 
+            # Import Serper API for enhanced web search
+            try:
+                from app.enhanced_enrichment_service import EnhancedEnrichmentService
+                serper_service = EnhancedEnrichmentService()
+                use_serper_enrichment = serper_service.is_enabled()
+                if use_serper_enrichment:
+                    logger.info("✅ Using Serper API for enhanced web search")
+            except ImportError as e:
+                serper_service = None
+                use_serper_enrichment = False
+                logger.warning(f"⚠️ Serper API not available: {e}")
+
             research_service = CompanyResearchService()
             cache_manager = RedisCacheManager()
             await cache_manager.connect()
@@ -1745,6 +1757,42 @@ class EmailProcessingWorkflow:
             
             # Merge candidate info into research result
             research_result.update(candidate_info)
+
+            # 🔍 Use Serper API for additional web search if available
+            if use_serper_enrichment and serper_service and (company_guess or research_domain):
+                try:
+                    logger.info(f"🔍 Enhancing with Serper web search for: {company_guess or research_domain}")
+                    serper_results = await serper_service.search_company_info(
+                        company_name=company_guess or "",
+                        domain=research_domain
+                    )
+
+                    if serper_results:
+                        # Update research result with Serper data
+                        if serper_results.get('phone') and not research_result.get('phone'):
+                            research_result['phone'] = serper_results['phone']
+                            logger.info(f"📱 Found phone via Serper: {serper_results['phone']}")
+
+                        if serper_results.get('website') and not research_result.get('website'):
+                            research_result['website'] = serper_results['website']
+                            logger.info(f"🌐 Found website via Serper: {serper_results['website']}")
+
+                        if serper_results.get('address'):
+                            research_result['address'] = serper_results['address']
+                            # Extract city/state from address
+                            import re
+                            city_state = re.search(r'([^,]+),\s*([A-Z]{2})', serper_results['address'])
+                            if city_state:
+                                research_result['city'] = city_state.group(1).strip()
+                                research_result['state'] = city_state.group(2).strip()
+                                logger.info(f"📍 Found location via Serper: {research_result['city']}, {research_result['state']}")
+
+                        research_result['serper_enriched'] = True
+                        research_result['confidence'] = min(research_result.get('confidence', 0.5) + 0.2, 1.0)
+                        logger.info("✅ Serper web search enrichment completed")
+
+                except Exception as e:
+                    logger.error(f"❌ Serper enrichment failed: {str(e)}")
 
             # 🚀 NEW: Apollo.io enrichment for accurate company phone/website
             if candidate_email:

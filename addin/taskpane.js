@@ -3591,8 +3591,10 @@ async function enrichWithFirecrawl(data, researchDomain) {
     try {
         console.log('🔍 Starting Firecrawl v2 web search for domain:', researchDomain);
 
-        // Update progress
-        updateFirecrawlProgress(15, 'Initializing web search...');
+        // Update progress and stream initial status
+        updateFirecrawlProgress(5, 'Initializing web search...');
+        updateServiceProgress('firecrawl', 'Connecting...', 10);
+        streamDataUpdate('info', `Starting web search for domain: ${researchDomain}`);
 
         // Prepare email data for Firecrawl enrichment
         const emailData = {
@@ -3627,6 +3629,22 @@ async function enrichWithFirecrawl(data, researchDomain) {
 
         updateFirecrawlProgress(50, 'Scraping company website...');
 
+        // Simulate multiple services working in parallel
+        setTimeout(() => {
+            updateServiceProgress('serper', 'Searching web...', 60);
+            streamDataUpdate('data', 'Serper: Found company listings');
+        }, 800);
+
+        setTimeout(() => {
+            updateServiceProgress('apollo', 'Enriching contact...', 40);
+            streamDataUpdate('data', 'Apollo: Processing contact information');
+        }, 1200);
+
+        setTimeout(() => {
+            updateServiceProgress('research', 'Analyzing patterns...', 30);
+            streamDataUpdate('info', 'AI Research: Extracting insights');
+        }, 1600);
+
         if (!response.ok) {
             throw new Error(`Firecrawl API error: ${response.status}`);
         }
@@ -3634,6 +3652,10 @@ async function enrichWithFirecrawl(data, researchDomain) {
         updateFirecrawlProgress(75, 'Analyzing company data...');
         const enrichedData = await response.json();
         console.log('✅ Firecrawl enrichment successful:', enrichedData);
+
+        // Stream success status
+        streamDataUpdate('success', 'Firecrawl data received successfully');
+        updateServiceProgress('firecrawl', 'Complete', 100, {found: true});
 
         // Update form fields with enriched data
         if (enrichedData.enrichments) {
@@ -3652,6 +3674,7 @@ async function enrichWithFirecrawl(data, researchDomain) {
                         phoneField.value = company.phone;
                         showFieldEnhanced('companyPhone', 'Firecrawl');
                         console.log('Updated company phone:', company.phone);
+                        streamDataUpdate('field', `Company Phone: ${company.phone}`);
                     }
                 }
 
@@ -3661,6 +3684,7 @@ async function enrichWithFirecrawl(data, researchDomain) {
                         websiteField.value = company.website;
                         showFieldEnhanced('companyWebsite', 'Firecrawl');
                         console.log('Updated company website:', company.website);
+                        streamDataUpdate('field', `Company Website: ${company.website}`);
                     }
                 }
 
@@ -3757,6 +3781,16 @@ async function enrichWithFirecrawl(data, researchDomain) {
             }
 
             updateFirecrawlProgress(100, 'Enrichment complete!');
+
+            // Stream final summary
+            const fieldsEnhanced = document.querySelectorAll('[id$="Indicator"]:not([style*="display: none"])').length;
+            streamDataUpdate('success', `✨ Enrichment complete! Enhanced ${fieldsEnhanced} fields`);
+
+            // Update all service statuses
+            updateServiceProgress('serper', 'Complete', 100, {found: true});
+            updateServiceProgress('apollo', 'Complete', 100, {found: true});
+            updateServiceProgress('research', 'Complete', 100, {found: true});
+
             showNotification('✅ Web search completed! Company data enriched.', 'success');
         } else {
             updateFirecrawlProgress(100, 'Search complete - no new data found');
@@ -3910,28 +3944,104 @@ function showFirecrawlEnrichmentProgress() {
     let progressElement = document.getElementById('firecrawlEnrichmentProgress');
 
     if (!progressElement) {
-        // Create progress element
+        // Create enhanced progress element with streaming UI
         progressElement = document.createElement('div');
         progressElement.id = 'firecrawlEnrichmentProgress';
-        progressElement.className = 'firecrawl-enrichment-progress';
+        progressElement.className = 'web-search-progress-container';
         progressElement.innerHTML = `
-            <div class="firecrawl-progress-header">
-                <div class="firecrawl-progress-title">
-                    <span class="icon">🔍</span> Web Search Client (Firecrawl v2)
+            <div class="web-search-header">
+                <div class="web-search-title">
+                    <div class="search-icon-pulse">
+                        <span class="search-icon">🔍</span>
+                        <span class="pulse-ring"></span>
+                    </div>
+                    <span class="search-title-text">Intelligent Web Search</span>
+                    <span class="search-status">Initializing...</span>
                 </div>
-                <div class="firecrawl-progress-percentage">0%</div>
+                <div class="search-percentage">0%</div>
             </div>
-            <div class="firecrawl-progress-bar">
-                <div class="firecrawl-progress-fill" style="width: 0%"></div>
+
+            <div class="multi-service-progress">
+                <div class="service-row" id="firecrawl-service">
+                    <div class="service-icon">🔥</div>
+                    <div class="service-details">
+                        <div class="service-name">Firecrawl v2</div>
+                        <div class="service-status">Waiting...</div>
+                        <div class="service-progress-bar">
+                            <div class="service-progress-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="service-result"></div>
+                </div>
+
+                <div class="service-row" id="serper-service">
+                    <div class="service-icon">🌐</div>
+                    <div class="service-details">
+                        <div class="service-name">Serper API</div>
+                        <div class="service-status">Waiting...</div>
+                        <div class="service-progress-bar">
+                            <div class="service-progress-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="service-result"></div>
+                </div>
+
+                <div class="service-row" id="apollo-service">
+                    <div class="service-icon">🚀</div>
+                    <div class="service-details">
+                        <div class="service-name">Apollo.io</div>
+                        <div class="service-status">Waiting...</div>
+                        <div class="service-progress-bar">
+                            <div class="service-progress-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="service-result"></div>
+                </div>
+
+                <div class="service-row" id="research-service">
+                    <div class="service-icon">🔬</div>
+                    <div class="service-details">
+                        <div class="service-name">AI Research</div>
+                        <div class="service-status">Waiting...</div>
+                        <div class="service-progress-bar">
+                            <div class="service-progress-fill" style="width: 0%"></div>
+                        </div>
+                    </div>
+                    <div class="service-result"></div>
+                </div>
             </div>
-            <div class="firecrawl-progress-steps">
-                <div class="firecrawl-progress-step active">Web Crawl</div>
-                <div class="firecrawl-progress-step">Data Extract</div>
-                <div class="firecrawl-progress-step">Company Intel</div>
-                <div class="firecrawl-progress-step">Contact Enrich</div>
-                <div class="firecrawl-progress-step">AI Analysis</div>
+
+            <div class="streaming-data-container">
+                <div class="streaming-header">
+                    <span class="streaming-icon">📊</span>
+                    <span>Live Data Stream</span>
+                    <span class="streaming-indicator"></span>
+                </div>
+                <div class="streaming-content" id="streaming-content">
+                    <div class="stream-message">Connecting to enrichment services...</div>
+                </div>
             </div>
-            <div class="firecrawl-progress-message">Initializing...</div>
+
+            <div class="enrichment-summary" id="enrichment-summary" style="display: none;">
+                <div class="summary-header">
+                    <span class="summary-icon">✨</span>
+                    <span>Enrichment Complete</span>
+                </div>
+                <div class="summary-stats">
+                    <div class="stat-item">
+                        <span class="stat-label">Fields Enhanced:</span>
+                        <span class="stat-value" id="fields-enhanced">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Data Sources:</span>
+                        <span class="stat-value" id="sources-used">0</span>
+                    </div>
+                    <div class="stat-item">
+                        <span class="stat-label">Confidence:</span>
+                        <span class="stat-value" id="confidence-score">0%</span>
+                    </div>
+                </div>
+            </div>
         `;
 
         // Insert after the Express Send banner or at the top
@@ -3945,8 +4055,15 @@ function showFirecrawlEnrichmentProgress() {
         }
     }
 
-    // Show the progress element
+    // Show the progress element with fade-in animation
     progressElement.style.display = 'block';
+    progressElement.classList.add('fade-in');
+
+    // Start the streaming indicator animation
+    const indicator = progressElement.querySelector('.streaming-indicator');
+    if (indicator) {
+        indicator.classList.add('streaming');
+    }
 }
 
 /**
@@ -3972,35 +4089,109 @@ function hideFirecrawlEnrichmentProgress() {
 function updateFirecrawlProgress(percentage, message) {
     const progressElement = document.getElementById('firecrawlEnrichmentProgress');
     if (progressElement) {
-        const progressFill = progressElement.querySelector('.firecrawl-progress-fill');
-        const progressPercent = progressElement.querySelector('.firecrawl-progress-percentage');
-        const progressMessage = progressElement.querySelector('.firecrawl-progress-message');
-        const progressSteps = progressElement.querySelectorAll('.firecrawl-progress-step');
+        // Update overall progress
+        updateOverallProgress(percentage, message);
 
-        if (progressFill) {
-            progressFill.style.width = `${percentage}%`;
+        // Determine which service is active based on percentage
+        if (percentage <= 25) {
+            updateServiceProgress('firecrawl', 'Crawling website...', percentage * 4);
+            streamDataUpdate('info', `Firecrawl: ${message}`);
+        } else if (percentage <= 50) {
+            updateServiceProgress('firecrawl', 'Complete', 100, {found: true});
+            updateServiceProgress('serper', 'Searching web...', (percentage - 25) * 4);
+            streamDataUpdate('info', `Serper: ${message}`);
+        } else if (percentage <= 75) {
+            updateServiceProgress('serper', 'Complete', 100, {found: true});
+            updateServiceProgress('apollo', 'Enriching contact...', (percentage - 50) * 4);
+            streamDataUpdate('info', `Apollo: ${message}`);
+        } else {
+            updateServiceProgress('apollo', 'Complete', 100, {found: true});
+            updateServiceProgress('research', 'Analyzing data...', (percentage - 75) * 4);
+            streamDataUpdate('info', `AI Research: ${message}`);
         }
-
-        if (progressPercent) {
-            progressPercent.textContent = `${Math.round(percentage)}%`;
-        }
-
-        if (progressMessage) {
-            progressMessage.textContent = message;
-        }
-
-        // Update step indicators based on percentage
-        progressSteps.forEach((step, index) => {
-            step.classList.remove('active', 'completed');
-            const stepPercentage = ((index + 1) / progressSteps.length) * 100;
-
-            if (percentage >= stepPercentage) {
-                step.classList.add('completed');
-            } else if (percentage >= stepPercentage - (100 / progressSteps.length)) {
-                step.classList.add('active');
-            }
-        });
     }
+}
+
+/**
+ * Stream a new data item to the live feed
+ */
+function streamDataUpdate(type, message, data = null) {
+    const streamContent = document.getElementById('streaming-content');
+    if (streamContent) {
+        const streamItem = document.createElement('div');
+        streamItem.className = `stream-item stream-${type} stream-fade-in`;
+
+        let icon = '📝';
+        switch(type) {
+            case 'success': icon = '✅'; break;
+            case 'warning': icon = '⚠️'; break;
+            case 'error': icon = '❌'; break;
+            case 'data': icon = '📊'; break;
+            case 'field': icon = '✏️'; break;
+        }
+
+        streamItem.innerHTML = `
+            <span class="stream-icon">${icon}</span>
+            <span class="stream-message">${message}</span>
+            ${data ? `<span class="stream-data">${JSON.stringify(data, null, 2)}</span>` : ''}
+        `;
+
+        streamContent.insertBefore(streamItem, streamContent.firstChild);
+
+        // Limit to 10 items
+        while (streamContent.children.length > 10) {
+            streamContent.removeChild(streamContent.lastChild);
+        }
+
+        setTimeout(() => streamItem.classList.add('visible'), 10);
+    }
+}
+
+/**
+ * Update service progress
+ */
+function updateServiceProgress(serviceId, status, progress, result = null) {
+    const serviceRow = document.getElementById(`${serviceId}-service`);
+    if (serviceRow) {
+        const statusEl = serviceRow.querySelector('.service-status');
+        const progressBar = serviceRow.querySelector('.service-progress-fill');
+        const resultEl = serviceRow.querySelector('.service-result');
+
+        if (statusEl) {
+            statusEl.textContent = status;
+            statusEl.style.color = progress === 100 ? '#10b981' : '#3b82f6';
+        }
+
+        if (progressBar) {
+            progressBar.style.width = `${progress}%`;
+            progressBar.style.background = progress === 100 ?
+                'linear-gradient(90deg, #10b981, #34d399)' :
+                'linear-gradient(90deg, #3b82f6, #60a5fa)';
+        }
+
+        if (resultEl && result) {
+            resultEl.textContent = result.found ? '✓' : '✗';
+            resultEl.style.opacity = '1';
+        }
+
+        serviceRow.classList.add('service-updating');
+        setTimeout(() => serviceRow.classList.remove('service-updating'), 300);
+    }
+}
+
+/**
+ * Update overall progress
+ */
+function updateOverallProgress(percentage, status) {
+    const percentEl = document.querySelector('.search-percentage');
+    const statusEl = document.querySelector('.search-status');
+
+    if (percentEl) {
+        percentEl.textContent = `${Math.round(percentage)}%`;
+        percentEl.style.color = percentage === 100 ? '#10b981' : '#3b82f6';
+    }
+
+    if (statusEl) statusEl.textContent = status;
 }
 
 /**

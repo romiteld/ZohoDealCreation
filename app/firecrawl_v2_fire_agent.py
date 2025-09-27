@@ -737,11 +737,11 @@ class FirecrawlV2Enterprise:
             # Look for title tags or h1 headers
             r'(?i)(?:^|\n)#{1,2}\s*([^#\n]+?)(?:\s*-\s*(?:Home|Welcome|About))?(?:\n|$)',
             # Look for "About [Company]" or "Welcome to [Company]"
-            r'(?i)(?:About|Welcome to)\s+([A-Z][^,.\n]*?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors))',
-            # Look for company name in context
-            r'(?i)([A-Z][^,.\n]*?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors))',
+            r'(?i)(?:About|Welcome to)\s+([A-Z][^,.\n]*?(?:\s+)?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors|Financial))',
+            # Look for company name in context - preserve spaces before LLC/Inc
+            r'(?i)([A-Z][^,.\n]*?(?:\s+)?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors|Financial))',
             # Look for copyright notices
-            r'(?i)©.*?(\d{4}).*?([A-Z][^,.\n]*?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors))',
+            r'(?i)©.*?(\d{4}).*?([A-Z][^,.\n]*?(?:\s+)?(?:Inc|LLC|Corp|Company|Group|Holdings|Solutions|Technologies|Services|Advisors|Financial))',
         ]
 
         for pattern in patterns:
@@ -753,19 +753,33 @@ class FirecrawlV2Enterprise:
                 else:
                     company_name = matches[0].strip()
 
-                # Clean up the name
+                # Clean up the name while preserving proper spacing
                 company_name = re.sub(r'\s+', ' ', company_name)  # Normalize whitespace
                 company_name = company_name.strip('.,!?')  # Remove trailing punctuation
+
+                # Fix common formatting issues while preserving spaces before LLC/Inc
+                company_name = re.sub(r'(\w)(LLC|Inc|Corp)', r'\1 \2', company_name)  # Add space if missing
+                company_name = re.sub(r'Financial([a-z])', r'Financial \1', company_name)  # Fix "FinancialLLC" -> "Financial LLC"
 
                 if len(company_name) > 3 and len(company_name) < 100:  # Reasonable length
                     return company_name
 
-        # Fallback: try to extract from URL
+        # Fallback: try to extract from URL and format properly
         if fallback_url.startswith('http'):
             from urllib.parse import urlparse
             domain = urlparse(fallback_url).netloc
             domain = domain.replace('www.', '').replace('.com', '').replace('.net', '').replace('.org', '')
-            return domain.title()
+            # Convert domain to proper case and add spaces before capitals
+            formatted_name = ''
+            for i, char in enumerate(domain):
+                if i > 0 and char.isupper() and domain[i-1].islower():
+                    formatted_name += ' '
+                formatted_name += char
+            # Check if it looks like it should have LLC/Inc
+            if any(suffix in domain.lower() for suffix in ['llc', 'inc', 'corp']):
+                formatted_name = re.sub(r'(\w)(llc|inc|corp)$', r'\1 \2', formatted_name, flags=re.IGNORECASE)
+                formatted_name = formatted_name.replace('llc', 'LLC').replace('inc', 'Inc').replace('corp', 'Corp')
+            return formatted_name.title()
 
         return fallback_url
 
@@ -786,7 +800,20 @@ class FirecrawlV2Enterprise:
                 context = ' '.join(lines[context_start:context_end]).lower()
 
                 for phone_tuple in phones:
-                    formatted_phone = f"({phone_tuple[0]}) {phone_tuple[1]}-{phone_tuple[2]}"
+                    # Validate phone number parts are reasonable
+                    area_code = phone_tuple[0]
+                    prefix = phone_tuple[1]
+                    suffix = phone_tuple[2]
+
+                    # Skip if area code starts with 0 or 1 (invalid US area codes)
+                    if area_code[0] in ['0', '1']:
+                        continue
+
+                    # Skip if any part is all zeros
+                    if area_code == '000' or prefix == '000' or suffix == '0000':
+                        continue
+
+                    formatted_phone = f"({area_code}) {prefix}-{suffix}"
 
                     # Score based on context keywords
                     score = 0
