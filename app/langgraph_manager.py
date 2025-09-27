@@ -1348,8 +1348,7 @@ class EmailProcessingWorkflow:
                     
                 return value
             
-            # Clean each field with appropriate max lengths
-            cleaned_result = {}
+            # Clean fields in place to preserve all modern fields
             field_limits = {
                 'candidate_name': 50,
                 'job_title': 50,
@@ -1365,9 +1364,9 @@ class EmailProcessingWorkflow:
 
             for field, limit in field_limits.items():
                 if field in result:
-                    cleaned_result[field] = clean_field(result.get(field), field, limit)
+                    result[field] = clean_field(result.get(field), field, limit)
 
-            # Add financial advisor specific fields
+            # Clean financial advisor specific fields in place
             financial_fields = [
                 'aum_managed', 'production_annual', 'client_count',
                 'years_experience', 'availability_timeframe', 'compensation_range',
@@ -1375,18 +1374,17 @@ class EmailProcessingWorkflow:
             ]
             for field in financial_fields:
                 if field in result and result[field]:
-                    cleaned_result[field] = clean_field(result.get(field), field, 100)
+                    result[field] = clean_field(result.get(field), field, 100)
 
-            # Handle list fields (licenses, designations, specializations)
+            # Handle list fields in place (licenses, designations, specializations)
             list_fields = ['licenses_held', 'designations', 'specializations']
             for field in list_fields:
                 if field in result and result[field]:
-                    if isinstance(result[field], list):
-                        cleaned_result[field] = result[field]
-                    elif isinstance(result[field], str):
+                    if isinstance(result[field], str):
                         # Convert string to list if needed
                         items = [item.strip() for item in result[field].split(',')]
-                        cleaned_result[field] = items
+                        result[field] = items
+                    # If it's already a list, leave it as is
 
             # Special handling for Calendly emails - extract recruiting goals if not in notes
             if 'calendly' in state['email_content'].lower():
@@ -1394,29 +1392,29 @@ class EmailProcessingWorkflow:
                 # Look for recruiting goals question and answer
                 goals_pattern = r'What recruiting goals[^?]*\?\s*([^\n]+(?:\n[^\n]+)?)'
                 goals_match = re.search(goals_pattern, state['email_content'], re.IGNORECASE)
-                if goals_match and (not cleaned_result.get('notes') or len(cleaned_result.get('notes', '')) < 50):
+                if goals_match and (not result.get('notes') or len(result.get('notes', '')) < 50):
                     recruiting_goals = goals_match.group(1).strip()
                     # Clean up the goals text
                     recruiting_goals = recruiting_goals.replace('Your confirmation email', '').strip()
                     if recruiting_goals:
                         # Append to existing notes or create new
-                        existing_notes = cleaned_result.get('notes', '')
+                        existing_notes = result.get('notes', '')
                         if existing_notes:
-                            cleaned_result['notes'] = f"{existing_notes}. Recruiting goals: {recruiting_goals[:200]}"
+                            result['notes'] = f"{existing_notes}. Recruiting goals: {recruiting_goals[:200]}"
                         else:
-                            cleaned_result['notes'] = f"Recruiting goals: {recruiting_goals[:200]}"
+                            result['notes'] = f"Recruiting goals: {recruiting_goals[:200]}"
 
                 # Also look for phone number if not extracted
-                if not cleaned_result.get('phone'):
+                if not result.get('phone'):
                     phone_pattern = r'Phone[\s:]+(\+?[\d\s\-\(\)\.]+)'
                     phone_match = re.search(phone_pattern, state['email_content'])
                     if phone_match:
                         phone = phone_match.group(1).strip()
                         digits = re.sub(r'\D', '', phone)
                         if len(digits) >= 10:
-                            cleaned_result['phone'] = phone[:30]
-            
-            result = cleaned_result
+                            result['phone'] = phone[:30]
+
+            # Note: result now preserves all fields including modern ones like contact_city, contact_state
             logger.info(f"Extraction completed (CLEANED): {result}")
             
             # Track extraction metrics if learning analytics is available

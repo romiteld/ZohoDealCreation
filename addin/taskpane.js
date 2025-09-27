@@ -645,7 +645,7 @@ async function extractAndPreview() {
                     contactState: getString(contact.state),
                     firmName: getString(company.company_name) || getString(extracted?.company_name) || getString(extracted?.firmName) || getString(extracted?.firm_name) || '', // CACHE_BUST_V2
                     // Map company fields from structured data (Firecrawl/Apollo enrichment)
-                    companyPhone: getString(company.phone || extracted?.company_phone || extracted?.phone),
+                    companyPhone: getString(company.phone || extracted?.company_phone),
                     companyWebsite: getString(company.website || extracted?.company_website || extracted?.website),
                     companyOwner: getString(company.detail || extracted?.credit_person_name || extracted?.referrer_name),
                     referrerName: getString(extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName),
@@ -653,7 +653,7 @@ async function extractAndPreview() {
                     notes: getString(extracted?.notes),
                     // NEW: Map deal fields from backend structured data
                     descriptionOfReqs: getString(deal.description_of_reqs || extracted?.description_of_requirements),
-                    pipeline: getString(deal.pipeline) || 'Recruitment',
+                    pipeline: getString(deal.pipeline) || 'Sales Pipeline',
                     closingDate: getString(deal.closing_date),
                     whoGetsCredit: getString(company.who_gets_credit || extracted?.who_gets_credit),
                     calendlyUrl: getString(extracted?.calendly_url || extracted?.calendlyUrl),
@@ -1698,8 +1698,10 @@ async function handleSendToZoho() {
                 ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
             },
             body: JSON.stringify({
-                sender_email: 'steve@emailthewell.com',  // Always use Steve's email
-                sender_name: 'Steve Perry',  // Always use Steve Perry
+                sender_email: 'steve@emailthewell.com',  // Operational override for Zoho processing
+                original_sender_email: currentEmailData?.from?.emailAddress || null,  // Actual sender for learning pipeline
+                sender_name: 'Steve Perry',  // Operational override
+                original_sender_name: currentEmailData?.from?.displayName || null,  // Actual sender name for context
                 subject: currentEmailData?.subject || 'Manual Entry',
                 body: currentEmailData?.body || 'Manual data entry - no email body available',
                 attachments: attachmentData,
@@ -1954,8 +1956,8 @@ function getFormData() {
 
         // Legacy fields for backward compatibility
         source: document.getElementById('companySource').value,
-        referrerName: document.getElementById('sourceDetail').value.trim() || 'Steve Perry',
-        referrerEmail: 'steve@emailthewell.com'  // Always use Steve's email
+        referrerName: document.getElementById('sourceDetail').value.trim() || null,
+        referrerEmail: document.getElementById('sourceDetail').value.trim() ? 'steve@emailthewell.com' : null  // Only use if there's a referrer
     };
 }
 

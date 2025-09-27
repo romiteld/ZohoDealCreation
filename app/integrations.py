@@ -1038,7 +1038,7 @@ class ZohoClient:
         """Search for existing account by website."""
         try:
             clean_website = website.lower().replace('http://', '').replace('https://', '').replace('www.', '')
-            response = self._make_request("GET", f"Accounts/search?criteria=Website:equals:{clean_website}")
+            response = self._make_request("GET", f"Accounts/search?criteria=(Website:equals:{clean_website})")
             
             if response.get("data") and len(response["data"]) > 0:
                 return response["data"][0]["id"]
@@ -1050,7 +1050,7 @@ class ZohoClient:
     def search_account_by_name(self, company_name: str) -> Optional[str]:
         """Search for existing account by name."""
         try:
-            response = self._make_request("GET", f"Accounts/search?criteria=Account_Name:equals:{company_name}")
+            response = self._make_request("GET", f"Accounts/search?criteria=(Account_Name:equals:{company_name})")
             
             if response.get("data") and len(response["data"]) > 0:
                 return response["data"][0]["id"]
@@ -1062,7 +1062,7 @@ class ZohoClient:
     def search_contact_by_email(self, email: str) -> Optional[str]:
         """Search for existing contact by email."""
         try:
-            response = self._make_request("GET", f"Contacts/search?criteria=Email:equals:{email}")
+            response = self._make_request("GET", f"Contacts/search?criteria=(Email:equals:{email})")
             
             if response.get("data") and len(response["data"]) > 0:
                 return response["data"][0]["id"]
@@ -1170,12 +1170,15 @@ class ZohoApiClient(ZohoClient):
         """Public method for health checks."""
         return self._get_access_token()
     
-    async def create_or_update_records(self, extracted_data, sender_email: str, attachment_urls: list = None, is_duplicate: bool = False) -> dict:
+    async def create_or_update_records(self, extracted_data, sender_email: str, attachment_urls: list = None, is_duplicate: bool = False, attachment_metadata: list = None) -> dict:
         """
         Create or update Zoho records (Account -> Contact -> Deal) based on extracted data.
         This is the main orchestration method called by the API.
         Uses Steve's 3-record template structure for comprehensive field mapping.
         Returns dict with all created record IDs and details.
+
+        Args:
+            attachment_metadata: List of dicts with 'url' and 'filename' keys for proper attachment naming
         """
         try:
             # Extract structured data from Steve's template format
@@ -1345,7 +1348,15 @@ class ZohoApiClient(ZohoClient):
             logger.info(f"Deal ID: {deal_id}")
             
             # 4. Attach files if any
-            if attachment_urls:
+            # Prefer attachment_metadata for proper filenames, fallback to URLs with generic names
+            if attachment_metadata:
+                for attachment in attachment_metadata:
+                    try:
+                        self.attach_file_to_deal(deal_id, attachment['url'], attachment['filename'])
+                    except Exception as e:
+                        logger.warning(f"Failed to attach file {attachment.get('filename', 'unknown')}: {e}")
+            elif attachment_urls:
+                # Fallback for backwards compatibility
                 for i, url in enumerate(attachment_urls):
                     filename = f"attachment_{i+1}"
                     try:

@@ -13,6 +13,8 @@ class AttachmentPayload(BaseModel):
 class EmailPayload(BaseModel):
     sender_name: Optional[str] = None
     sender_email: str
+    original_sender_email: Optional[str] = Field(None, description="Actual sender email for learning pipeline (vs operational override)")
+    original_sender_name: Optional[str] = Field(None, description="Actual sender name for learning context")
     subject: str
     body: str
     attachments: List[AttachmentPayload] = []

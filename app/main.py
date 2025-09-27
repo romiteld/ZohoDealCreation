@@ -1450,9 +1450,12 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                 feedback_loop = FeedbackLoop(correction_service)
                 
                 # Process and store the user feedback
+                # Use original_sender_email for learning if provided, fallback to sender_email
+                learning_sender_email = getattr(request, 'original_sender_email', None) or request.sender_email
+
                 feedback_result = await feedback_loop.process_user_feedback(
                     email_data={
-                        'sender_email': request.sender_email,
+                        'sender_email': learning_sender_email,
                         'body': request.body
                     },
                     ai_extraction=request.ai_extraction,
@@ -1520,8 +1523,9 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         elif request.user_corrections and request.ai_extraction and not correction_service:
             logger.warning("User corrections provided but learning services not available")
         
-        # Process attachments
+        # Process attachments - keep both URL and filename for proper Zoho naming
         attachment_urls = []
+        attachment_metadata = []
         if request.attachments:
             for attachment in request.attachments:
                 url = await blob_storage.upload_attachment(
@@ -1531,9 +1535,14 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                 )
                 if url:
                     attachment_urls.append(url)
+                    attachment_metadata.append({
+                        'url': url,
+                        'filename': attachment.filename
+                    })
         
-        # Extract sender domain
-        sender_domain = request.sender_email.split('@')[1] if '@' in request.sender_email else 'unknown.com'
+        # Extract sender domain - use original_sender_email for learning if provided
+        learning_email = getattr(request, 'original_sender_email', None) or request.sender_email
+        sender_domain = learning_email.split('@')[1] if '@' in learning_email else 'unknown.com'
         
         # Check if user provided corrections (skip AI if so)
         if request.user_corrections:
@@ -2466,7 +2475,8 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
                                     enhanced_data,
                                     request.sender_email,
                                     attachment_urls,
-                                    False  # is_duplicate
+                                    False,  # is_duplicate
+                                    attachment_metadata  # Pass metadata for proper filenames
                                 )
                                 
                                 saved_to_zoho = True

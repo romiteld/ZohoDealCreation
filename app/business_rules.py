@@ -218,16 +218,38 @@ def determine_source(email_body: str, referrer_name: Optional[str], sender_email
     """
     Determines the deal source based on email content and referrer info.
     """
+    # Filter out metadata-based referrers (reply-to, owner emails, etc.)
     if referrer_name and referrer_name.lower() != "unknown":
-        return "Referral", referrer_name
-    
+        # Check if referrer is from internal/metadata sources
+        metadata_domains = ['@emailthewell.com', '@thewell.com']
+        metadata_emails = ['steve@emailthewell.com', 'daniel.romitelli@emailthewell.com']
+
+        # Check if referrer_name is actually an email
+        if '@' in referrer_name:
+            # It's an email, check if it's metadata
+            if any(domain in referrer_name.lower() for domain in metadata_domains):
+                referrer_name = None  # Ignore metadata email
+            elif referrer_name.lower() in metadata_emails:
+                referrer_name = None  # Ignore specific metadata emails
+
+        # Also strip current sender's name/email if it somehow got into referrer
+        if referrer_name and sender_email:
+            # Extract sender name from email (part before @)
+            sender_base = sender_email.split('@')[0].lower()
+            if referrer_name.lower() == sender_email.lower() or referrer_name.lower() == sender_base:
+                referrer_name = None  # Ignore if referrer is the sender themselves
+
+        # Only treat as referral if we have a valid human referrer
+        if referrer_name:
+            return "Referral", referrer_name
+
     lower_body = email_body.lower()
     lower_sender = sender_email.lower()
-    
+
     # Check if this is a consultation email - these are referrals even if from Calendly
     if is_client_consultation_email(email_body, subject, sender_email):
         return "Referral", "Client consultation scheduling"
-    
+
     if "twav" in lower_body or "advisor vault" in lower_body:
         return "Reverse Recruiting", "TWAV Platform"
     if "calendly.com" in lower_body or "calendly.com" in lower_sender:
