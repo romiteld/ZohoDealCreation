@@ -2170,6 +2170,16 @@ function showTestSuccess(result) {
     successMessage.innerHTML = message;
     successMessage.style.display = 'block';
 
+    // Hide progress section and overlay
+    const progressSection = document.getElementById('progressSection');
+    if (progressSection) {
+        progressSection.style.display = 'none';
+    }
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'none';
+    }
+
     // Hide form and show both buttons
     previewForm.style.display = 'none';
     document.getElementById('btnSend').style.display = 'block';
