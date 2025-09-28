@@ -885,11 +885,30 @@ function performLocalExtraction(emailData) {
         if (calendlyLocation && calendlyLocation[1]) {
             // Clean up Zoom URL and meeting info
             let location = calendlyLocation[1].trim();
-            // Remove everything after the Zoom URL if present
-            const zoomUrlMatch = location.match(/(https:\/\/[^\s]+\.zoom\.us\/[^\s]+)/i);
-            if (zoomUrlMatch) {
-                location = zoomUrlMatch[1];
+
+            // Check if this is Zoom meeting instructions
+            if (location.toLowerCase().includes('zoom') || location.includes('https://')) {
+                // Extract just the Zoom URL if present
+                const zoomUrlMatch = location.match(/(https:\/\/[^\s]+\.zoom\.us\/[^\s]+)/i);
+                if (zoomUrlMatch) {
+                    location = 'Zoom Meeting';  // Just use simple description
+                } else if (location.toLowerCase().includes('zoom web conference')) {
+                    // It's Zoom but no URL found, just use first line or generic description
+                    location = 'Zoom Meeting';
+                } else {
+                    // Take only the first line to avoid multi-line descriptions
+                    const firstLine = location.split('\n')[0].trim();
+                    location = firstLine;
+                }
+            } else {
+                // For non-Zoom locations, take only first line to avoid multi-line issues
+                const firstLine = location.split('\n')[0].trim();
+                location = firstLine;
             }
+
+            // Final cleanup - remove any commas that would cause splitting issues
+            location = location.replace(/,\s*(tablet|smartphone|computer)/gi, '');
+
             extracted.location = location;
         }
     }
