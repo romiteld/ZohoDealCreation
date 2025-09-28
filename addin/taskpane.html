@@ -17,142 +17,207 @@
     <style>
         * {
             box-sizing: border-box;
+            margin: 0;
+            padding: 0;
         }
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
-            padding: 0;
-            margin: 0;
             height: 100vh;
             display: flex;
             flex-direction: column;
-            background: #f7f9fc;
-            overflow-x: hidden;
-            min-width: 280px;
+            background: #ffffff;
+            overflow: hidden;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
         }
 
         .header {
-            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            padding: 12px;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            padding: 20px 16px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
             flex-shrink: 0;
+            text-align: center;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .header::before {
+            content: '';
+            position: absolute;
+            top: -50%;
+            right: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle, rgba(255,255,255,0.1) 0%, transparent 70%);
+            animation: shimmer 3s ease-in-out infinite;
+        }
+
+        @keyframes shimmer {
+            0%, 100% { transform: translate(50%, -50%) rotate(0deg); }
+            50% { transform: translate(50%, -50%) rotate(180deg); }
         }
 
         .header h4 {
             margin: 0;
-            font-size: 20px;
+            font-size: 18px;
             font-weight: 600;
-            letter-spacing: -0.5px;
+            letter-spacing: -0.3px;
+            line-height: 1.2;
+            position: relative;
+            z-index: 1;
         }
 
         .header .subtitle {
-            font-size: 13px;
-            opacity: 0.95;
-            margin-top: 6px;
+            font-size: 12px;
+            opacity: 0.9;
+            margin-top: 4px;
             font-weight: 400;
+            line-height: 1.4;
+            position: relative;
+            z-index: 1;
         }
         
         .content {
             flex: 1;
             overflow-y: auto;
             overflow-x: hidden;
-            padding: 12px;
-            background: #f7f9fc;
+            padding: 0;
+            background: linear-gradient(to bottom, #f8fafc, #ffffff);
+            position: relative;
+        }
+
+        .content > * {
+            margin: 0 16px;
+        }
+
+        .content > *:first-child {
+            margin-top: 16px;
+        }
+
+        .content > *:last-child {
+            margin-bottom: 16px;
         }
         
         .preview-section {
             background: white;
-            border-radius: 12px;
-            padding: 12px;
-            margin-bottom: 12px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.08);
-            border: 1px solid rgba(0,0,0,0.06);
-            transition: box-shadow 0.2s ease;
+            border-radius: 10px;
+            padding: 20px;
+            margin-bottom: 16px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.05);
+            border: 1px solid #e2e8f0;
+            transition: all 0.2s ease;
+            backdrop-filter: blur(10px);
         }
 
         .preview-section:hover {
-            box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
+            box-shadow: 0 4px 6px rgba(0,0,0,0.07);
+            transform: translateY(-1px);
+            border-color: #cbd5e1;
         }
         
         .section-title {
-            font-size: 14px;
+            font-size: 13px;
             font-weight: 600;
-            color: #495057;
-            margin-bottom: 10px;
+            color: #334155;
+            margin-bottom: 16px;
             display: flex;
             align-items: center;
+            padding-bottom: 8px;
+            border-bottom: 2px solid #f1f5f9;
         }
-        
+
         .section-title .icon {
             margin-right: 8px;
-            font-size: 16px;
+            font-size: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            width: 24px;
+            height: 24px;
+            background: linear-gradient(135deg, #f0f9ff, #e0f2fe);
+            border-radius: 6px;
         }
         
         .form-label {
-            font-size: 13px;
-            color: #475569;
+            font-size: 11px;
+            color: #64748b;
             margin-bottom: 6px;
-            font-weight: 500;
-            letter-spacing: 0.01em;
+            font-weight: 600;
+            letter-spacing: 0.5px;
+            text-transform: uppercase;
         }
 
         .form-control, .form-select {
-            font-size: 14px;
+            font-size: 13px;
             padding: 10px 12px;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
+            border: 1.5px solid #e2e8f0;
+            border-radius: 6px;
             background: white;
             transition: all 0.2s ease;
             width: 100%;
             outline: none;
+            line-height: 1.4;
         }
 
         .form-control:hover, .form-select:hover {
             border-color: #cbd5e1;
+            background: #fafbfc;
         }
-        
+
         .form-control:focus, .form-select:focus {
-            border-color: #2563eb;
-            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
+            border-color: #667eea;
+            box-shadow: 0 0 0 3px rgba(102, 126, 234, 0.1);
+            background: white;
         }
         
         .alert-info {
-            font-size: 13px;
-            padding: 14px 16px;
-            margin-bottom: 20px;
-            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-            border: 1px solid #bfdbfe;
-            border-radius: 8px;
+            font-size: 12px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+            border: 1px solid #cbd5e1;
+            border-radius: 6px;
             line-height: 1.5;
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .alert-info strong {
+            font-weight: 600;
+            color: #1e40af;
         }
         
         .extracted-indicator {
-            display: inline-block;
-            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-            color: white;
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 4px;
-            margin-left: 8px;
-            margin-top: 4px;
-            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            background: #dcfce7;
+            color: #15803d;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 12px;
+            margin-left: 6px;
+            font-weight: 600;
             transition: all 0.2s ease;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
         }
 
         .edited-indicator {
-            display: inline-block;
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            color: white;
-            font-size: 11px;
-            padding: 3px 8px;
-            border-radius: 4px;
-            margin-left: 8px;
-            margin-top: 4px;
-            font-weight: 500;
+            display: inline-flex;
+            align-items: center;
+            background: #fed7aa;
+            color: #c2410c;
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 12px;
+            margin-left: 6px;
+            font-weight: 600;
             transition: all 0.2s ease;
-            letter-spacing: 0.02em;
+            letter-spacing: 0.3px;
+            text-transform: uppercase;
         }
 
         /* High confidence - Green */
@@ -197,65 +262,94 @@
         }
         
         .footer {
-            padding: 10px;
-            background: white;
+            padding: 12px 16px;
+            background: linear-gradient(to right, #ffffff, #f8fafc);
             border-top: 1px solid #e2e8f0;
             display: flex;
-            gap: 6px;
-            box-shadow: 0 -4px 12px rgba(0,0,0,0.04);
+            gap: 8px;
+            box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
             flex-shrink: 0;
-            flex-wrap: wrap;
-            justify-content: center;
+            align-items: center;
+            justify-content: space-between;
         }
 
         .btn {
-            font-size: 13px;
-            padding: 8px 12px;
-            border-radius: 8px;
-            font-weight: 500;
+            font-size: 12px;
+            padding: 10px 16px;
+            border-radius: 6px;
+            font-weight: 600;
             border: none;
             cursor: pointer;
             transition: all 0.2s ease;
-            min-width: 75px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 6px;
-            letter-spacing: 0.01em;
-            flex: 1 1 auto;
-            max-width: 130px;
+            letter-spacing: 0.3px;
             white-space: nowrap;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .btn::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            width: 0;
+            height: 0;
+            border-radius: 50%;
+            background: rgba(255, 255, 255, 0.3);
+            transform: translate(-50%, -50%);
+            transition: width 0.4s, height 0.4s;
+        }
+
+        .btn:active::before {
+            width: 300px;
+            height: 300px;
         }
         
         .btn-primary {
-            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
+            box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
+            flex: 1 1 auto;
+            max-width: 180px;
+            min-width: 120px;
         }
 
         .btn-primary:hover {
-            background: linear-gradient(135deg, #1d4ed8 0%, #6d28d9 100%);
+            background: linear-gradient(135deg, #5a67d8 0%, #6b4098 100%);
             transform: translateY(-1px);
-            box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
         }
 
         .btn-secondary {
-            background: #e2e8f0;
+            background: #f1f5f9;
             color: #475569;
+            border: 1px solid #e2e8f0;
+            min-width: 80px;
         }
 
         .btn-secondary:hover {
-            background: #cbd5e1;
+            background: #e2e8f0;
+            border-color: #cbd5e1;
+            transform: translateY(-1px);
         }
 
         .btn-warning {
-            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
-            color: white;
+            background: #fbbf24;
+            color: #78350f;
+            font-weight: 600;
+            border: 1px solid #fcd34d;
+            min-width: 100px;
         }
 
         .btn-warning:hover {
-            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+            background: #f59e0b;
+            border-color: #f59e0b;
             transform: translateY(-1px);
+            color: white;
         }
 
         .btn-outline-success {
@@ -333,14 +427,13 @@
         }
         
         .spinner-border {
-            width: 20px;
-            height: 20px;
-            border-width: 3px;
-            margin-right: 10px;
-            border: 3px solid #e2e8f0;
-            border-top-color: #2563eb;
+            width: 18px;
+            height: 18px;
+            margin-right: 8px;
+            border: 2px solid rgba(102, 126, 234, 0.2);
+            border-top-color: #667eea;
             border-radius: 50%;
-            animation: spin 1s linear infinite;
+            animation: spin 0.8s linear infinite;
             display: inline-block;
         }
         
@@ -886,27 +979,25 @@
             background: rgba(255, 255, 255, 0.5);
         }
 
-        /* Responsive layout for narrow task pane */
-        .row {
+        /* Modern grid system */
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .form-grid-single {
+            display: grid;
+            grid-template-columns: 1fr;
+            gap: 12px;
+            margin-bottom: 16px;
+        }
+
+        .form-field {
             display: flex;
-            gap: 8px;
-            flex-wrap: wrap;
-        }
-
-        .col {
-            flex: 1 1 100%;
+            flex-direction: column;
             min-width: 0;
-        }
-
-        .col-half {
-            flex: 1 1 48%;
-            min-width: 0;
-        }
-
-        @media (max-width: 350px) {
-            .col-half {
-                flex: 1 1 100%;
-            }
         }
 
         /* Ensure dropdowns don't overflow */
@@ -915,13 +1006,32 @@
             text-overflow: ellipsis;
         }
 
-        /* Compact spacing for narrow panels */
+        /* Compact spacing */
         .mb-2 {
             margin-bottom: 8px;
         }
 
         .mb-3 {
-            margin-bottom: 12px;
+            margin-bottom: 16px;
+        }
+
+        /* Smooth scrollbar */
+        .content::-webkit-scrollbar {
+            width: 6px;
+        }
+
+        .content::-webkit-scrollbar-track {
+            background: #f1f5f9;
+            border-radius: 3px;
+        }
+
+        .content::-webkit-scrollbar-thumb {
+            background: #cbd5e1;
+            border-radius: 3px;
+        }
+
+        .content::-webkit-scrollbar-thumb:hover {
+            background: #94a3b8;
         }
 
     </style>
@@ -934,15 +1044,35 @@
     
     <div class="content" id="mainContent">
         <!-- Initial loading state -->
-        <div id="loadingState" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px;">
-            <div style="width: 56px; height: 56px; border: 4px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite;"></div>
-            <h3 style="margin-top: 24px; margin-bottom: 12px; color: #1e293b; font-size: 18px; font-weight: 600;">AI is analyzing your email</h3>
-            <p style="color: #64748b; font-size: 14px; margin: 0; text-align: center; max-width: 280px; line-height: 1.5;">This typically takes 15-30 seconds. We're extracting contact information, company details, and deal requirements.</p>
+        <div id="loadingState" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 40px 20px;">
+            <div style="position: relative; width: 60px; height: 60px; margin-bottom: 24px;">
+                <div style="position: absolute; width: 100%; height: 100%; border: 3px solid rgba(102, 126, 234, 0.1); border-radius: 50%;"></div>
+                <div style="position: absolute; width: 100%; height: 100%; border: 3px solid transparent; border-top-color: #667eea; border-radius: 50%; animation: spin 1s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;"></div>
+                <div style="position: absolute; width: 80%; height: 80%; top: 10%; left: 10%; border: 3px solid transparent; border-top-color: #764ba2; border-radius: 50%; animation: spin 1.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite reverse;"></div>
+            </div>
+            <h3 style="color: #1e293b; font-size: 16px; font-weight: 600; margin-bottom: 8px; text-align: center;">AI is analyzing your email</h3>
+            <p style="color: #64748b; font-size: 13px; text-align: center; max-width: 260px; line-height: 1.5;">Extracting contact information, company details, and deal requirements...</p>
+            <div style="margin-top: 20px; display: flex; gap: 6px;">
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #667eea; animation: pulse 1.4s ease-in-out infinite;"></span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #667eea; animation: pulse 1.4s ease-in-out 0.2s infinite;"></span>
+                <span style="width: 8px; height: 8px; border-radius: 50%; background: #667eea; animation: pulse 1.4s ease-in-out 0.4s infinite;"></span>
+            </div>
         </div>
 
         <style>
             @keyframes spin {
                 to { transform: rotate(360deg); }
+            }
+
+            @keyframes pulse {
+                0%, 60%, 100% {
+                    transform: scale(0.8);
+                    opacity: 0.5;
+                }
+                30% {
+                    transform: scale(1.2);
+                    opacity: 1;
+                }
             }
         </style>
 
@@ -1005,40 +1135,40 @@
                     <span class="icon">👤</span>
                     Contact Information
                 </div>
-                <div class="row mb-3">
-                    <div class="col-half">
+                <div class="form-grid">
+                    <div class="form-field">
                         <label class="form-label">First Name *</label>
                         <input type="text" class="form-control" id="contactFirstName" required>
-                        <span id="contactFirstNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="contactFirstNameIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
-                    <div class="col-half">
+                    <div class="form-field">
                         <label class="form-label">Last Name *</label>
                         <input type="text" class="form-control" id="contactLastName" required>
-                        <span id="contactLastNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="contactLastNameIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                 </div>
-                <div class="row mb-3">
-                    <div class="col-half">
+                <div class="form-grid">
+                    <div class="form-field">
                         <label class="form-label">Email</label>
                         <input type="email" class="form-control" id="candidateEmail">
-                        <span id="candidateEmailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="candidateEmailIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
-                    <div class="col-half">
+                    <div class="form-field">
                         <label class="form-label">Phone</label>
                         <input type="tel" class="form-control" id="candidatePhone">
-                        <span id="candidatePhoneIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="candidatePhoneIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                 </div>
-                <div class="row mb-3">
-                    <div class="col-half">
+                <div class="form-grid">
+                    <div class="form-field">
                         <label class="form-label">City</label>
                         <input type="text" class="form-control" id="contactCity">
-                        <span id="contactCityIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="contactCityIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
-                    <div class="col-half">
+                    <div class="form-field">
                         <label class="form-label">State</label>
                         <input type="text" class="form-control" id="contactState">
-                        <span id="contactStateIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="contactStateIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                 </div>
             </div>
@@ -1049,25 +1179,25 @@
                     <span class="icon">🏢</span>
                     Company Information
                 </div>
-                <div class="row mb-3">
-                    <div class="col">
+                <div class="form-grid">
+                    <div class="form-field">
                         <label class="form-label">Company Name *</label>
                         <input type="text" class="form-control" id="firmName" required>
-                        <span id="firmNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="firmNameIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
-                    <div style="flex: 1;">
+                    <div class="form-field">
                         <label class="form-label">Company Phone</label>
                         <input type="tel" class="form-control" id="companyPhone">
-                        <span id="companyPhoneIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="companyPhoneIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                 </div>
-                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                    <div style="flex: 1;">
+                <div class="form-grid">
+                    <div class="form-field">
                         <label class="form-label">Website</label>
                         <input type="url" class="form-control" id="companyWebsite" placeholder="https://...">
-                        <span id="companyWebsiteIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="companyWebsiteIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
-                    <div style="flex: 1;">
+                    <div class="form-field">
                         <label class="form-label">Company Source</label>
                         <select class="form-select" id="companySource">
                             <option value="Email Inbound">Email Inbound</option>
@@ -1075,7 +1205,7 @@
                             <option value="Reverse Recruiting">Reverse Recruiting</option>
                             <option value="Website Inbound">Website Inbound</option>
                         </select>
-                        <span id="companySourceIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="companySourceIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                 </div>
             </div>
@@ -1086,43 +1216,47 @@
                     <span class="icon">💼</span>
                     Deal Information
                 </div>
-                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                    <div style="flex: 1;">
+                <div class="form-grid">
+                    <div class="form-field">
                         <label class="form-label">Job Title *</label>
                         <input type="text" class="form-control" id="jobTitle" required>
-                        <span id="jobTitleIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="jobTitleIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
-                    <div style="flex: 1;">
+                    <div class="form-field">
                         <label class="form-label">Location</label>
                         <input type="text" class="form-control" id="location">
-                        <span id="locationIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="locationIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                 </div>
-                <div style="margin-bottom: 16px;">
-                    <label class="form-label">Deal Name (Auto-generated)</label>
-                    <input type="text" class="form-control" id="dealName" readonly
-                           placeholder="[Job Title] ([Location]) [Company Name]"
-                           style="background-color: #f8fafc;">
-                    <span id="dealNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                <div class="form-grid-single">
+                    <div class="form-field">
+                        <label class="form-label">Deal Name (Auto-generated)</label>
+                        <input type="text" class="form-control" id="dealName" readonly
+                               placeholder="[Job Title] ([Location]) [Company Name]"
+                               style="background-color: #f8fafc;">
+                        <span id="dealNameIndicator" class="extracted-indicator" style="display: none;">AI</span>
+                    </div>
                 </div>
-                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                    <div style="flex: 1;">
+                <div class="form-grid">
+                    <div class="form-field">
                         <label class="form-label">Pipeline</label>
                         <input type="text" class="form-control" id="pipeline" value="Sales Pipeline" readonly style="background-color: #f8fafc;">
-                        <span id="pipelineIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="pipelineIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
-                    <div style="flex: 1;">
+                    <div class="form-field">
                         <label class="form-label">Closing Date</label>
                         <input type="date" class="form-control" id="closingDate">
-                        <span id="closingDateIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                        <span id="closingDateIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                 </div>
-                <div style="margin-bottom: 16px;">
-                    <label class="form-label">Description of Requirements</label>
-                    <textarea class="form-control" id="descriptionOfReqs" rows="3"
-                             placeholder="Describe the job requirements, qualifications, and specific needs..."
-                             style="resize: vertical; min-height: 80px;"></textarea>
-                    <span id="descriptionOfReqsIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                <div class="form-grid-single">
+                    <div class="form-field">
+                        <label class="form-label">Description of Requirements</label>
+                        <textarea class="form-control" id="descriptionOfReqs" rows="3"
+                                 placeholder="Describe the job requirements, qualifications, and specific needs..."
+                                 style="resize: vertical; min-height: 80px;"></textarea>
+                        <span id="descriptionOfReqsIndicator" class="extracted-indicator" style="display: none;">AI</span>
+                    </div>
                 </div>
             </div>
 
@@ -1136,8 +1270,8 @@
                     <span class="collapse-icon" id="creditSectionIcon">▼</span>
                 </div>
                 <div class="collapsible-content" id="creditSection">
-                    <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                        <div style="flex: 1;">
+                    <div class="form-grid">
+                        <div class="form-field">
                             <label class="form-label">Credit Type</label>
                             <select class="form-select" id="whoGetsCredit">
                                 <option value="">None</option>
@@ -1145,22 +1279,24 @@
                                 <option value="Affiliate">Affiliate</option>
                                 <option value="Both">Both</option>
                             </select>
-                            <span id="whoGetsCreditIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                            <span id="whoGetsCreditIndicator" class="extracted-indicator" style="display: none;">AI</span>
                         </div>
-                        <div style="flex: 1;">
+                        <div class="form-field">
                             <label class="form-label">Credit Detail (Name)</label>
                             <input type="text" class="form-control" id="creditDetail"
                                    placeholder="Person who gets credit">
-                            <span id="creditDetailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                            <span id="creditDetailIndicator" class="extracted-indicator" style="display: none;">AI</span>
                             <!-- Hidden field for backward compatibility with backend mapping -->
                             <input type="hidden" id="companyOwner">
                         </div>
                     </div>
-                    <div style="margin-bottom: 16px;">
-                        <label class="form-label">Source Detail</label>
-                        <input type="text" class="form-control" id="sourceDetail"
-                               placeholder="Referrer name or specific source">
-                        <span id="sourceDetailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
+                    <div class="form-grid-single">
+                        <div class="form-field">
+                            <label class="form-label">Source Detail</label>
+                            <input type="text" class="form-control" id="sourceDetail"
+                                   placeholder="Referrer name or specific source">
+                            <span id="sourceDetailIndicator" class="extracted-indicator" style="display: none;">AI</span>
+                        </div>
                     </div>
                 </div>
             </div>
