@@ -1881,8 +1881,8 @@ async function handleSendToZoho(overrideTestMode = false) {
         // Check if this was a duplicate
         if (result.status === 'duplicate' || result.status === 'duplicate_blocked') {
             showDuplicate(result);
-        } else if (effectiveTestMode) {
-            // Show test mode success
+        } else if (effectiveTestMode || result.status === 'preview') {
+            // Show test mode success (either explicitly test mode or preview status from backend)
             showTestSuccess(result);
         } else {
             // Show success message
@@ -2094,7 +2094,12 @@ async function updateProgress(step, message) {
  */
 function showDuplicate(result) {
     const successMessage = document.getElementById('successMessage');
+    const errorMessage = document.getElementById('errorMessage');
     const warningMessage = document.getElementById('warningMessage') || successMessage;
+
+    // Clear other message containers
+    if (errorMessage) errorMessage.style.display = 'none';
+    if (successMessage && warningMessage !== successMessage) successMessage.style.display = 'none';
 
     // Build duplicate details HTML
     let duplicateDetails = '';
@@ -2147,8 +2152,29 @@ function showDuplicate(result) {
  * Show test mode success message
  */
 function showTestSuccess(result) {
+    console.log('showTestSuccess called with result:', result);
+
     const previewForm = document.getElementById('previewForm');
     const successMessage = document.getElementById('successMessage');
+    const errorMessage = document.getElementById('errorMessage');
+    const warningMessage = document.getElementById('warningMessage');
+
+    if (!successMessage) {
+        console.error('CRITICAL: successMessage element not found!');
+        console.error('Available elements:', Array.from(document.querySelectorAll('[id]')).map(el => el.id));
+        return;
+    }
+
+    // Clear other message containers
+    if (errorMessage) errorMessage.style.display = 'none';
+    if (warningMessage) warningMessage.style.display = 'none';
+
+    // Handle different response structures
+    // Backend returns: { status: "preview", extracted: {...}, message: "...", correlation_id: "..." }
+    const extracted = result.extracted || result;
+    const contact = extracted.contact_record || {};
+    const company = extracted.company_record || {};
+    const deal = extracted.deal_record || {};
 
     // Build test success message
     let message = `
@@ -2157,13 +2183,17 @@ function showTestSuccess(result) {
             <p><strong>This was a TEST RUN - No records were created in Zoho CRM</strong></p>
             <p>Extracted Data:</p>
             <ul>
-                ${result.deal_name ? `<li>Deal: ${result.deal_name}</li>` : ''}
-                ${result.extracted?.contact_record?.first_name ? `<li>Contact: ${result.extracted.contact_record.first_name} ${result.extracted.contact_record.last_name || ''}</li>` : ''}
-                ${result.extracted?.company_record?.company_name ? `<li>Company: ${result.extracted.company_record.company_name}</li>` : ''}
+                ${deal.deal_name || result.deal_name ? `<li>Deal: ${deal.deal_name || result.deal_name}</li>` : ''}
+                ${contact.first_name ? `<li>Contact: ${contact.first_name} ${contact.last_name || ''}</li>` : ''}
+                ${company.company_name ? `<li>Company: ${company.company_name}</li>` : ''}
+                ${contact.email ? `<li>Email: ${contact.email}</li>` : ''}
+                ${contact.phone ? `<li>Phone: ${contact.phone}</li>` : ''}
+                ${contact.city || contact.state ? `<li>Location: ${contact.city || ''} ${contact.state || ''}</li>` : ''}
             </ul>
             <p style="margin-top: 20px;">
                 <em>Click "Send" to create actual records, or "Test" to test again.</em>
             </p>
+            ${result.correlation_id ? `<p style="font-size: 0.8em; color: #666; margin-top: 10px;">Correlation ID: ${result.correlation_id}</p>` : ''}
         </div>
     `;
 
@@ -2181,16 +2211,27 @@ function showTestSuccess(result) {
     }
 
     // Hide form and show both buttons
-    previewForm.style.display = 'none';
-    document.getElementById('btnSend').style.display = 'block';
-    const btnTestMode = document.getElementById('btnTestMode');
-    if (btnTestMode) btnTestMode.style.display = 'block';
-    document.getElementById('btnCancel').style.display = 'none';
+    if (previewForm) {
+        previewForm.style.display = 'none';
+    }
 
-    // Reset button state
     const btnSend = document.getElementById('btnSend');
-    btnSend.disabled = false;
-    btnSend.innerHTML = 'Send';
+    const btnTestMode = document.getElementById('btnTestMode');
+    const btnCancel = document.getElementById('btnCancel');
+
+    if (btnSend) {
+        btnSend.style.display = 'block';
+        btnSend.disabled = false;
+        btnSend.innerHTML = 'Send';
+    }
+
+    if (btnTestMode) {
+        btnTestMode.style.display = 'block';
+    }
+
+    if (btnCancel) {
+        btnCancel.style.display = 'none';
+    }
 }
 
 /**

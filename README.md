@@ -5,9 +5,11 @@
 [![Azure](https://img.shields.io/badge/Azure-Container%20Apps-blue.svg)](https://azure.microsoft.com/)
 [![LangGraph](https://img.shields.io/badge/LangGraph-0.2.74-orange.svg)](https://github.com/langchain-ai/langgraph)
 [![GPT-5](https://img.shields.io/badge/GPT--5-Multi--Tier-success.svg)](https://openai.com/)
-[![Redis](https://img.shields.io/badge/Redis-Cache-red.svg)](https://redis.io/)
+[![Redis](https://img.shields.io/badge/Redis-6.0-red.svg)](https://redis.io/)
 [![PostgreSQL](https://img.shields.io/badge/PostgreSQL-15-blue.svg)](https://www.postgresql.org/)
 [![Docker](https://img.shields.io/badge/Docker-Containerized-blue.svg)](https://www.docker.com/)
+[![Firecrawl](https://img.shields.io/badge/Firecrawl-v2-purple.svg)](https://firecrawl.dev/)
+[![Azure OpenAI](https://img.shields.io/badge/Azure--OpenAI-GPT--5-lightblue.svg)](https://azure.microsoft.com/en-us/products/ai-services/openai-service)
 [![License](https://img.shields.io/badge/License-Proprietary-red.svg)]()
 
 > **Transform recruitment emails into structured Zoho CRM records in seconds with AI-powered extraction, intelligent caching, and enterprise-grade security.**
@@ -686,59 +688,110 @@ End-to-end email processing pipeline:
 
 > **View complete Azure infrastructure in [ARCHITECTURE.md](ARCHITECTURE.md#azure-infrastructure)**
 - **TheWell-Infra-East**: Infrastructure and application resources (East US region)
-  
-  **Core Services:**
-  - `well-zoho-oauth` - **OAuth Reverse Proxy Service** (Azure App Service - Flask)
+
+  **Core Application Services:**
+  - `well-zoho-oauth-v2` - **OAuth Reverse Proxy Service** (Azure App Service - Flask)
     - Handles all API routing with authentication
     - Manages Zoho OAuth token refresh
     - Implements security features (rate limiting, circuit breaker)
     - Single entry point for all API calls
-    
+
   - `well-intake-api` - Main FastAPI application (Azure Container Apps)
     - LangGraph workflow engine with GPT-5-mini
     - Business logic and data processing
+    - Auto-scaling 1-10 instances
     - Protected behind reverse proxy
-    
+
   - `wellintakeacr0903` - Azure Container Registry
-    - Docker image repository
+    - Docker image repository (Basic SKU)
+    - Multi-architecture builds
     - Version control for deployments
-    
+
+  **Data Services:**
   - `well-intake-db-0903` - PostgreSQL Flexible Server
-    - PostgreSQL 15 with pgvector extension
+    - PostgreSQL 15 with pgvector extension (Standard_D2ds_v5)
     - 400K token context window support
     - Vector similarity search capabilities
-    
-  - `wellintakestorage0903` - Azure Blob Storage
-    - Email attachment storage
-    - Private container with SAS token auth
-    
+    - General Purpose tier with zone redundancy
+
   - `wellintakecache0903` - Azure Cache for Redis
-    - Redis 6.0 with 256MB Basic C0 tier
-    - Intelligent caching with pattern recognition
-    - Email classification and template detection
-    
+    - Redis 6.0 for intelligent caching
+    - Pattern recognition and email classification
+    - Template detection and TTL optimization
+
+  - `wellintakestorage0903` - Azure Blob Storage
+    - Email attachment storage (Hot tier)
+    - Private containers with SAS token auth
+    - Lifecycle policies for cost optimization
+
+  - `wellattachments0903` - Dedicated Attachment Storage
+    - Additional blob storage for large files
+    - Separate from main application storage
+
+  **AI & Cognitive Services:**
+  - `well-intake-aoai` - Azure OpenAI Service (East US)
+    - GPT-5-mini model deployment
+    - Primary AI processing endpoint
+
+  - `well-intake-aoai-eus2` - Azure OpenAI Service (East US 2)
+    - Secondary/backup AI endpoint
+    - Load balancing and redundancy
+
+  - `wellintakesearch0903` - Azure AI Search
+    - Semantic pattern learning (Standard tier)
+    - Company template storage
+    - Vector-based similarity matching
+
+  **Messaging & Communication:**
   - `wellintakebus0903` - Azure Service Bus
-    - Batch processing queue management
+    - Batch processing queue management (Standard tier)
     - Multi-email context processing
     - Message routing and retry logic
 
-  - `wellintakesearch0903` - Azure AI Search
-    - Semantic pattern learning
-    - Company template storage
-    - Vector-based similarity matching
+  - `well-communication-services` - Azure Communication Services
+    - Email delivery infrastructure
+    - SMTP and API-based email sending
+
+  - `well-email-service` - Email Service
+    - Managed email domains (emailthewell.com)
+    - Azure managed domain support
+
+  **Security & Monitoring:**
+  - `well-intake-kv` - Azure Key Vault
+    - Secret and certificate management
+    - API key rotation and storage
+    - HSM-backed security
+
+  - `wellintakeinsights0903` - Application Insights
+    - Real-time monitoring and analytics
+    - Custom metrics and telemetry
+    - Performance tracking
+
+  - `well-intake-logs` - Log Analytics Workspace
+    - Centralized logging
+    - Query and analysis capabilities
+
+  **CDN & Frontend:**
+  - `well-intake-frontdoor` - Azure Front Door
+    - Global CDN with edge locations
+    - WAF protection and routing
+    - SSL termination and caching
 
 ## 🚀 Production URLs
 
 ### Primary Service (Use These)
-- **Service Root**: https://well-zoho-oauth.azurewebsites.net/
-- **API Proxy**: https://well-zoho-oauth.azurewebsites.net/api/*
-- **OAuth Token**: https://well-zoho-oauth.azurewebsites.net/oauth/token
-- **Manifest**: https://well-zoho-oauth.azurewebsites.net/manifest.xml
-- **Health Check**: https://well-zoho-oauth.azurewebsites.net/health
+- **Service Root**: https://well-zoho-oauth-v2.azurewebsites.net/
+- **API Proxy**: https://well-zoho-oauth-v2.azurewebsites.net/api/*
+- **OAuth Token**: https://well-zoho-oauth-v2.azurewebsites.net/oauth/token
+- **Manifest**: https://well-zoho-oauth-v2.azurewebsites.net/manifest.xml
+- **Health Check**: https://well-zoho-oauth-v2.azurewebsites.net/health
 
 ### Backend Services (Protected - Access via Proxy Only)
-- Container Apps API: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
-- Direct access requires API key authentication
+- **Container Apps API**: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
+  - **Runtime**: Azure Container Apps (well-intake-api)
+  - **Image**: wellintakeacr0903.azurecr.io/well-intake-api:latest
+  - **Environment**: well-intake-env (East US)
+  - Direct access requires API key authentication
 
 ## 📋 API Endpoints
 
@@ -753,6 +806,8 @@ End-to-end email processing pipeline:
 | ALL | `/cdn/*` | CDN management (alias for /api/cdn/*) | Automatic |
 | GET | `/proxy/health` | Backend API health check | None |
 | GET | `/manifest.xml` | Outlook Add-in manifest | None |
+
+> **Base URL**: https://well-zoho-oauth-v2.azurewebsites.net
 
 ### Outlook Add-in Static Files
 
@@ -792,7 +847,7 @@ The system serves Outlook Add-in files from both root (`/`) and `/addin/` paths 
 ### Request Format
 
 ```json
-POST https://well-zoho-oauth.azurewebsites.net/api/intake/email
+POST https://well-zoho-oauth-v2.azurewebsites.net/api/intake/email
 {
     "subject": "Email subject",
     "body": "Email body content",
@@ -1389,7 +1444,7 @@ Mount CSV files to the container data directory:
 Imports all CSV files from the default directory (`app/admin/imports/` or `/mnt/data/`).
 
 ```bash
-curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+curl -X POST "https://well-zoho-oauth-v2.azurewebsites.net/api/talentwell/admin/import-exports" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json"
 ```
@@ -1414,7 +1469,7 @@ curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/imp
 Specify exact file paths for each CSV type.
 
 ```bash
-curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+curl -X POST "https://well-zoho-oauth-v2.azurewebsites.net/api/talentwell/admin/import-exports" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1431,7 +1486,7 @@ curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/imp
 Send CSV content directly in JSON payload.
 
 ```bash
-curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+curl -X POST "https://well-zoho-oauth-v2.azurewebsites.net/api/talentwell/admin/import-exports" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{
@@ -1444,7 +1499,7 @@ curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/imp
 Upload CSV files directly via multipart form data.
 
 ```bash
-curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/import-exports" \
+curl -X POST "https://well-zoho-oauth-v2.azurewebsites.net/api/talentwell/admin/import-exports" \
   -H "X-API-Key: $API_KEY" \
   -F "deals=@Deals.csv" \
   -F "stages=@Stage_History.csv" \
@@ -1458,7 +1513,7 @@ curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/admin/imp
 Generate and seed all policy data into database and Redis cache.
 
 ```bash
-curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/talentwell/seed-policies" \
+curl -X POST "https://well-zoho-oauth-v2.azurewebsites.net/api/talentwell/seed-policies" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json"
 ```
@@ -1487,7 +1542,7 @@ Refresh Redis cache from database without regeneration.
 
 ```bash
 # Access through internal policy loader service
-curl -X GET "https://well-zoho-oauth.azurewebsites.net/api/cache/warmup" \
+curl -X GET "https://well-zoho-oauth-v2.azurewebsites.net/api/cache/warmup" \
   -H "X-API-Key: $API_KEY"
 ```
 
@@ -1497,7 +1552,7 @@ curl -X GET "https://well-zoho-oauth.azurewebsites.net/api/cache/warmup" \
 Process emails from Outlook Add-in with TalentWell integration.
 
 ```bash
-curl -X POST "https://well-zoho-oauth.azurewebsites.net/api/intake/email" \
+curl -X POST "https://well-zoho-oauth-v2.azurewebsites.net/api/intake/email" \
   -H "X-API-Key: $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

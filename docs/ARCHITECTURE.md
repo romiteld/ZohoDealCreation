@@ -32,20 +32,22 @@ graph TB
     subgraph ExternalSystems["🌐 External Systems"]
         Outlook["📧 Microsoft 365<br/>Email Client + Add-in"]
         Zoho["📊 Zoho CRM v8<br/>CRM System"]
-        OpenAI["🤖 OpenAI GPT-5<br/>gpt-5-mini model"]
-        Firecrawl["🔍 Firecrawl API<br/>Company Research"]
-        Serper["🔎 Serper API<br/>Search Service"]
+        OpenAI["🤖 Azure OpenAI<br/>well-intake-aoai (East US)<br/>well-intake-aoai-eus2 (East US 2)"]
+        Firecrawl["🔍 Firecrawl v2 API<br/>Company Research & Fire Agent"]
+        Apollo["🚀 Apollo.io API<br/>Contact Enrichment"]
     end
     
-    subgraph AzureServices["☁️ Azure Infrastructure"]
-        Storage["📁 Blob Storage<br/>wellintakestorage0903"]
-        Postgres["🗄️ PostgreSQL<br/>well-intake-db-0903<br/>with pgvector"]
-        Redis["⚡ Redis Cache<br/>wellintakecache0903"]
-        ServiceBus["📨 Service Bus<br/>well-intake-servicebus"]
-        SignalR["🔌 SignalR<br/>well-intake-signalr"]
-        Search["🔍 AI Search<br/>well-intake-search"]
-        FrontDoor["🌍 Front Door CDN<br/>well-intake-frontdoor"]
-        AppInsights["📊 App Insights<br/>Monitoring & Analytics"]
+    subgraph AzureServices["☁️ Azure Infrastructure - TheWell-Infra-East"]
+        Storage["📁 Blob Storage<br/>wellintakestorage0903<br/>wellattachments0903"]
+        Postgres["🗄️ PostgreSQL Flexible<br/>well-intake-db-0903<br/>v15 + pgvector<br/>Standard_D2ds_v5"]
+        Redis["⚡ Redis Cache<br/>wellintakecache0903<br/>v6.0 Premium"]
+        ServiceBus["📨 Service Bus<br/>wellintakebus0903<br/>Standard tier"]
+        Search["🔍 AI Search<br/>wellintakesearch0903<br/>Standard tier"]
+        FrontDoor["🌍 Front Door CDN<br/>well-intake-frontdoor<br/>Premium tier + WAF"]
+        AppInsights["📊 App Insights<br/>wellintakeinsights0903<br/>Monitoring & Analytics"]
+        KeyVault["🔐 Key Vault<br/>well-intake-kv<br/>Secret management"]
+        Registry["🐳 Container Registry<br/>wellintakeacr0903<br/>Basic SKU"]
+        Communication["📧 Communication Services<br/>well-communication-services<br/>Email delivery"]
     end
     
     Recruiter -->|"Sends emails"| Outlook
@@ -86,8 +88,8 @@ graph TB
     end
     
     subgraph Gateway["🔐 API Gateway Layer"]
-        FrontDoor["🌍 Azure Front Door<br/>CDN + WAF<br/>well-intake-frontdoor"]
-        OAuthProxy["🔑 OAuth Proxy<br/>Flask App Service<br/>well-zoho-oauth-v2"]
+        FrontDoor["🌍 Azure Front Door<br/>CDN + WAF + Routing<br/>well-intake-frontdoor<br/>Premium tier"]
+        OAuthProxy["🔑 OAuth Proxy Service<br/>Flask App Service<br/>well-zoho-oauth-v2<br/>TheWell-WebApps-Plan"]
     end
     
     subgraph Application["⚡ Application Layer"]
@@ -112,21 +114,23 @@ graph TB
     end
     
     subgraph Data["🗄️ Data Layer"]
-        PostgreSQL["🐘 PostgreSQL<br/>well-intake-db-0903<br/>pgvector extension"]
-        Redis["⚡ Redis Cache<br/>wellintakecache0903<br/>6GB Premium"]
-        BlobStorage["📁 Blob Storage<br/>wellintakestorage0903<br/>email-attachments"]
-        AISearch["🔍 AI Search<br/>well-intake-search<br/>Semantic indexing"]
+        PostgreSQL["🐘 PostgreSQL Flexible<br/>well-intake-db-0903<br/>v15 + pgvector<br/>Standard_D2ds_v5 (Central US)"]
+        Redis["⚡ Redis Cache<br/>wellintakecache0903<br/>v6.0 with intelligent caching"]
+        BlobStorage["📁 Blob Storage<br/>wellintakestorage0903<br/>wellattachments0903<br/>Hot tier + lifecycle policies"]
+        AISearch["🔍 AI Search<br/>wellintakesearch0903<br/>Standard tier semantic indexing"]
     end
     
-    subgraph Messaging["📨 Messaging Layer"]
-        ServiceBus["📬 Service Bus<br/>email-batch-queue<br/>50 emails/batch"]
-        SignalR["🔌 SignalR Service<br/>well-intake-signalr<br/>WebSocket hub"]
+    subgraph Messaging["📨 Messaging & Communication Layer"]
+        ServiceBus["📬 Service Bus<br/>wellintakebus0903<br/>Standard tier<br/>Batch processing queues"]
+        Communication["📧 Azure Communication<br/>well-communication-services<br/>Email delivery infrastructure"]
+        EmailService["📨 Email Service<br/>well-email-service<br/>Managed domains (emailthewell.com)"]
     end
     
     subgraph External["🌐 External Services"]
-        OpenAI["🤖 OpenAI<br/>gpt-5-mini<br/>temperature=1"]
-        Zoho["📊 Zoho CRM<br/>API v8<br/>Account/Contact/Deal"]
-        Firecrawl["🔍 Firecrawl<br/>Company research<br/>5s timeout"]
+        AzureOpenAI["🤖 Azure OpenAI<br/>well-intake-aoai (East US)<br/>well-intake-aoai-eus2 (East US 2)<br/>GPT-5-mini, temperature=1"]
+        Zoho["📊 Zoho CRM<br/>API v8<br/>Account/Contact/Deal creation"]
+        Firecrawl["🔍 Firecrawl v2<br/>Fire Agent + Company research<br/>5s timeout with fallback"]
+        Apollo["🚀 Apollo.io<br/>People Match API<br/>Contact enrichment"]
         MSGraph["📧 MS Graph<br/>Email access<br/>OAuth 2.0"]
     end
     
@@ -145,17 +149,125 @@ graph TB
     FastAPI --> BlobStorage
     FastAPI --> AISearch
     FastAPI --> ServiceBus
-    FastAPI --> SignalR
-    
-    VoIT --> OpenAI
+    FastAPI --> Communication
+    FastAPI --> EmailService
+
+    VoIT --> AzureOpenAI
     OAuthProxy --> Zoho
     LangGraph --> Firecrawl
+    LangGraph --> Apollo
     FastAPI --> MSGraph
     
     style FastAPI fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
     style LangGraph fill:#9B59B6,stroke:#7D3C98,stroke-width:2px,color:#fff
     style C3Cache fill:#E74C3C,stroke:#C0392B,stroke-width:2px,color:#fff
     style PostgreSQL fill:#336791,stroke:#234A6F,stroke-width:2px,color:#fff
+```
+
+---
+
+## 🏗️ Azure Resource Topology (Production Infrastructure)
+
+```mermaid
+graph TB
+    subgraph "☁️ Azure Subscription: Microsoft Azure Sponsorship"
+        subgraph "🗂️ TheWell-Infra-East (East US)"
+            subgraph "🚀 Compute & Application Services"
+                ContainerApps["🐳 well-intake-api<br/>Container Apps<br/>Auto-scale 1-10 instances<br/>well-intake-env"]
+                AppService["🌐 well-zoho-oauth-v2<br/>App Service<br/>TheWell-WebApps-Plan"]
+                Registry["📦 wellintakeacr0903<br/>Container Registry<br/>Basic SKU"]
+            end
+
+            subgraph "🗄️ Data & Storage Services"
+                PostgreSQL["🐘 well-intake-db-0903<br/>PostgreSQL Flexible<br/>Standard_D2ds_v5<br/>(Central US)"]
+                Redis["⚡ wellintakecache0903<br/>Redis Cache v6.0<br/>Intelligent caching"]
+                BlobMain["📁 wellintakestorage0903<br/>Storage Account<br/>Hot tier"]
+                BlobAttach["📎 wellattachments0903<br/>Storage Account<br/>Attachments"]
+                BlobFunc["🔧 wellintakefunc0903<br/>Storage Account<br/>Functions"]
+                BlobContent["📝 wellcontent0903<br/>Storage Account<br/>Content management"]
+            end
+
+            subgraph "🤖 AI & Cognitive Services"
+                OpenAI1["🧠 well-intake-aoai<br/>Azure OpenAI<br/>East US Primary"]
+                OpenAI2["🧠 well-intake-aoai-eus2<br/>Azure OpenAI<br/>East US 2 Secondary"]
+                Search["🔍 wellintakesearch0903<br/>AI Search<br/>Standard tier"]
+            end
+
+            subgraph "📨 Messaging & Communication"
+                ServiceBus["📬 wellintakebus0903<br/>Service Bus<br/>Standard tier"]
+                CommServices["📧 well-communication-services<br/>Communication Services<br/>Global"]
+                EmailService["📨 well-email-service<br/>Email Service<br/>emailthewell.com"]
+            end
+
+            subgraph "🌐 CDN & Networking"
+                FrontDoor["🌍 well-intake-frontdoor<br/>Front Door CDN<br/>Premium + WAF<br/>Global"]
+                FrontDoorEndpoint["🔗 well-intake-api<br/>Front Door Endpoint<br/>Global"]
+            end
+
+            subgraph "🔐 Security & Monitoring"
+                KeyVault["🔐 well-intake-kv<br/>Key Vault<br/>Secret management"]
+                AppInsights["📊 wellintakeinsights0903<br/>Application Insights<br/>Analytics & monitoring"]
+                LogAnalytics["📋 well-intake-logs<br/>Log Analytics<br/>Centralized logging"]
+                AlertGroup["🚨 Application Insights Smart Detection<br/>Action Group<br/>Global"]
+            end
+
+            subgraph "🔧 Additional App Services"
+                LinkedInPublisher["📱 well-linkedin-publisher<br/>App Service<br/>EastUSPlan"]
+                ScheduledPublisher["⏰ well-scheduled-publisher<br/>App Service<br/>EastUSPlan"]
+                YouTubePublisher["📺 well-youtube-publisher<br/>App Service<br/>EastUSPlan"]
+                ContentStudioAPI["🎨 well-content-studio-api<br/>Container Apps<br/>well-intake-env"]
+            end
+        end
+
+        subgraph "🎯 Additional Resource Groups"
+            ContentStudioRG["well-content-studio-rg<br/>Content management resources"]
+            DefaultRG["DefaultResourceGroup-EUS<br/>Default resources"]
+            AIInsightsRG["ai_wellintakeinsights0903_*_managed<br/>Auto-managed AI resources"]
+        end
+    end
+
+    %% Connection flows
+    FrontDoor --> AppService
+    FrontDoor --> ContainerApps
+    ContainerApps --> PostgreSQL
+    ContainerApps --> Redis
+    ContainerApps --> BlobMain
+    ContainerApps --> BlobAttach
+    ContainerApps --> ServiceBus
+    ContainerApps --> Search
+    ContainerApps --> OpenAI1
+    ContainerApps --> OpenAI2
+    ContainerApps --> KeyVault
+    ContainerApps --> AppInsights
+
+    AppService --> ContainerApps
+    AppService --> KeyVault
+    AppService --> Redis
+
+    Registry --> ContainerApps
+
+    CommServices --> EmailService
+    ContainerApps --> CommServices
+
+    AppInsights --> LogAnalytics
+    AlertGroup --> AppInsights
+
+    %% Styling
+    classDef compute fill:#4A90E2,stroke:#2E5C8A,stroke-width:2px,color:#fff
+    classDef data fill:#9B59B6,stroke:#7D3C98,stroke-width:2px,color:#fff
+    classDef ai fill:#E74C3C,stroke:#C0392B,stroke-width:2px,color:#fff
+    classDef messaging fill:#F39C12,stroke:#D68910,stroke-width:2px,color:#fff
+    classDef network fill:#27AE60,stroke:#1E8449,stroke-width:2px,color:#fff
+    classDef security fill:#E67E22,stroke:#D35400,stroke-width:2px,color:#fff
+    classDef additional fill:#95A5A6,stroke:#7F8C8D,stroke-width:1px,color:#2C3E50
+
+    class ContainerApps,AppService,Registry compute
+    class PostgreSQL,Redis,BlobMain,BlobAttach,BlobFunc,BlobContent data
+    class OpenAI1,OpenAI2,Search ai
+    class ServiceBus,CommServices,EmailService messaging
+    class FrontDoor,FrontDoorEndpoint network
+    class KeyVault,AppInsights,LogAnalytics,AlertGroup security
+    class LinkedInPublisher,ScheduledPublisher,YouTubePublisher,ContentStudioAPI additional
 ```
 
 ---
@@ -243,45 +355,67 @@ graph TB
 
 ```mermaid
 graph TB
-    subgraph AzureCloud["☁️ Azure Cloud - East US Region"]
+    subgraph AzureCloud["☁️ Azure Cloud - Microsoft Azure Sponsorship"]
         subgraph ResourceGroups["🗂️ Resource Groups"]
-            InfraRG["TheWell-Infra-East<br/>Infrastructure resources"]
+            InfraRG["TheWell-Infra-East<br/>Primary infrastructure (East US)"]
+            ContentRG["well-content-studio-rg<br/>Content management (East US)"]
+            DefaultRG["DefaultResourceGroup-EUS<br/>Default resources (East US)"]
+            AIRGroup["ai_wellintakeinsights0903_*_managed<br/>Auto-managed AI resources"]
         end
-        
+
         subgraph ContainerApps["🐳 Container Apps Environment"]
-            API["well-intake-api<br/>FastAPI Container<br/>2 CPU, 4GB RAM<br/>Auto-scale: 1-10"]
-            OAuthApp["well-zoho-oauth-v2<br/>Flask App Service<br/>B1 Plan"]
+            API["well-intake-api<br/>FastAPI Container<br/>well-intake-env<br/>Auto-scale: 1-10"]
+            ContentAPI["well-content-studio-api<br/>Content Studio Container<br/>well-intake-env"]
+            OAuthApp["well-zoho-oauth-v2<br/>Flask App Service<br/>TheWell-WebApps-Plan"]
+            LinkedInApp["well-linkedin-publisher<br/>LinkedIn Publisher<br/>EastUSPlan"]
+            ScheduledApp["well-scheduled-publisher<br/>Scheduled Publisher<br/>EastUSPlan"]
+            YouTubeApp["well-youtube-publisher<br/>YouTube Publisher<br/>EastUSPlan"]
         end
         
         subgraph Database["🗄️ Database Services"]
-            PostgresFlexible["well-intake-db-0903<br/>PostgreSQL Flexible Server<br/>B_Standard_B2s<br/>32GB storage<br/>pgvector extension"]
+            PostgresFlexible["well-intake-db-0903<br/>PostgreSQL Flexible Server v15<br/>Standard_D2ds_v5 (General Purpose)<br/>pgvector extension<br/>Central US location"]
         end
         
         subgraph Caching["⚡ Cache Services"]
-            RedisCache["wellintakecache0903<br/>Redis Premium P1<br/>6GB memory<br/>Cluster enabled"]
+            RedisCache["wellintakecache0903<br/>Redis Cache v6.0<br/>Intelligent caching<br/>Pattern recognition"]
         end
         
         subgraph Storage["📁 Storage Services"]
-            BlobStorage["wellintakestorage0903<br/>StorageV2<br/>Hot tier<br/>Containers:<br/>- email-attachments"]
+            BlobStorage["wellintakestorage0903<br/>Primary storage<br/>Hot tier + lifecycle policies"]
+            AttachmentStorage["wellattachments0903<br/>Attachment storage<br/>Hot tier"]
+            FuncStorage["wellintakefunc0903<br/>Function storage<br/>Azure Functions"]
+            ContentStorage["wellcontent0903<br/>Content storage<br/>Content management"]
         end
         
-        subgraph Messaging["📨 Messaging Services"]
-            ServiceBus["well-intake-servicebus<br/>Premium tier<br/>Queues:<br/>- email-batch-queue"]
-            SignalR["well-intake-signalr<br/>Standard tier<br/>1 unit<br/>1000 connections"]
+        subgraph Messaging["📨 Messaging & Communication Services"]
+            ServiceBus["wellintakebus0903<br/>Service Bus<br/>Standard tier<br/>Batch processing queues"]
+            CommServices["well-communication-services<br/>Communication Services<br/>Email delivery infrastructure"]
+            EmailService["well-email-service<br/>Email Service<br/>Managed domains:<br/>- emailthewell.com<br/>- AzureManagedDomain"]
         end
         
-        subgraph Search["🔍 Search & AI"]
-            AISearch["well-intake-search<br/>Standard tier<br/>Semantic search<br/>Vector indexes"]
-            AppInsights["well-intake-insights<br/>Application Insights<br/>Log Analytics<br/>Custom metrics"]
+        subgraph SearchAI["🔍 Search & AI Services"]
+            AISearch["wellintakesearch0903<br/>AI Search<br/>Standard tier<br/>Semantic search + Vector indexes"]
+            OpenAI1["well-intake-aoai<br/>Azure OpenAI<br/>East US Primary<br/>GPT-5-mini deployment"]
+            OpenAI2["well-intake-aoai-eus2<br/>Azure OpenAI<br/>East US 2 Secondary<br/>Load balancing"]
+        end
+
+        subgraph Monitoring["📊 Monitoring & Analytics"]
+            AppInsights["wellintakeinsights0903<br/>Application Insights<br/>Analytics & monitoring"]
+            LogWorkspace["well-intake-logs<br/>Log Analytics Workspace<br/>Centralized logging"]
+            AlertGroup["Application Insights Smart Detection<br/>Action Group<br/>Global alerts"]
         end
         
-        subgraph Network["🌐 Networking"]
-            FrontDoor["well-intake-frontdoor<br/>Premium tier<br/>WAF enabled<br/>Global PoPs"]
-            DNS["DNS Zones<br/>Custom domains"]
+        subgraph Network["🌐 Networking & CDN"]
+            FrontDoor["well-intake-frontdoor<br/>Front Door CDN Profile<br/>Premium tier + WAF<br/>Global PoPs"]
+            FrontDoorEndpoint["well-intake-api<br/>Front Door Endpoint<br/>Global distribution"]
         end
-        
+
+        subgraph Security["🔐 Security & Key Management"]
+            KeyVault["well-intake-kv<br/>Key Vault<br/>Secret management<br/>HSM-backed"]
+        end
+
         subgraph Registry["📦 Container Registry"]
-            ACR["wellintakeacr0903<br/>Basic tier<br/>Docker images"]
+            ACR["wellintakeacr0903<br/>Container Registry<br/>Basic SKU<br/>Docker image repository"]
         end
     end
     
@@ -310,6 +444,113 @@ graph TB
     style RedisCache fill:#DC382D,stroke:#B02920,stroke-width:2px,color:#fff
     style FrontDoor fill:#FF6B35,stroke:#CC5429,stroke-width:2px,color:#fff
 ```
+
+---
+
+## 🛠️ Technology Stack & Dependencies
+
+### Core Application Framework
+- **FastAPI 0.104.1** - Modern Python web framework with automatic OpenAPI documentation
+- **Python 3.11** - Runtime environment with latest performance optimizations
+- **Uvicorn 0.24.0** - ASGI server for production deployment
+- **Gunicorn 21.2.0** - Production WSGI server with worker management
+
+### AI & Machine Learning
+- **LangGraph 0.2.74** - Advanced AI workflow orchestration (replaced CrewAI)
+- **LangChain Core 0.3.29** - Foundation for LLM applications
+- **LangChain OpenAI 0.2.14** - OpenAI integration layer
+- **OpenAI ≥1.58.1** - GPT-5 model access and API client
+- **TikToken ≥0.7** - Token counting for cost calculation
+- **NumPy 1.24.3** - Scientific computing foundation
+- **SciPy 1.11.4** - Advanced mathematical algorithms
+
+### Data & Persistence
+- **PostgreSQL 15** - Primary database with advanced features
+  - **asyncpg 0.29.0** - Async PostgreSQL driver
+  - **psycopg2-binary 2.9.9** - Traditional PostgreSQL adapter
+  - **pgvector 0.2.5** - Vector similarity search extension
+- **Redis 6.0** - Intelligent caching and session storage
+  - **redis 5.0.1** - Python Redis client with clustering support
+- **Pandas 2.0.3** - Data manipulation and CSV processing
+
+### Azure Cloud Services
+- **Azure Storage Blob 12.19.0** - File and attachment storage
+- **Azure Service Bus 7.11.4** - Message queuing and batch processing
+- **Azure Search Documents 11.4.0** - Semantic search and indexing
+- **Azure Key Vault Secrets 4.7.0** - Secret management
+- **Azure Key Vault Keys 4.8.0** - Cryptographic key operations
+- **Azure Identity 1.15.0** - Managed identity authentication
+- **Azure Core 1.29.6** - Common Azure SDK functionality
+- **Azure Communication Email 1.0.0** - Email delivery service
+- **Azure Monitor OpenTelemetry 1.2.0** - Performance monitoring
+- **Azure Monitor Query 1.2.0** - Log analytics and querying
+- **Azure Management Front Door 1.1.0** - CDN management
+- **Azure Management CDN 13.1.1** - Content delivery network
+
+### Web & API Technologies
+- **Pydantic 2.8.2** - Data validation and serialization
+- **Pydantic Core 2.20.1** - High-performance validation core
+- **Requests 2.31.0** - HTTP library for external API calls
+- **HTTPX 0.25.2** - Modern async HTTP client
+- **AIOHTTP 3.9.1** - Async HTTP client/server framework
+- **WebSockets 12.0** - Real-time communication protocol
+- **SSE-Starlette 1.8.2** - Server-sent events for streaming
+- **Python-Multipart 0.0.6** - File upload handling
+
+### External Integrations
+- **Firecrawl-py 4.3.6** - Web scraping and company research (v2 Fire Agent)
+- **Apollo.io REST API** - Contact enrichment and data intelligence
+- **SendGrid 6.11.0** - Email delivery service backup
+- **Beautiful Soup 4.12.3** - HTML parsing and processing
+- **Email Validator 2.1.0** - Email address validation
+
+### Security & Authentication
+- **Cryptography 41.0.7** - Encryption and security primitives
+- **PyJWT 2.8.0** - JSON Web Token handling
+- **SlowAPI 0.1.9** - Rate limiting and abuse prevention
+- **User-Agents 2.2.0** - User agent parsing for analytics
+
+### Development & Operations
+- **Python-dotenv 1.0.0** - Environment variable management
+- **Structlog 23.2.0** - Structured logging
+- **Application Insights 0.11.10** - Azure monitoring integration
+- **PSUtil 5.9.6** - System monitoring and resource tracking
+- **Jinja2 ≥3.1.2** - Template engine for manifest generation
+- **AIOFILES 23.2.1** - Async file I/O operations
+
+### File Processing & Data Formats
+- **OpenPyXL 3.1.2** - Excel file processing
+- **XLRD 2.0.1** - Excel file reading
+- **Chardet 5.2.0** - Character encoding detection
+- **Croniter 1.4.1** - Cron schedule parsing
+
+### Development Dependencies
+```bash
+# Core Python packages
+setuptools==70.0.0
+typing-extensions>=4.11,<5
+
+# Development tools (requirements-dev.txt)
+pytest>=7.4.0
+black>=23.0.0
+isort>=5.12.0
+flake8>=6.0.0
+mypy>=1.5.0
+```
+
+### Outlook Add-in Technologies
+- **Office.js** - Microsoft Office JavaScript API
+- **Manifest v2.0.0.23** - Latest Outlook Add-in manifest version
+- **JavaScript ES6+** - Modern JavaScript with async/await
+- **HTML5 & CSS3** - Modern web standards
+- **Office Add-in Manifest 1.13.6** - Validation and conversion tools
+
+### Container & Deployment
+- **Docker** - Containerization with multi-stage builds
+- **Azure Container Apps** - Serverless container hosting
+- **Azure Container Registry** - Docker image repository
+- **GitHub Actions** - CI/CD pipeline automation
+- **Multi-architecture builds** - linux/amd64 and arm64 support
 
 ---
 
@@ -431,6 +672,65 @@ flowchart TB
     style K fill:#e8f5e9
     style P fill:#f3e5f5
 ```
+
+### Recent System Enhancements & Innovations
+
+#### 🚀 C³ (Conformal Counterfactual Cache) Algorithm
+The patent-pending C³ cache system provides 90% cost reduction through intelligent caching with conformal prediction guarantees:
+
+**Key Features:**
+- **Risk-bounded caching** with δ=0.01 confidence threshold
+- **Vector similarity search** using OpenAI embeddings (1536 dimensions)
+- **Edit distance validation** with ε=3 character threshold
+- **Adaptive calibration** with 1000-sample calibration set
+- **Multi-tier TTL strategy** based on email classification:
+  - Referral emails: 48-hour TTL
+  - Recruiter emails: 7-day TTL
+  - Template emails: 90-day TTL
+  - Direct emails: 24-hour TTL
+
+**Performance Metrics:**
+- 92% cache hit rate in production
+- <100ms response time for cache hits
+- 90% cost reduction vs. uncached processing
+- Automatic pattern recognition and optimization
+
+#### 🎯 VoIT (Value-of-Insight Tree) Orchestration
+Intelligent budget-aware processing with dynamic model selection:
+
+**Core Capabilities:**
+- **Complexity scoring** (0.0-1.0 scale) for email content analysis
+- **Urgency detection** with business value estimation ($0-$1000)
+- **Budget allocation** (0.1-10 processing units) with cost constraints
+- **Quality targets** (0.8-0.99) with automatic optimization
+- **Multi-model ensemble** for high-value processing
+
+**Model Selection Strategy:**
+- **GPT-5-nano** ($0.05/1M tokens) for simple emails (<0.3 complexity)
+- **GPT-5-mini** ($0.25/1M tokens) for standard emails (0.3-0.7 complexity)
+- **GPT-5-full** ($1.25/1M tokens) for complex emails (>0.7 complexity)
+- **Multi-model ensemble** for high-value or critical processing
+
+#### 📊 TalentWell Financial Advisor System
+Comprehensive CRM and digest generation system for financial advisor workflows:
+
+**Data Import & Processing:**
+- **CSV Import Engine** supporting 4 file types (deals, stage history, meetings, notes)
+- **Policy Generation** with Bayesian priors and A/B testing configurations
+- **Data Normalization** with company name standardization and location mapping
+- **Audit Trails** with correlation IDs and comprehensive error tracking
+
+**Weekly Digest Generation:**
+- **Financial Pattern Recognition** extracting AUM, production, and growth metrics
+- **Zoom Transcript Processing** with VTT format support and evidence extraction
+- **DigestCard Format** with structured bullet points and verified data only
+- **Email Delivery** via Azure Communication Services
+
+**Key Features:**
+- **Employer Normalization** with intelligent company matching
+- **City Context Mapping** for geographic data standardization
+- **Subject Line Bandit** optimization for email engagement
+- **Selector Priors** for audience targeting and personalization
 
 ### VoIT (Value-of-Insight Tree) Orchestration
 
@@ -722,6 +1022,148 @@ graph TB
     style L fill:#ff9800
     style M fill:#03a9f4
 ```
+
+---
+
+## 🔌 API Architecture & Endpoints
+
+### Authentication & Authorization Flow
+
+```mermaid
+sequenceDiagram
+    participant Client as 📱 Client (Outlook Add-in)
+    participant Proxy as 🔑 OAuth Proxy (well-zoho-oauth-v2)
+    participant API as 🚀 FastAPI (well-intake-api)
+    participant Zoho as 📊 Zoho CRM
+    participant Vault as 🔐 Key Vault
+    participant Redis as ⚡ Redis Cache
+
+    Client->>Proxy: POST /api/intake/email
+    Note over Client,Proxy: No API key required for client
+
+    Proxy->>Vault: Get API keys & secrets
+    Vault-->>Proxy: Return credentials
+
+    Proxy->>Redis: Check OAuth token cache
+    alt Token cached & valid
+        Redis-->>Proxy: Return cached token
+    else Token expired/missing
+        Proxy->>Zoho: Refresh OAuth token
+        Zoho-->>Proxy: New access token
+        Proxy->>Redis: Cache new token (55min TTL)
+    end
+
+    Proxy->>API: Forward request with injected credentials
+    Note over Proxy,API: X-API-Key header automatically added
+
+    API->>API: Process email with LangGraph
+    API->>Zoho: Create CRM records (via OAuth token)
+    Zoho-->>API: Record IDs & confirmation
+
+    API-->>Proxy: Processing results
+    Proxy-->>Client: JSON response
+```
+
+### Production API Endpoints
+
+**Base URL**: `https://well-zoho-oauth-v2.azurewebsites.net`
+
+#### Core Email Processing
+```http
+POST /api/intake/email
+Content-Type: application/json
+
+{
+  "subject": "Senior Developer Position - ABC Corp",
+  "body": "Email content with candidate information...",
+  "sender_email": "recruiter@abccorp.com",
+  "sender_name": "Jane Smith",
+  "attachments": [
+    {
+      "filename": "resume.pdf",
+      "content_base64": "base64_encoded_content",
+      "content_type": "application/pdf"
+    }
+  ]
+}
+```
+
+#### Batch Processing
+```http
+POST /api/batch/submit
+Content-Type: application/json
+
+{
+  "emails": [
+    { "subject": "...", "body": "..." },
+    { "subject": "...", "body": "..." }
+  ],
+  "batch_size": 50,
+  "priority": "standard"
+}
+
+GET /api/batch/{batch_id}/status
+```
+
+#### Cache Management
+```http
+GET /api/cache/status
+POST /api/cache/invalidate
+POST /api/cache/warmup
+```
+
+#### TalentWell Administration
+```http
+POST /api/talentwell/admin/import-exports
+POST /api/talentwell/seed-policies
+```
+
+#### Vault Agent & C³ Cache
+```http
+GET /api/vault-agent/status
+POST /api/vault-agent/canonical-records
+GET /api/cache/c3/metrics
+```
+
+### Authentication Mechanisms
+
+#### 1. OAuth Proxy Service (Client-facing)
+- **No API key required** for Outlook Add-in clients
+- **Automatic credential injection** by proxy service
+- **Token management** with 55-minute cache TTL
+- **Rate limiting** at proxy level (100 req/min per IP)
+
+#### 2. Direct API Access (Internal)
+- **X-API-Key header** required for direct Container Apps access
+- **Timing-safe comparison** with rate limiting protection
+- **Client IP tracking** with 15-minute lockout on abuse
+- **CORS configured** for allowed origins only
+
+#### 3. Managed Identity (Azure Services)
+- **System-assigned identity** for Container Apps
+- **Azure Key Vault access** without stored credentials
+- **RBAC integration** with minimal privilege principle
+- **Automatic token rotation** handled by Azure platform
+
+### Security Features
+
+#### Request Validation
+- **Input sanitization** using Pydantic models
+- **File upload limits** (25MB per attachment)
+- **Content-Type validation** for all uploads
+- **Schema enforcement** for JSON payloads
+
+#### Rate Limiting & DDoS Protection
+- **Azure WAF** protection at Front Door level
+- **Application-level** rate limiting (100 req/min)
+- **Circuit breaker** pattern for external services
+- **Automatic IP blocking** for suspicious activity
+
+#### Data Protection
+- **TLS 1.3 encryption** for all data in transit
+- **AES-256 encryption** for data at rest
+- **PII masking** in logs and telemetry
+- **Secure token storage** in Redis with encryption
 
 ---
 
