@@ -14,6 +14,9 @@ let extractedData = null;
 let originalExtractedData = null;
 let currentExtractedData = null;  // Store current extracted data for learning
 
+// Feature flags
+let isTestMode = false;  // Default to false, will be set explicitly when needed
+
 /**
  * Get current Outlook user context for client extraction
  * @returns {Object|null} User context with name and email, or null if unavailable
@@ -510,7 +513,7 @@ async function extractAndPreview() {
                     sender_name: currentEmailData.from?.displayName || '',
                     subject: currentEmailData.subject || '',
                     body: currentEmailData.body || '',
-                    dry_run: isTestMode,  // If test mode, don't create Zoho records
+                    dry_run: false,  // Default to false, will be set explicitly when in test mode
                     user_context: getUserContext()  // Include current Outlook user context
                 })
             };
@@ -806,11 +809,23 @@ function performLocalExtraction(emailData) {
     console.log('Email subject:', subject);
     console.log('From:', emailData?.from);
     
+    // Define next label pattern for Calendly emails to prevent over-capturing
+    // Includes both Calendly labels and Zoom meeting instructions
+    const NEXT_LABEL = /(Invitee:|Invitee Email:|Text Reminder Number:|Event Date\/Time:|Event Type:|Description:|Location:|Invitee Time Zone:|Questions:|Your confirmation|View event|Pro Tip|Sent from Calendly|One tap mobile|Meeting ID|Passcode|They can also dial in|Find your local number|Join by SIP|Join by H.323|$)/i;
+
     // For Ashley Ethridge recruitment email, look for Invitee pattern
-    // Check for "Invitee:" pattern first
-    const inviteeMatch = body.match(/Invitee:\s*([^\n]+)/i);
-    if (inviteeMatch) {
-        extracted.candidateName = inviteeMatch[1].trim();
+    // Check for "Invitee:" pattern first with look-ahead to next label
+    const inviteeRegex = new RegExp(`Invitee:\\s*([\\s\\S]*?)(?=\\s*${NEXT_LABEL.source})`, 'i');
+    const inviteeMatch = body.match(inviteeRegex);
+    if (inviteeMatch && inviteeMatch[1]) {
+        // Clean up the extracted name - remove any trailing Calendly labels
+        let candidateName = inviteeMatch[1].trim();
+        // Remove any text after the next label indicator
+        const nextLabelIndex = candidateName.search(/Invitee Email:|Text Reminder Number:|Event Date\/Time:|Event Type:|Description:|Location:|Invitee Time Zone:|Questions:/i);
+        if (nextLabelIndex > 0) {
+            candidateName = candidateName.substring(0, nextLabelIndex).trim();
+        }
+        extracted.candidateName = candidateName;
     } else {
         // Extract candidate name (common patterns)
         const namePatterns = [
@@ -827,9 +842,17 @@ function performLocalExtraction(emailData) {
     }
     
     // Extract job title - check for "Event Type:" pattern (from recruiting emails)
-    const eventTypeMatch = body.match(/Event Type:\s*([^\n]+)/i);
-    if (eventTypeMatch) {
-        extracted.jobTitle = eventTypeMatch[1].trim();
+    const eventTypeRegex = new RegExp(`Event Type:\\s*([\\s\\S]*?)(?=\\s*${NEXT_LABEL.source})`, 'i');
+    const eventTypeMatch = body.match(eventTypeRegex);
+    if (eventTypeMatch && eventTypeMatch[1]) {
+        // Clean up the extracted job title
+        let jobTitle = eventTypeMatch[1].trim();
+        // Remove any text after the next label indicator
+        const nextLabelIndex = jobTitle.search(/Invitee:|Invitee Email:|Text Reminder Number:|Event Date\/Time:|Description:|Location:|Invitee Time Zone:|Questions:/i);
+        if (nextLabelIndex > 0) {
+            jobTitle = jobTitle.substring(0, nextLabelIndex).trim();
+        }
+        extracted.jobTitle = jobTitle;
     } else {
         // Standard patterns
         const jobPatterns = [
@@ -855,11 +878,27 @@ function performLocalExtraction(emailData) {
         }
     }
     
-    // Standard location patterns
+    // Look for explicit Location field in Calendly emails
+    if (!extracted.location) {
+        const locationRegex = new RegExp(`Location:\\s*([\\s\\S]*?)(?=\\s*${NEXT_LABEL.source})`, 'i');
+        const calendlyLocation = body.match(locationRegex);
+        if (calendlyLocation && calendlyLocation[1]) {
+            // Clean up Zoom URL and meeting info
+            let location = calendlyLocation[1].trim();
+            // Remove everything after the Zoom URL if present
+            const zoomUrlMatch = location.match(/(https:\/\/[^\s]+\.zoom\.us\/[^\s]+)/i);
+            if (zoomUrlMatch) {
+                location = zoomUrlMatch[1];
+            }
+            extracted.location = location;
+        }
+    }
+
+    // Standard location patterns (avoid email signatures)
     if (!extracted.location) {
         const locationPatterns = [
-            /(?:location|based in|located in|area|office)\s*:?\s*([^,\n.]+)/i,
-            /in\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:area|office|location)/i
+            /(?:based in|located in)\s*:?\s*([^,\n.]+)/i,
+            /in\s+(?:the\s+)?([A-Z][a-z]+(?:\s+[A-Z][a-z]+)?)\s+(?:area|location)/i
         ];
         for (const pattern of locationPatterns) {
             const match = body.match(pattern);
@@ -1289,6 +1328,37 @@ function setValueWithConfidence(fieldId, value, extractedData, confidenceScore =
         let safeValue = '';
         if (typeof value === 'string') {
             safeValue = value.trim();
+
+            // Prevent truncation - limit field values to reasonable lengths
+            const maxLengths = {
+                'contactFirstName': 50,
+                'contactLastName': 50,
+                'candidateEmail': 100,
+                'candidatePhone': 30,
+                'contactCity': 50,
+                'contactState': 30,
+                'firmName': 100,
+                'companyPhone': 30,
+                'companyWebsite': 200,
+                'jobTitle': 100,
+                'location': 100,
+                'dealName': 200,
+                'descriptionOfReqs': 500,
+                'notes': 500
+            };
+
+            const maxLength = maxLengths[actualFieldId];
+            if (maxLength && safeValue.length > maxLength) {
+                console.warn(`⚠️ Truncating ${actualFieldId} from ${safeValue.length} to ${maxLength} chars`);
+                safeValue = safeValue.substring(0, maxLength);
+            }
+
+            // Special handling for email content that might be wrongly placed
+            if (safeValue.includes('\n') && !['descriptionOfReqs', 'notes'].includes(actualFieldId)) {
+                console.warn(`⚠️ Multi-line content detected in ${actualFieldId}, taking first line only`);
+                safeValue = safeValue.split('\n')[0].trim();
+            }
+
         } else if (value !== null && value !== undefined) {
             console.warn(`WARNING: Non-string value for ${fieldId}:`, typeof value, value);
             // If it's an object, don't try to convert it - just use empty string
@@ -1660,7 +1730,10 @@ function showPreviewForm() {
 /**
  * Handle Send to Zoho button click
  */
-async function handleSendToZoho(isTestMode = false) {
+async function handleSendToZoho(overrideTestMode = false) {
+    // Use the override if provided, otherwise use the global isTestMode flag
+    const effectiveTestMode = typeof overrideTestMode === 'boolean' ? overrideTestMode : isTestMode;
+
     try {
         // Validate required fields
         if (!validateForm()) {
@@ -1744,12 +1817,12 @@ async function handleSendToZoho(isTestMode = false) {
                 // Include current Outlook user context for client extraction
                 user_context: getUserContext(),
                 // Test mode flag
-                dry_run: isTestMode
+                dry_run: effectiveTestMode
             })
         });
         
         await updateProgress(4, 'Checking for duplicates...');
-        await updateProgress(5, isTestMode ? 'Running test extraction...' : 'Creating Zoho records...');
+        await updateProgress(5, effectiveTestMode ? 'Running test extraction...' : 'Creating Zoho records...');
         
         if (!response.ok) {
             const error = await response.json().catch(() => ({}));
@@ -1788,7 +1861,7 @@ async function handleSendToZoho(isTestMode = false) {
         // Check if this was a duplicate
         if (result.status === 'duplicate' || result.status === 'duplicate_blocked') {
             showDuplicate(result);
-        } else if (isTestMode) {
+        } else if (effectiveTestMode) {
             // Show test mode success
             showTestSuccess(result);
         } else {

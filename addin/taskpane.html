@@ -15,47 +15,60 @@
     <!-- Bootstrap removed due to Outlook CSP restrictions - using inline styles instead -->
     
     <style>
+        * {
+            box-sizing: border-box;
+        }
+
         body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
             padding: 0;
             margin: 0;
             height: 100vh;
             display: flex;
             flex-direction: column;
+            background: #f7f9fc;
         }
-        
+
         .header {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
             color: white;
-            padding: 15px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+            padding: 20px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08);
         }
-        
+
         .header h4 {
             margin: 0;
-            font-size: 18px;
+            font-size: 20px;
             font-weight: 600;
+            letter-spacing: -0.5px;
         }
-        
+
         .header .subtitle {
-            font-size: 12px;
-            opacity: 0.9;
-            margin-top: 5px;
+            font-size: 13px;
+            opacity: 0.95;
+            margin-top: 6px;
+            font-weight: 400;
         }
         
         .content {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
-            background: #f8f9fa;
+            padding: 24px;
+            background: #f7f9fc;
         }
         
         .preview-section {
             background: white;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 15px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-radius: 12px;
+            padding: 20px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.08);
+            border: 1px solid rgba(0,0,0,0.06);
+            transition: box-shadow 0.2s ease;
+        }
+
+        .preview-section:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
         }
         
         .section-title {
@@ -73,55 +86,69 @@
         }
         
         .form-label {
-            font-size: 12px;
-            color: #6c757d;
-            margin-bottom: 4px;
-            font-weight: 500;
-        }
-        
-        .form-control, .form-select {
             font-size: 13px;
-            padding: 6px 10px;
+            color: #475569;
+            margin-bottom: 6px;
+            font-weight: 500;
+            letter-spacing: 0.01em;
+        }
+
+        .form-control, .form-select {
+            font-size: 14px;
+            padding: 10px 12px;
+            border: 1px solid #e2e8f0;
+            border-radius: 8px;
+            background: white;
+            transition: all 0.2s ease;
+            width: 100%;
+            outline: none;
+        }
+
+        .form-control:hover, .form-select:hover {
+            border-color: #cbd5e1;
         }
         
-        .form-control:focus {
-            border-color: #667eea;
-            box-shadow: 0 0 0 0.2rem rgba(102, 126, 234, 0.25);
+        .form-control:focus, .form-select:focus {
+            border-color: #2563eb;
+            box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.1);
         }
         
         .alert-info {
-            font-size: 12px;
-            padding: 10px;
-            margin-bottom: 15px;
-            background: #e8f4fd;
-            border: 1px solid #bee5eb;
-            border-radius: 6px;
+            font-size: 13px;
+            padding: 14px 16px;
+            margin-bottom: 20px;
+            background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+            border: 1px solid #bfdbfe;
+            border-radius: 8px;
+            line-height: 1.5;
         }
         
         .extracted-indicator {
             display: inline-block;
-            background: #28a745;
+            background: linear-gradient(135deg, #10b981 0%, #059669 100%);
             color: white;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 3px;
-            margin-left: 5px;
-            margin-top: 2px;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+            margin-top: 4px;
             font-weight: 500;
             transition: all 0.2s ease;
+            letter-spacing: 0.02em;
         }
 
         .edited-indicator {
             display: inline-block;
-            background: #ffc107;
-            color: #212529;
-            font-size: 10px;
-            padding: 2px 6px;
-            border-radius: 3px;
-            margin-left: 5px;
-            margin-top: 2px;
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+            font-size: 11px;
+            padding: 3px 8px;
+            border-radius: 4px;
+            margin-left: 8px;
+            margin-top: 4px;
             font-weight: 500;
             transition: all 0.2s ease;
+            letter-spacing: 0.02em;
         }
 
         /* High confidence - Green */
@@ -166,27 +193,59 @@
         }
         
         .footer {
-            padding: 15px;
+            padding: 20px;
             background: white;
-            border-top: 1px solid #dee2e6;
+            border-top: 1px solid #e2e8f0;
             display: flex;
-            gap: 10px;
+            gap: 12px;
+            box-shadow: 0 -4px 12px rgba(0,0,0,0.04);
         }
-        
+
         .btn {
             font-size: 14px;
-            padding: 8px 16px;
-            border-radius: 6px;
+            padding: 10px 20px;
+            border-radius: 8px;
             font-weight: 500;
+            border: none;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 100px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 8px;
+            letter-spacing: 0.01em;
         }
         
         .btn-primary {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            border: none;
+            background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
+            color: white;
+            box-shadow: 0 2px 4px rgba(37, 99, 235, 0.2);
         }
-        
+
         .btn-primary:hover {
-            background: linear-gradient(135deg, #5a67d8 0%, #6b42a0 100%);
+            background: linear-gradient(135deg, #1d4ed8 0%, #6d28d9 100%);
+            transform: translateY(-1px);
+            box-shadow: 0 4px 8px rgba(37, 99, 235, 0.3);
+        }
+
+        .btn-secondary {
+            background: #e2e8f0;
+            color: #475569;
+        }
+
+        .btn-secondary:hover {
+            background: #cbd5e1;
+        }
+
+        .btn-warning {
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+            color: white;
+        }
+
+        .btn-warning:hover {
+            background: linear-gradient(135deg, #d97706 0%, #b45309 100%);
+            transform: translateY(-1px);
         }
 
         .btn-outline-success {
@@ -264,10 +323,15 @@
         }
         
         .spinner-border {
-            width: 16px;
-            height: 16px;
-            border-width: 2px;
+            width: 20px;
+            height: 20px;
+            border-width: 3px;
             margin-right: 10px;
+            border: 3px solid #e2e8f0;
+            border-top-color: #2563eb;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            display: inline-block;
         }
         
         .error-message {
@@ -361,25 +425,31 @@
         /* Collapsible Section Styles */
         .collapsible-section {
             background: white;
-            border-radius: 8px;
-            margin-bottom: 15px;
-            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+            border-radius: 12px;
+            margin-bottom: 20px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.08);
+            border: 1px solid rgba(0,0,0,0.06);
             overflow: hidden;
+            transition: box-shadow 0.2s ease;
+        }
+
+        .collapsible-section:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.08), 0 2px 4px rgba(0,0,0,0.04);
         }
 
         .collapsible-header {
-            padding: 15px;
+            padding: 16px 20px;
             cursor: pointer;
             display: flex;
             align-items: center;
             justify-content: space-between;
-            background: #f8f9fa;
-            border-bottom: 1px solid #dee2e6;
-            transition: background-color 0.2s ease;
+            background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+            border-bottom: 1px solid #e2e8f0;
+            transition: all 0.2s ease;
         }
 
         .collapsible-header:hover {
-            background: #e9ecef;
+            background: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 100%);
         }
 
         .collapsible-header .section-title-content {
@@ -816,13 +886,17 @@
     
     <div class="content" id="mainContent">
         <!-- Initial loading state -->
-        <div id="loadingState" class="text-center py-5">
-            <div class="spinner-border text-primary mb-3" role="status"></div>
-            <p class="loading-text">Initializing...</p>
-            <button onclick="testInitialization()" style="margin-top: 10px; padding: 5px 10px;">Test Initialization</button>
-            <button onclick="testFieldPopulation()" style="margin-top: 10px; padding: 5px 10px; margin-left: 5px;">Test Field Population</button>
-            <button onclick="testExpressSendBanner()" style="margin-top: 10px; padding: 5px 10px; margin-left: 5px;">Test Express Send</button>
+        <div id="loadingState" style="display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 20px;">
+            <div style="width: 56px; height: 56px; border: 4px solid #e2e8f0; border-top-color: #2563eb; border-radius: 50%; animation: spin 1s linear infinite;"></div>
+            <h3 style="margin-top: 24px; margin-bottom: 12px; color: #1e293b; font-size: 18px; font-weight: 600;">AI is analyzing your email</h3>
+            <p style="color: #64748b; font-size: 14px; margin: 0; text-align: center; max-width: 280px; line-height: 1.5;">This typically takes 15-30 seconds. We're extracting contact information, company details, and deal requirements.</p>
         </div>
+
+        <style>
+            @keyframes spin {
+                to { transform: rotate(360deg); }
+            }
+        </style>
 
         <!-- Express Send Banner (shown when extraction confidence is high) -->
         <div id="expressSendBanner" class="express-send-banner">
@@ -856,18 +930,18 @@
                         Describe corrections in natural language and click Apply
                     </small>
                 </div>
-                <div class="d-flex gap-2">
-                    <button type="button" class="btn btn-sm btn-outline-primary" id="btnApplyCorrections">
-                        <span class="icon">🤖</span> Apply Corrections
+                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-sm" style="background: #eff6ff; color: #2563eb; padding: 8px 14px; font-size: 13px;" id="btnApplyCorrections">
+                        🤖 Apply Corrections
                     </button>
-                    <button type="button" class="btn btn-sm btn-outline-secondary" id="btnSuggestFixes">
-                        <span class="icon">💡</span> Suggest Common Fixes
+                    <button type="button" class="btn btn-sm" style="background: #f3f4f6; color: #6b7280; padding: 8px 14px; font-size: 13px;" id="btnSuggestFixes">
+                        💡 Suggest Fixes
                     </button>
-                    <button type="button" class="btn btn-sm btn-outline-info" id="btnWebSearchClient">
-                        <span class="icon">🔍</span> Web Search Client
+                    <button type="button" class="btn btn-sm" style="background: #f0f9ff; color: #0284c7; padding: 8px 14px; font-size: 13px;" id="btnWebSearchClient">
+                        🔍 Web Search
                     </button>
-                    <button type="button" class="btn btn-sm btn-outline-success" id="btnApolloEnrich" style="display: none;">
-                        <span class="icon">🚀</span> Enrich
+                    <button type="button" class="btn btn-sm" style="background: #f0fdf4; color: #16a34a; padding: 8px 14px; font-size: 13px; display: none;" id="btnApolloEnrich">
+                        🚀 Enrich
                     </button>
                 </div>
                 <!-- Quick fix suggestions -->
@@ -883,37 +957,37 @@
                     <span class="icon">👤</span>
                     Contact Information
                 </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
+                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                    <div style="flex: 1;">
                         <label class="form-label">First Name *</label>
                         <input type="text" class="form-control" id="contactFirstName" required>
                         <span id="contactFirstNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div style="flex: 1;">
                         <label class="form-label">Last Name *</label>
                         <input type="text" class="form-control" id="contactLastName" required>
                         <span id="contactLastNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
+                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                    <div style="flex: 1;">
                         <label class="form-label">Email</label>
                         <input type="email" class="form-control" id="candidateEmail">
                         <span id="candidateEmailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div style="flex: 1;">
                         <label class="form-label">Phone</label>
                         <input type="tel" class="form-control" id="candidatePhone">
                         <span id="candidatePhoneIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
+                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                    <div style="flex: 1;">
                         <label class="form-label">City</label>
                         <input type="text" class="form-control" id="contactCity">
                         <span id="contactCityIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div style="flex: 1;">
                         <label class="form-label">State</label>
                         <input type="text" class="form-control" id="contactState">
                         <span id="contactStateIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
@@ -927,25 +1001,25 @@
                     <span class="icon">🏢</span>
                     Company Information
                 </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
+                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                    <div style="flex: 1;">
                         <label class="form-label">Company Name *</label>
                         <input type="text" class="form-control" id="firmName" required>
                         <span id="firmNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div style="flex: 1;">
                         <label class="form-label">Company Phone</label>
                         <input type="tel" class="form-control" id="companyPhone">
                         <span id="companyPhoneIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
+                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                    <div style="flex: 1;">
                         <label class="form-label">Website</label>
                         <input type="url" class="form-control" id="companyWebsite" placeholder="https://...">
                         <span id="companyWebsiteIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div style="flex: 1;">
                         <label class="form-label">Company Source</label>
                         <select class="form-select" id="companySource">
                             <option value="Email Inbound">Email Inbound</option>
@@ -964,45 +1038,43 @@
                     <span class="icon">💼</span>
                     Deal Information
                 </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
+                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                    <div style="flex: 1;">
                         <label class="form-label">Job Title *</label>
                         <input type="text" class="form-control" id="jobTitle" required>
                         <span id="jobTitleIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div style="flex: 1;">
                         <label class="form-label">Location</label>
                         <input type="text" class="form-control" id="location">
                         <span id="locationIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
-                <div class="row">
-                    <div class="col-md-12 mb-3">
-                        <label class="form-label">Deal Name (Auto-generated)</label>
-                        <input type="text" class="form-control" id="dealName" readonly
-                               placeholder="[Job Title] ([Location]) [Company Name]">
-                        <span id="dealNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
-                    </div>
+                <div style="margin-bottom: 16px;">
+                    <label class="form-label">Deal Name (Auto-generated)</label>
+                    <input type="text" class="form-control" id="dealName" readonly
+                           placeholder="[Job Title] ([Location]) [Company Name]"
+                           style="background-color: #f8fafc;">
+                    <span id="dealNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                 </div>
-                <div class="row">
-                    <div class="col-md-6 mb-3">
+                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                    <div style="flex: 1;">
                         <label class="form-label">Pipeline</label>
-                        <input type="text" class="form-control" id="pipeline" value="Sales Pipeline" readonly style="background-color: #f5f5f5;">
+                        <input type="text" class="form-control" id="pipeline" value="Sales Pipeline" readonly style="background-color: #f8fafc;">
                         <span id="pipelineIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div class="col-md-6 mb-3">
+                    <div style="flex: 1;">
                         <label class="form-label">Closing Date</label>
                         <input type="date" class="form-control" id="closingDate">
                         <span id="closingDateIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
-                <div class="row">
-                    <div class="col-md-12 mb-3">
-                        <label class="form-label">Description of Requirements</label>
-                        <textarea class="form-control" id="descriptionOfReqs" rows="3" 
-                                 placeholder="Describe the job requirements, qualifications, and specific needs..."></textarea>
-                        <span id="descriptionOfReqsIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
-                    </div>
+                <div style="margin-bottom: 16px;">
+                    <label class="form-label">Description of Requirements</label>
+                    <textarea class="form-control" id="descriptionOfReqs" rows="3"
+                             placeholder="Describe the job requirements, qualifications, and specific needs..."
+                             style="resize: vertical; min-height: 80px;"></textarea>
+                    <span id="descriptionOfReqsIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                 </div>
             </div>
 
@@ -1016,8 +1088,8 @@
                     <span class="collapse-icon" id="creditSectionIcon">▼</span>
                 </div>
                 <div class="collapsible-content" id="creditSection">
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
+                    <div style="display: flex; gap: 16px; margin-bottom: 16px;">
+                        <div style="flex: 1;">
                             <label class="form-label">Credit Type</label>
                             <select class="form-select" id="whoGetsCredit">
                                 <option value="">None</option>
@@ -1027,7 +1099,7 @@
                             </select>
                             <span id="whoGetsCreditIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                         </div>
-                        <div class="col-md-6 mb-3">
+                        <div style="flex: 1;">
                             <label class="form-label">Credit Detail (Name)</label>
                             <input type="text" class="form-control" id="creditDetail"
                                    placeholder="Person who gets credit">
@@ -1036,13 +1108,11 @@
                             <input type="hidden" id="companyOwner">
                         </div>
                     </div>
-                    <div class="row">
-                        <div class="col-md-12 mb-3">
-                            <label class="form-label">Source Detail</label>
-                            <input type="text" class="form-control" id="sourceDetail"
-                                   placeholder="Referrer name or specific source">
-                            <span id="sourceDetailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
-                        </div>
+                    <div style="margin-bottom: 16px;">
+                        <label class="form-label">Source Detail</label>
+                        <input type="text" class="form-control" id="sourceDetail"
+                               placeholder="Referrer name or specific source">
+                        <span id="sourceDetailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
             </div>
