@@ -312,7 +312,7 @@ async function initializeTaskpane() {
         // Set up event listeners
         document.getElementById('btnSend').addEventListener('click', () => handleSendToZoho(false));
         document.getElementById('btnCancel').addEventListener('click', handleCancel);
-        document.getElementById('btnClose').addEventListener('click', handleClose);
+        // btnClose removed - only Cancel, Test, Send buttons remain
 
         // Test mode button
         const btnTestMode = document.getElementById('btnTestMode');
@@ -1759,9 +1759,10 @@ async function handleSendToZoho(overrideTestMode = false) {
             return;
         }
         
-        // Hide preview form, show progress
+        // Hide preview form, show progress with overlay
         document.getElementById('previewForm').style.display = 'none';
         document.getElementById('progressSection').style.display = 'block';
+        document.getElementById('progressOverlay').style.display = 'block';
         document.getElementById('btnSend').style.display = 'none';
         document.getElementById('btnCancel').style.display = 'none';
         
@@ -2139,7 +2140,7 @@ function showDuplicate(result) {
         }
     }
 
-    document.getElementById('btnClose').style.display = 'block';
+    // btnClose removed
 }
 
 /**
@@ -2194,7 +2195,7 @@ function showSuccess(result) {
     `;
     successMessage.style.display = 'block';
 
-    document.getElementById('btnClose').style.display = 'block';
+    // btnClose removed
 }
 
 /**
@@ -2205,7 +2206,7 @@ function showError(message) {
     if (errorMessage) {
         errorMessage.innerHTML = `<strong>❌ Error:</strong> ${message}`;
         errorMessage.style.display = 'block';
-        document.getElementById('btnClose').style.display = 'block';
+        // btnClose removed
     } else {
         // Fallback to notification
         showNotification(message, 'error');
@@ -2284,10 +2285,14 @@ function handleCancel() {
         successMessage.textContent = '';
     }
 
-    // Clear any progress section
+    // Clear any progress section and overlay
     const progressSection = document.getElementById('progressSection');
     if (progressSection) {
         progressSection.style.display = 'none';
+    }
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'none';
     }
 
     // Reset progress bar if exists
@@ -2316,15 +2321,12 @@ function handleCancel() {
 
     // Reset button states
     const btnSend = document.getElementById('btnSend');
-    const btnClose = document.getElementById('btnClose');
     const btnCancel = document.getElementById('btnCancel');
     if (btnSend) {
         btnSend.style.display = 'block';
         btnSend.disabled = false;
     }
-    if (btnClose) {
-        btnClose.style.display = 'none';
-    }
+    // btnClose removed
     if (btnCancel) {
         btnCancel.style.display = 'block';
     }
@@ -3968,9 +3970,13 @@ function showApolloEnrichmentProgress() {
         }
     }
     
-    // Show the progress element
+    // Show the progress element and overlay
     progressElement.style.display = 'block';
-    
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'block';
+    }
+
     // Start progress animation
     animateApolloProgress();
 }
@@ -3982,6 +3988,10 @@ function hideApolloEnrichmentProgress() {
     const progressElement = document.getElementById('apolloEnrichmentProgress');
     if (progressElement) {
         progressElement.style.display = 'none';
+    }
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'none';
     }
 }
 
@@ -4147,9 +4157,13 @@ function showFirecrawlEnrichmentProgress() {
         }
     }
 
-    // Show the progress element with fade-in animation
+    // Show the progress element with fade-in animation and overlay
     progressElement.style.display = 'block';
     progressElement.classList.add('fade-in');
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'block';
+    }
 
     // Start the streaming indicator animation
     const indicator = progressElement.querySelector('.streaming-indicator');
@@ -4168,6 +4182,10 @@ function hideFirecrawlEnrichmentProgress() {
         setTimeout(() => {
             if (progressElement) {
                 progressElement.style.display = 'none';
+            }
+            const progressOverlay = document.getElementById('progressOverlay');
+            if (progressOverlay) {
+                progressOverlay.style.display = 'none';
             }
         }, 2000);
     }
