@@ -1128,7 +1128,7 @@ function populateForm(data) {
     if (data.pipeline) {
         setValueWithConfidence('pipeline', data.pipeline, data);
     } else {
-        setValue('pipeline', 'Sales'); // Default pipeline
+        setValue('pipeline', 'Sales Pipeline'); // Default pipeline - CRITICAL: Must be exact 'Sales Pipeline' for Zoho
     }
 
     // Use backend closing date if available, otherwise default to today + 60 days
