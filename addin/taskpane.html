@@ -27,13 +27,16 @@
             display: flex;
             flex-direction: column;
             background: #f7f9fc;
+            overflow-x: hidden;
+            min-width: 280px;
         }
 
         .header {
             background: linear-gradient(135deg, #2563eb 0%, #7c3aed 100%);
             color: white;
-            padding: 20px;
+            padding: 12px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+            flex-shrink: 0;
         }
 
         .header h4 {
@@ -53,15 +56,16 @@
         .content {
             flex: 1;
             overflow-y: auto;
-            padding: 24px;
+            overflow-x: hidden;
+            padding: 12px;
             background: #f7f9fc;
         }
         
         .preview-section {
             background: white;
             border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
+            padding: 12px;
+            margin-bottom: 12px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.04), 0 1px 2px rgba(0,0,0,0.08);
             border: 1px solid rgba(0,0,0,0.06);
             transition: box-shadow 0.2s ease;
@@ -193,28 +197,34 @@
         }
         
         .footer {
-            padding: 20px;
+            padding: 10px;
             background: white;
             border-top: 1px solid #e2e8f0;
             display: flex;
-            gap: 12px;
+            gap: 6px;
             box-shadow: 0 -4px 12px rgba(0,0,0,0.04);
+            flex-shrink: 0;
+            flex-wrap: wrap;
+            justify-content: center;
         }
 
         .btn {
-            font-size: 14px;
-            padding: 10px 20px;
+            font-size: 13px;
+            padding: 8px 12px;
             border-radius: 8px;
             font-weight: 500;
             border: none;
             cursor: pointer;
             transition: all 0.2s ease;
-            min-width: 100px;
+            min-width: 75px;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 8px;
+            gap: 6px;
             letter-spacing: 0.01em;
+            flex: 1 1 auto;
+            max-width: 130px;
+            white-space: nowrap;
         }
         
         .btn-primary {
@@ -876,6 +886,44 @@
             background: rgba(255, 255, 255, 0.5);
         }
 
+        /* Responsive layout for narrow task pane */
+        .row {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .col {
+            flex: 1 1 100%;
+            min-width: 0;
+        }
+
+        .col-half {
+            flex: 1 1 48%;
+            min-width: 0;
+        }
+
+        @media (max-width: 350px) {
+            .col-half {
+                flex: 1 1 100%;
+            }
+        }
+
+        /* Ensure dropdowns don't overflow */
+        .form-select {
+            max-width: 100%;
+            text-overflow: ellipsis;
+        }
+
+        /* Compact spacing for narrow panels */
+        .mb-2 {
+            margin-bottom: 8px;
+        }
+
+        .mb-3 {
+            margin-bottom: 12px;
+        }
+
     </style>
 </head>
 <body>
@@ -957,37 +1005,37 @@
                     <span class="icon">👤</span>
                     Contact Information
                 </div>
-                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                    <div style="flex: 1;">
+                <div class="row mb-3">
+                    <div class="col-half">
                         <label class="form-label">First Name *</label>
                         <input type="text" class="form-control" id="contactFirstName" required>
                         <span id="contactFirstNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div style="flex: 1;">
+                    <div class="col-half">
                         <label class="form-label">Last Name *</label>
                         <input type="text" class="form-control" id="contactLastName" required>
                         <span id="contactLastNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
-                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                    <div style="flex: 1;">
+                <div class="row mb-3">
+                    <div class="col-half">
                         <label class="form-label">Email</label>
                         <input type="email" class="form-control" id="candidateEmail">
                         <span id="candidateEmailIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div style="flex: 1;">
+                    <div class="col-half">
                         <label class="form-label">Phone</label>
                         <input type="tel" class="form-control" id="candidatePhone">
                         <span id="candidatePhoneIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
                 </div>
-                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                    <div style="flex: 1;">
+                <div class="row mb-3">
+                    <div class="col-half">
                         <label class="form-label">City</label>
                         <input type="text" class="form-control" id="contactCity">
                         <span id="contactCityIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
                     </div>
-                    <div style="flex: 1;">
+                    <div class="col-half">
                         <label class="form-label">State</label>
                         <input type="text" class="form-control" id="contactState">
                         <span id="contactStateIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
@@ -1001,8 +1049,8 @@
                     <span class="icon">🏢</span>
                     Company Information
                 </div>
-                <div style="display: flex; gap: 16px; margin-bottom: 16px;">
-                    <div style="flex: 1;">
+                <div class="row mb-3">
+                    <div class="col">
                         <label class="form-label">Company Name *</label>
                         <input type="text" class="form-control" id="firmName" required>
                         <span id="firmNameIndicator" class="extracted-indicator" style="display: none;">AI Extracted</span>
