@@ -99,6 +99,40 @@
         .content > *:last-child {
             margin-bottom: 16px;
         }
+
+        /* Override margins for loading state to ensure proper centering */
+        #loadingState {
+            margin: 0 !important;
+        }
+
+        /* Force correct button text - prevent any JavaScript from overriding */
+        #btnCancel::after {
+            content: "Cancel" !important;
+        }
+
+        #btnTestMode::after {
+            content: "Test" !important;
+        }
+
+        #btnSend::after {
+            content: "Send" !important;
+        }
+
+        /* Hide any existing button text */
+        #btnCancel, #btnTestMode, #btnSend {
+            font-size: 0 !important;
+            text-indent: -9999px !important;
+        }
+
+        /* Style the pseudo-element text */
+        #btnCancel::after, #btnTestMode::after, #btnSend::after {
+            font-size: 14px !important;
+            text-indent: 0 !important;
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+        }
         
         .preview-section {
             background: white;
