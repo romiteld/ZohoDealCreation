@@ -1128,7 +1128,7 @@ function populateForm(data) {
     if (data.pipeline) {
         setValueWithConfidence('pipeline', data.pipeline, data);
     } else {
-        setValue('pipeline', 'Recruitment'); // Default pipeline
+        setValue('pipeline', 'Sales'); // Default pipeline
     }
 
     // Use backend closing date if available, otherwise default to today + 60 days
@@ -2161,7 +2161,7 @@ function showTestSuccess(result) {
                 ${result.extracted?.company_record?.company_name ? `<li>Company: ${result.extracted.company_record.company_name}</li>` : ''}
             </ul>
             <p style="margin-top: 20px;">
-                <em>Click "Send to Zoho CRM" to create actual records, or "Test Extract Only" to test again.</em>
+                <em>Click "Send" to create actual records, or "Test" to test again.</em>
             </p>
         </div>
     `;
@@ -2179,7 +2179,7 @@ function showTestSuccess(result) {
     // Reset button state
     const btnSend = document.getElementById('btnSend');
     btnSend.disabled = false;
-    btnSend.innerHTML = 'Send to Zoho CRM';
+    btnSend.innerHTML = 'Send';
 }
 
 /**

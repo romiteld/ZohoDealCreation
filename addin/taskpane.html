@@ -1044,8 +1044,8 @@
     
     <div class="content" id="mainContent">
         <!-- Initial loading state -->
-        <div id="loadingState" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 40px 20px;">
-            <div style="position: relative; width: 60px; height: 60px; margin-bottom: 24px;">
+        <div id="loadingState" style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 400px; padding: 40px 20px; text-align: center;">
+            <div style="position: relative; width: 60px; height: 60px; margin: 0 auto 24px auto;">
                 <div style="position: absolute; width: 100%; height: 100%; border: 3px solid rgba(102, 126, 234, 0.1); border-radius: 50%;"></div>
                 <div style="position: absolute; width: 100%; height: 100%; border: 3px solid transparent; border-top-color: #667eea; border-radius: 50%; animation: spin 1s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite;"></div>
                 <div style="position: absolute; width: 80%; height: 80%; top: 10%; left: 10%; border: 3px solid transparent; border-top-color: #764ba2; border-radius: 50%; animation: spin 1.5s cubic-bezier(0.68, -0.55, 0.265, 1.55) infinite reverse;"></div>
@@ -1240,7 +1240,7 @@
                 <div class="form-grid">
                     <div class="form-field">
                         <label class="form-label">Pipeline</label>
-                        <input type="text" class="form-control" id="pipeline" value="Sales Pipeline" readonly style="background-color: #f8fafc;">
+                        <input type="text" class="form-control" id="pipeline" value="Sales" readonly style="background-color: #f8fafc;">
                         <span id="pipelineIndicator" class="extracted-indicator" style="display: none;">AI</span>
                     </div>
                     <div class="form-field">
@@ -1408,16 +1408,12 @@
     </div>
     
     <div class="footer" id="footer" style="display: none;">
-        <button type="button" class="btn btn-secondary" id="btnCancel">Cancel</button>
-        <button type="button" class="btn btn-warning" id="btnTestMode" style="margin-right: 10px;">
-            Test Extract Only
-        </button>
-        <button type="button" class="btn btn-primary flex-fill" id="btnSend">
-            Send to Zoho CRM
-        </button>
-        <button type="button" class="btn btn-primary flex-fill" id="btnClose" style="display: none;">
-            Close
-        </button>
+        <div style="display: flex; gap: 8px; width: 100%;">
+            <button type="button" class="btn btn-secondary" id="btnCancel" style="flex: 1; min-width: 80px;">Cancel</button>
+            <button type="button" class="btn btn-warning" id="btnTestMode" style="flex: 1; min-width: 80px;">Test</button>
+            <button type="button" class="btn btn-primary" id="btnSend" style="flex: 1; min-width: 80px;">Send</button>
+            <button type="button" class="btn btn-primary" id="btnClose" style="display: none; flex: 1;">Close</button>
+        </div>
     </div>
     
     <!-- Collapsible Section JavaScript -->
