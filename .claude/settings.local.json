@@ -196,7 +196,15 @@
       "Bash(while read name)",
       "Bash(do if [ ! -z \"$name\" ])",
       "Bash(then echo \"  Account: $name\")",
-      "Bash(fi)"
+      "Bash(fi)",
+      "Bash(wsl az --version)",
+      "Bash(wsl az acr login:*)",
+      "Bash(wsl az afd endpoint purge:*)",
+      "Bash(wsl az containerapp show:*)",
+      "Bash(wsl az postgres flexible-server show:*)",
+      "Bash(wsl az redis show:*)",
+      "Bash(docker:*)",
+      "Bash(wsl az account show:*)"
     ],
     "deny": [],
     "ask": [],
