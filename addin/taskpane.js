@@ -2036,7 +2036,12 @@ async function handleSendToZoho(overrideTestMode = false) {
         // Hide preview form, show progress with overlay
         document.getElementById('previewForm').style.display = 'none';
         document.getElementById('progressSection').style.display = 'block';
-        document.getElementById('progressOverlay').style.display = 'block';
+        const overlay = document.getElementById('progressOverlay');
+        if (overlay) {
+            overlay.style.display = 'block';
+            overlay.style.visibility = 'visible';
+            overlay.style.pointerEvents = 'auto';
+        }
         // Explicitly show progress-container when starting processing
         const progressContainer = document.querySelector('.progress-container');
         if (progressContainer) {
@@ -2494,7 +2499,7 @@ function showTestSuccess(result) {
     successMessage.innerHTML = message;
     successMessage.style.display = 'block';
 
-    // Hide progress section and overlay
+    // Hide progress section and overlay - MUST happen before showing success message
     const progressSection = document.getElementById('progressSection');
     if (progressSection) {
         progressSection.style.display = 'none';
@@ -2502,6 +2507,9 @@ function showTestSuccess(result) {
     const progressOverlay = document.getElementById('progressOverlay');
     if (progressOverlay) {
         progressOverlay.style.display = 'none';
+        // Force immediate removal from DOM flow
+        progressOverlay.style.visibility = 'hidden';
+        progressOverlay.style.pointerEvents = 'none';
     }
 
     // Also explicitly hide the progress-container
@@ -2513,6 +2521,8 @@ function showTestSuccess(result) {
     // CRITICAL: Ensure form is visible BEFORE populating it
     if (previewForm) {
         previewForm.style.display = 'block';  // Show form first
+        // Force immediate reflow to ensure visibility
+        previewForm.offsetHeight; // Trigger reflow
     }
 
     // Populate form using the same normalization as live extraction

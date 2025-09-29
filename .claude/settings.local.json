@@ -223,7 +223,8 @@
       "Bash(wsl az containerapp ingress traffic set:*)",
       "Bash(do echo -n \"$file: \")",
       "Read(//d/Development/Web/wealth/frontend/src/components/**)",
-      "Read(//d/Development/Web/wealth/frontend/**)"
+      "Read(//d/Development/Web/wealth/frontend/**)",
+      "Bash(wsl az containerapp logs show:*)"
     ],
     "deny": [],
     "ask": [],
