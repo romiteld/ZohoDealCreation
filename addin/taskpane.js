@@ -2677,7 +2677,7 @@ async function applyNaturalLanguageCorrections() {
     } finally {
         // Restore button
         const btn = document.getElementById('btnApplyCorrections');
-        btn.innerHTML = '<span class="icon">🤖</span> Apply Corrections';
+        btn.innerHTML = 'Apply Corrections';
         btn.disabled = false;
     }
 }
