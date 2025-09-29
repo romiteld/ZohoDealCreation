@@ -6,10 +6,56 @@ Provides the interface expected by langgraph_manager.py
 import os
 import json
 import logging
+import re
 from typing import Dict, Optional, Any
 from app.firecrawl_v2_fire_agent import FirecrawlV2Enterprise
 
 logger = logging.getLogger(__name__)
+
+
+def sanitize_location_field(location: Optional[str]) -> str:
+    """
+    Sanitize location field to remove markdown links, HTML tags, and other junk
+
+    Args:
+        location: Raw location string that may contain markdown/HTML
+
+    Returns:
+        Cleaned location string or empty string if invalid
+    """
+    if not location or not isinstance(location, str):
+        return ""
+
+    # Strip markdown links and HTML tags
+    location = re.sub(r'\[[^\]]*\]\([^)]+\)', '', location)  # strip markdown links
+    location = re.sub(r'</?[^>]+>', '', location)           # strip HTML tags
+    location = re.sub(r'[^\w\s,.-]', ' ', location)          # kill leftover junk
+    location = re.sub(r'\s+', ' ', location)                 # normalize whitespace
+    location = location.strip()
+
+    # If nothing left after sanitization, return empty
+    if not location:
+        return ""
+
+    # Filter out URLs (HTTP/HTTPS prefixes)
+    if location.lower().startswith(('http://', 'https://')):
+        return ""
+
+    # Filter out file paths/extensions
+    file_extensions = ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.jpg', '.png', '.gif']
+    for ext in file_extensions:
+        if ext in location.lower():
+            return ""
+
+    # Filter out overly long values (likely not real locations)
+    if len(location) > 100:
+        return ""
+
+    # Filter out values with suspicious patterns
+    if '://' in location or 'www.' in location:
+        return ""
+
+    return location
 
 
 class FirecrawlV2Agent:
@@ -92,8 +138,8 @@ class FirecrawlV2Agent:
                         "phone": company_data.get("contact", {}).get("phone"),
                         "email": company_data.get("contact", {}).get("email"),
                         "address": company_data.get("contact", {}).get("address"),
-                        "city": company_data.get("contact", {}).get("city") or company_data.get("city"),
-                        "state": company_data.get("contact", {}).get("state") or company_data.get("state"),
+                        "city": sanitize_location_field(company_data.get("contact", {}).get("city") or company_data.get("city")),
+                        "state": sanitize_location_field(company_data.get("contact", {}).get("state") or company_data.get("state")),
                         "linkedin_url": company_data.get("linkedin_url"),
                         "website": company_url,
 
@@ -125,21 +171,26 @@ class FirecrawlV2Agent:
                     # Parse headquarters into discrete city/state fields
                     headquarters = enrichments["company"]["headquarters"]
                     if headquarters:
-                        # Parse "City, State" or "City, State ZIP" format
-                        parts = headquarters.split(',')
-                        if len(parts) >= 2:
-                            enrichments["company"]["city"] = parts[0].strip()
-                            state_parts = parts[1].strip().split()
-                            enrichments["company"]["state"] = state_parts[0] if state_parts else None
-                            logger.info(f"Parsed headquarters '{headquarters}' into city: {enrichments['company']['city']}, state: {enrichments['company']['state']}")
-                        elif len(parts) == 1:
-                            # Single location string - use as city
-                            enrichments["company"]["city"] = parts[0].strip()
-                            logger.info(f"Using single location as city: {enrichments['company']['city']}")
-                    else:
-                        # Fallback to existing city/state if available
-                        enrichments["company"]["city"] = company_data.get("contact", {}).get("city")
-                        enrichments["company"]["state"] = company_data.get("contact", {}).get("state")
+                        # Sanitize headquarters first
+                        headquarters = sanitize_location_field(headquarters)
+                        if headquarters:
+                            # Parse "City, State" or "City, State ZIP" format
+                            parts = headquarters.split(',')
+                            if len(parts) >= 2:
+                                enrichments["company"]["city"] = sanitize_location_field(parts[0].strip())
+                                state_parts = parts[1].strip().split()
+                                enrichments["company"]["state"] = sanitize_location_field(state_parts[0]) if state_parts else None
+                                logger.info(f"Parsed headquarters '{headquarters}' into city: {enrichments['company']['city']}, state: {enrichments['company']['state']}")
+                            elif len(parts) == 1:
+                                # Single location string - use as city
+                                enrichments["company"]["city"] = sanitize_location_field(parts[0].strip())
+                                logger.info(f"Using single location as city: {enrichments['company']['city']}")
+
+                    # If no city/state from headquarters or they're empty after sanitization, keep the original sanitized values
+                    if not enrichments["company"].get("city"):
+                        enrichments["company"]["city"] = sanitize_location_field(company_data.get("contact", {}).get("city"))
+                    if not enrichments["company"].get("state"):
+                        enrichments["company"]["state"] = sanitize_location_field(company_data.get("contact", {}).get("state"))
 
                     # Extract person/contact data if available
                     sender_name = email_data.get("sender_name", "")
@@ -163,9 +214,9 @@ class FirecrawlV2Agent:
                                     "email": person_data.get("email"),
                                     "phone": person_data.get("phone"),
                                     "linkedin_url": person_data.get("linkedin_url"),
-                                    "location": person_data.get("location"),
-                                    "city": person_data.get("city") or company_data.get("contact", {}).get("city") or company_data.get("city"),
-                                    "state": person_data.get("state") or company_data.get("contact", {}).get("state") or company_data.get("state"),
+                                    "location": sanitize_location_field(person_data.get("location")),
+                                    "city": sanitize_location_field(person_data.get("city") or company_data.get("contact", {}).get("city") or company_data.get("city")),
+                                    "state": sanitize_location_field(person_data.get("state") or company_data.get("contact", {}).get("state") or company_data.get("state")),
                                     "bio": person_data.get("bio")
                                 }
                                 logger.info(f"✅ Successfully enriched person data for {sender_name}")

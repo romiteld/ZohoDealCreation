@@ -157,6 +157,36 @@ window.testExpressSendBanner = function() {
 };
 
 // Test function to validate field population with various data types
+// Export validateLocationField for console testing
+window.validateLocationField = validateLocationField;
+
+// Test function for validateLocationField
+window.testLocationSanitization = function() {
+    console.log('=== TEST LOCATION FIELD SANITIZATION ===');
+
+    const testCases = [
+        ['1_Landing Page_Whitepaper_ST_6.29]...', 'Markdown link'],
+        ['[Austin](https://example.com/austin)', 'Markdown link with location'],
+        ['<div>Dallas</div>', 'HTML tags'],
+        ['https://www.example.com/location', 'URL'],
+        ['/assets/images/headquarters.png', 'File path'],
+        ['New York, NY', 'Valid location'],
+        ['San Francisco', 'Valid city'],
+        ['CA', 'Valid state'],
+        ['[1_Landing_Page_Whitepaper_ST_6.29](https://thewellb2c.sharepoint.com/:x:/s/TheWellShared/EV7U0kBWvU9Apcd7D4N8dMsBqmnYHzO8VCDcGzgHvgKi8g?e=G7kcHc)', 'Complex SharePoint markdown']
+    ];
+
+    console.log('Testing validateLocationField with various inputs:');
+    testCases.forEach(([input, description]) => {
+        const result = validateLocationField(input);
+        console.log(`Input: "${input.substring(0, 50)}${input.length > 50 ? '...' : ''}" (${description})`);
+        console.log(`  Result: "${result}"`);
+        console.log(`  ${result === '' ? '✅ Correctly filtered out' : '✅ Allowed: ' + result}`);
+    });
+
+    return 'Test complete. Check console for results.';
+};
+
 window.testFieldPopulation = function() {
     console.log('=== TEST FIELD POPULATION ===');
 
@@ -1108,6 +1138,16 @@ function cleanCompanyWebsite(website) {
 function validateLocationField(location) {
     if (!location || typeof location !== 'string') return '';
 
+    // First, strip markdown links and HTML tags
+    location = location.replace(/\[[^\]]*\]\([^)]+\)/g, '')    // strip markdown links
+                      .replace(/<\/?[^>]+>/g, '')           // strip HTML tags
+                      .replace(/[^\w\s,.-]/g, ' ')          // kill leftover junk
+                      .replace(/\s+/g, ' ')                  // normalize whitespace
+                      .trim();
+
+    // If nothing left after sanitization, return empty
+    if (!location) return '';
+
     // Filter out URLs (HTTP/HTTPS prefixes)
     if (location.toLowerCase().startsWith('http://') ||
         location.toLowerCase().startsWith('https://')) {
@@ -1132,7 +1172,7 @@ function validateLocationField(location) {
         return '';
     }
 
-    return location.trim();
+    return location;
 }
 
 /**
