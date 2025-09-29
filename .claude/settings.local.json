@@ -221,7 +221,9 @@
       "Bash(wsl az maps account show:*)",
       "Bash(wsl az containerapp revision show:*)",
       "Bash(wsl az containerapp ingress traffic set:*)",
-      "Bash(do echo -n \"$file: \")"
+      "Bash(do echo -n \"$file: \")",
+      "Read(//d/Development/Web/wealth/frontend/src/components/**)",
+      "Read(//d/Development/Web/wealth/frontend/**)"
     ],
     "deny": [],
     "ask": [],
