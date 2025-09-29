@@ -319,6 +319,12 @@ async function initializeTaskpane() {
         if (btnTestMode) {
             btnTestMode.addEventListener('click', () => handleSendToZoho(true));
         }
+
+        // Dry Run button - sends with dry_run flag but not test mode
+        const btnDryRun = document.getElementById('btnDryRun');
+        if (btnDryRun) {
+            btnDryRun.addEventListener('click', () => handleDryRunSend());
+        }
         
         // Natural language corrections
         document.getElementById('btnApplyCorrections').addEventListener('click', applyNaturalLanguageCorrections);
@@ -541,7 +547,8 @@ async function extractAndPreview() {
                     // Check if response is actually empty
                     if (!responseText || responseText.trim() === '') {
                         console.error('Empty response from API - using fallback extraction');
-                        extractedData = performLocalExtraction(currentEmailData);
+                        const localExtracted = performLocalExtraction(currentEmailData);
+                        extractedData = normalizeExtractionForForm(localExtracted);
                         populateForm(extractedData);
                         showPreviewForm();
                         return;
@@ -553,7 +560,8 @@ async function extractAndPreview() {
                     console.error('Parse error:', parseError);
                     console.error('Response was:', responseText);
                     // Use fallback extraction
-                    extractedData = performLocalExtraction(currentEmailData);
+                    const localExtracted = performLocalExtraction(currentEmailData);
+                    extractedData = normalizeExtractionForForm(localExtracted);
                     // Still populate the form even if API fails
                     populateForm(extractedData);
                     showPreviewForm();
@@ -582,7 +590,8 @@ async function extractAndPreview() {
                     console.log('Available keys in response:', Object.keys(response));
                     // Fall back to local extraction instead of using malformed response
                     console.log('API response does not contain expected fields, using local extraction');
-                    extractedData = performLocalExtraction(currentEmailData);
+                    const localExtracted = performLocalExtraction(currentEmailData);
+                    extractedData = normalizeExtractionForForm(localExtracted);
                     populateForm(extractedData);
                     showPreviewForm();
                     return;
@@ -593,90 +602,24 @@ async function extractAndPreview() {
                 // Validate extracted data is an object and not a primitive or array
                 if (!extracted || typeof extracted !== 'object' || Array.isArray(extracted)) {
                     console.error('ERROR: Extracted data is not a valid object:', typeof extracted, extracted);
-                    extractedData = performLocalExtraction(currentEmailData);
+                    const localExtracted = performLocalExtraction(currentEmailData);
+                    extractedData = normalizeExtractionForForm(localExtracted);
                     populateForm(extractedData);
                     showPreviewForm();
                     return;
                 }
 
-                // Map the response to our expected format - handle nulls properly and ensure values are strings
-                const getString = (value) => {
-                    if (typeof value === 'string' && value.trim() !== '') {
-                        return value.trim();
-                    }
-                    return '';
-                };
+                // Map the API response into the structure required by the form and learning pipeline
+                extractedData = normalizeExtractionForForm(extracted, response);
 
-                // Check for contact_record structure first (Steve's 3-record structure)
-                const contact = extracted?.contact_record || {};
-                const company = extracted?.company_record || {};
-                const deal = extracted?.deal_record || {};
-
-                // DEBUG: Log the company record structure
-                console.log('DEBUG - Company record:', company);
-                console.log('DEBUG - Company.company_name:', company.company_name);
-                console.log('DEBUG - extracted.company_name:', extracted?.company_name);
-                console.log('DEBUG - extracted.firmName:', extracted?.firmName);
-                console.log('DEBUG - extracted.firm_name:', extracted?.firm_name);
-
-                // Build candidateName from contact_record if available
-                let candidateName = '';
-                if (contact.first_name || contact.last_name) {
-                    candidateName = `${getString(contact.first_name)} ${getString(contact.last_name)}`.trim();
-                } else {
-                    candidateName = getString(extracted?.candidate_name || extracted?.candidateName);
-                }
-
-                // DEBUG: Test each part of the firmName mapping
-                const companyNameFromRecord = company.company_name;
-                const companyNameDirect = extracted?.company_name;
-                const firmNameField = extracted?.firmName;
-                const firmNameUnder = extracted?.firm_name;
-
-                console.log('DEBUG - firmName mapping values:');
-                console.log('  company.company_name:', companyNameFromRecord);
-                console.log('  extracted.company_name:', companyNameDirect);
-                console.log('  extracted.firmName:', firmNameField);
-                console.log('  extracted.firm_name:', firmNameUnder);
-
-                const finalFirmName = getString(companyNameFromRecord || companyNameDirect || firmNameField || firmNameUnder);
-                console.log('DEBUG - Final firmName result:', finalFirmName);
-
-                extractedData = {
-                    candidateName: candidateName,
-                    candidateEmail: getString(contact.email || extracted?.candidate_email || extracted?.candidateEmail || extracted?.email),
-                    candidatePhone: getString(contact.phone || extracted?.candidate_phone || extracted?.candidatePhone || extracted?.phone),
-                    linkedinUrl: getString(extracted?.linkedin_url || extracted?.linkedinUrl),
-                    jobTitle: getString(extracted?.job_title || extracted?.jobTitle),
-                    location: getString(extracted?.location || extracted?.candidateLocation),
-                    // Use structured contact location data first, fallback to parsed location
-                    contactCity: getString(contact.city),
-                    contactState: getString(contact.state),
-                    firmName: getString(company.company_name) || getString(extracted?.company_name) || getString(extracted?.firmName) || getString(extracted?.firm_name) || '', // CACHE_BUST_V2
-                    // Map company fields from structured data (Firecrawl/Apollo enrichment)
-                    companyPhone: getString(company.phone || extracted?.company_phone),
-                    companyWebsite: getString(company.website || extracted?.company_website || extracted?.website),
-                    companyOwner: getString(company.detail || extracted?.credit_person_name || extracted?.referrer_name),
-                    referrerName: getString(extracted?.referrer_name || extracted?.referrerName || currentEmailData?.from?.displayName),
-                    referrerEmail: getString(extracted?.referrer_email || extracted?.referrerEmail || currentEmailData?.from?.emailAddress),
-                    notes: getString(extracted?.notes),
-                    // NEW: Map deal fields from backend structured data
-                    descriptionOfReqs: getString(deal.description_of_reqs || extracted?.description_of_requirements),
-                    pipeline: getString(deal.pipeline) || 'Sales Pipeline',
-                    closingDate: getString(deal.closing_date),
-                    whoGetsCredit: getString(company.who_gets_credit || extracted?.who_gets_credit),
-                    calendlyUrl: getString(extracted?.calendly_url || extracted?.calendlyUrl),
-                    source: getString(deal.source || extracted?.source || extracted?.Source) || 'Email Inbound',
-                    sourceDetail: getString(deal.source_detail || extracted?.source_detail)
-                };
-                
                 console.log('Mapped extractedData:', extractedData);
             } else {
                 // Log the error response
                 const errorText = await extractionResponse.text();
                 console.error('AI extraction failed with status:', extractionResponse.status, errorText);
                 // Fall back to local extraction
-                extractedData = performLocalExtraction(currentEmailData);
+                const localExtracted = performLocalExtraction(currentEmailData);
+                extractedData = normalizeExtractionForForm(localExtracted);
             }
         } catch (error) {
             console.error('AI extraction failed, using local extraction:', error);
@@ -698,7 +641,8 @@ async function extractAndPreview() {
             }
             
             // Fall back to local extraction
-            extractedData = performLocalExtraction(currentEmailData);
+            const localExtracted = performLocalExtraction(currentEmailData);
+            extractedData = normalizeExtractionForForm(localExtracted);
             console.log('Using local extraction due to API error');
         }
         
@@ -709,7 +653,8 @@ async function extractAndPreview() {
         // CRITICAL: Ensure we actually have data before populating
         if (!extractedData || Object.keys(extractedData).length === 0) {
             console.error('No extracted data available!');
-            extractedData = performLocalExtraction(currentEmailData);
+            const localExtracted = performLocalExtraction(currentEmailData);
+            extractedData = normalizeExtractionForForm(localExtracted);
             console.log('Using fallback extraction:', extractedData);
         }
         
@@ -776,7 +721,8 @@ async function extractAndPreview() {
     } catch (error) {
         console.error('Error in extraction:', error);
         // Still show form even if extraction fails
-        extractedData = performLocalExtraction(currentEmailData);
+        const localExtracted = performLocalExtraction(currentEmailData);
+        extractedData = normalizeExtractionForForm(localExtracted);
         populateForm(extractedData);
         showPreviewForm();
     }
@@ -1039,6 +985,201 @@ async function getAttachments(item) {
     }
     
     return attachments;
+}
+
+/**
+ * Validates if a string is a valid US state abbreviation
+ * @param {string} state - The state string to validate
+ * @returns {boolean} True if valid US state abbreviation
+ */
+function isValidUSState(state) {
+    if (!state || typeof state !== 'string') return false;
+
+    const US_STATES = [
+        'AL', 'AK', 'AZ', 'AR', 'CA', 'CO', 'CT', 'DE', 'FL', 'GA',
+        'HI', 'ID', 'IL', 'IN', 'IA', 'KS', 'KY', 'LA', 'ME', 'MD',
+        'MA', 'MI', 'MN', 'MS', 'MO', 'MT', 'NE', 'NV', 'NH', 'NJ',
+        'NM', 'NY', 'NC', 'ND', 'OH', 'OK', 'OR', 'PA', 'RI', 'SC',
+        'SD', 'TN', 'TX', 'UT', 'VT', 'VA', 'WA', 'WV', 'WI', 'WY',
+        'DC' // Include DC
+    ];
+
+    return US_STATES.includes(state.toUpperCase().trim());
+}
+
+/**
+ * Parses headquarters/location string into city and state components
+ * Handles multi-comma addresses and international locations
+ * @param {string} headquarters - The headquarters/location string to parse
+ * @returns {{city: string, state: string}} Parsed city and state
+ */
+function parseHeadquarters(headquarters) {
+    if (!headquarters || typeof headquarters !== 'string') {
+        return { city: '', state: '' };
+    }
+
+    console.log('DEBUG - Parsing headquarters:', headquarters);
+
+    // Split by comma and trim each part
+    const parts = headquarters.split(',').map(s => s.trim()).filter(s => s);
+
+    if (parts.length === 0) {
+        return { city: '', state: '' };
+    }
+
+    // Handle single part (just city name)
+    if (parts.length === 1) {
+        return { city: parts[0], state: '' };
+    }
+
+    // For multi-part addresses, work backwards to find state
+    let city = '';
+    let state = '';
+
+    // Check if last part contains a US state (might have ZIP)
+    const lastPart = parts[parts.length - 1];
+    const lastPartWords = lastPart.split(' ').map(s => s.trim()).filter(s => s);
+
+    // Check if first word of last part is a US state abbreviation
+    if (lastPartWords.length > 0 && isValidUSState(lastPartWords[0])) {
+        state = lastPartWords[0].toUpperCase();
+        // The second-to-last part is likely the city
+        if (parts.length >= 2) {
+            city = parts[parts.length - 2];
+        }
+    } else if (parts.length === 2) {
+        // For 2-part addresses that aren't US (e.g., "Toronto, ON" or "London, UK")
+        // Just use the first part as city, leave state empty to avoid invalid data
+        city = parts[0];
+        // Only set state if it's a valid US state
+        if (isValidUSState(lastPart)) {
+            state = lastPart.toUpperCase();
+        }
+    } else {
+        // For multi-comma addresses (e.g., "Suite 1400, Glendale, CA 91203")
+        // Try to find the state in the last or second-to-last part
+        for (let i = parts.length - 1; i >= Math.max(0, parts.length - 2); i--) {
+            const partWords = parts[i].split(' ').map(s => s.trim()).filter(s => s);
+            if (partWords.length > 0 && isValidUSState(partWords[0])) {
+                state = partWords[0].toUpperCase();
+                // City is the part before the state
+                if (i > 0) {
+                    city = parts[i - 1];
+                }
+                break;
+            }
+        }
+
+        // If no state found, use first non-suite/floor part as city
+        if (!city && parts.length > 0) {
+            for (const part of parts) {
+                // Skip parts that look like suite/floor/building numbers
+                if (!/^(suite|ste|floor|fl|bldg|building|unit|apt|#)\s*\d+/i.test(part)) {
+                    city = part;
+                    break;
+                }
+            }
+            // Fallback to first part if no non-suite part found
+            if (!city) {
+                city = parts[0];
+            }
+        }
+    }
+
+    console.log('DEBUG - Parsed headquarters result - city:', city, 'state:', state);
+    return { city, state };
+}
+
+/**
+ * Normalize extraction payload into the structure populateForm expects.
+ */
+function normalizeExtractionForForm(extracted, fallback = {}) {
+    const merged = extracted || {};
+    const fallbackSource = fallback || {};
+
+    // Combine top-level fields for easier lookup, but prefer explicit extracted values.
+    const topLevel = { ...fallbackSource, ...merged };
+
+    const contact = merged.contact_record || fallbackSource.contact_record || {};
+    const company = merged.company_record || fallbackSource.company_record || {};
+    const deal = merged.deal_record || fallbackSource.deal_record || {};
+
+    const toSafeString = (value) => {
+        if (typeof value === 'string') {
+            const trimmed = value.trim();
+            return trimmed !== '' ? trimmed : '';
+        }
+        return '';
+    };
+
+    // Build candidate full name with structured contact info if available
+    let candidateName = '';
+    if (contact.first_name || contact.last_name) {
+        candidateName = `${toSafeString(contact.first_name)} ${toSafeString(contact.last_name)}`.trim();
+    } else {
+        candidateName = toSafeString(topLevel.candidate_name || topLevel.candidateName);
+    }
+
+    const companyNameFromRecord = company.company_name;
+    const companyNameDirect = topLevel.company_name;
+    const firmNameField = topLevel.firmName;
+    const firmNameUnder = topLevel.firm_name;
+
+    console.log('DEBUG - Company record:', company);
+    console.log('DEBUG - extracted.company_name:', companyNameDirect);
+    console.log('DEBUG - extracted.firmName:', firmNameField);
+    console.log('DEBUG - extracted.firm_name:', firmNameUnder);
+
+    const finalFirmName = toSafeString(
+        companyNameFromRecord ||
+        companyNameDirect ||
+        firmNameField ||
+        firmNameUnder
+    );
+    console.log('DEBUG - Final firmName result:', finalFirmName);
+
+    // Parse headquarters string into city/state components if needed
+    let parsedCity = '';
+    let parsedState = '';
+
+    // Try to parse company headquarters if no contact-level location
+    const headquarters = company.headquarters || topLevel.headquarters || topLevel.company_headquarters;
+    if (headquarters && (!contact.city || !contact.state)) {
+        const parsed = parseHeadquarters(headquarters);
+        parsedCity = parsed.city;
+        parsedState = parsed.state;
+    }
+
+    const normalized = {
+        candidateName,
+        candidateEmail: toSafeString(contact.email || topLevel.candidate_email || topLevel.candidateEmail || topLevel.email),
+        candidatePhone: toSafeString(contact.phone || topLevel.candidate_phone || topLevel.candidatePhone || topLevel.phone),
+        linkedinUrl: toSafeString(topLevel.linkedin_url || topLevel.linkedinUrl),
+        jobTitle: toSafeString(topLevel.job_title || topLevel.jobTitle || deal.job_title),
+        // Include headquarters in location field for legacy fallback support
+        location: toSafeString(topLevel.location || topLevel.candidateLocation || deal.location || headquarters),
+        // Use fallback chain: contact location -> company location -> parsed headquarters
+        contactCity: toSafeString(contact.city || company.city || parsedCity),
+        contactState: toSafeString(contact.state || company.state || parsedState),
+        firmName: finalFirmName,
+        companyPhone: toSafeString(company.phone || topLevel.company_phone),
+        companyWebsite: toSafeString(company.website || topLevel.company_website || topLevel.website),
+        companyOwner: toSafeString(company.detail || topLevel.companyOwner || topLevel.credit_person_name || topLevel.referrer_name),
+        referrerName: toSafeString(topLevel.referrer_name || topLevel.referrerName || currentEmailData?.from?.displayName),
+        referrerEmail: toSafeString(topLevel.referrer_email || topLevel.referrerEmail || currentEmailData?.from?.emailAddress),
+        notes: toSafeString(topLevel.notes),
+        descriptionOfReqs: toSafeString(deal.description_of_reqs || topLevel.description_of_requirements || topLevel.descriptionOfReqs),
+        pipeline: toSafeString(deal.pipeline || topLevel.pipeline) || 'Sales Pipeline',
+        closingDate: toSafeString(deal.closing_date || topLevel.closingDate),
+        whoGetsCredit: toSafeString(company.who_gets_credit || topLevel.who_gets_credit || topLevel.whoGetsCredit),
+        calendlyUrl: toSafeString(topLevel.calendly_url || topLevel.calendlyUrl),
+        source: toSafeString(deal.source || topLevel.source || topLevel.Source) || 'Email Inbound',
+        sourceDetail: toSafeString(deal.source_detail || topLevel.source_detail || topLevel.sourceDetail),
+        dealName: toSafeString(deal.deal_name || topLevel.deal_name || topLevel.dealName)
+    };
+
+    console.log('normalizeExtractionForForm output:', normalized);
+    return normalized;
 }
 
 /**
@@ -1747,6 +1888,168 @@ function showPreviewForm() {
 }
 
 /**
+ * Show progress modal
+ */
+function showProgressModal(title) {
+    // Hide the form
+    document.getElementById('previewForm').style.display = 'none';
+    document.getElementById('footer').style.display = 'none';
+
+    // Show progress section
+    const progressSection = document.getElementById('progressSection');
+    if (progressSection) {
+        progressSection.style.display = 'block';
+        // Update title if needed
+        const titleElement = progressSection.querySelector('h5');
+        if (titleElement && title) {
+            titleElement.textContent = title;
+        }
+    }
+
+    // Reset progress bar
+    const progressBar = document.getElementById('progressBar');
+    if (progressBar) {
+        progressBar.style.width = '0%';
+        progressBar.textContent = '0%';
+    }
+}
+
+/**
+ * Close progress modal
+ */
+function closeProgressModal() {
+    // Hide progress section
+    const progressSection = document.getElementById('progressSection');
+    if (progressSection) {
+        progressSection.style.display = 'none';
+    }
+
+    // Show the form again
+    document.getElementById('previewForm').style.display = 'block';
+    document.getElementById('footer').style.display = 'flex';
+}
+
+/**
+ * Handle Dry Run Send - full send flow but with dry_run flag
+ * This allows testing the complete send flow without creating duplicates
+ */
+async function handleDryRunSend() {
+    try {
+        // Validate form first
+        if (!validateForm()) {
+            return;
+        }
+
+        // Show progress modal
+        showProgressModal('Dry Run Send');
+        await updateProgress(1, 'Preparing dry run...');
+
+        // Get form data
+        const formData = getFormData();
+
+        // Get attachments using the proper content retrieval
+        await updateProgress(2, 'Processing attachments...');
+        const attachmentData = await getAttachmentContent();
+
+        // Send with dry_run flag
+        await updateProgress(3, 'Sending dry run request...');
+
+        const response = await fetch(`${API_BASE_URL}/intake/email`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
+            },
+            body: JSON.stringify({
+                sender_email: 'steve@emailthewell.com',
+                original_sender_email: currentEmailData?.from?.emailAddress || null,
+                sender_name: 'Steve Perry',
+                original_sender_name: currentEmailData?.from?.displayName || null,
+                subject: currentEmailData?.subject || 'Manual Entry',
+                body: currentEmailData?.body || 'Manual data entry - no email body available',
+                attachments: attachmentData,
+                ai_extraction: currentExtractedData || {},
+                user_corrections: {
+                    company_record: {
+                        company_name: formData.firmName || null,
+                        phone: formData.companyPhone || null,
+                        website: formData.companyWebsite || null,
+                        detail: formData.creditDetail || null,
+                        source: formData.companySource || null,
+                        source_detail: formData.sourceDetail || null,
+                        who_gets_credit: formData.whoGetsCredit || null
+                    },
+                    contact_record: {
+                        first_name: formData.contactFirstName || null,
+                        last_name: formData.contactLastName || null,
+                        email: formData.candidateEmail || null,
+                        phone: formData.candidatePhone || null,
+                        city: formData.contactCity || null,
+                        state: formData.contactState || null
+                    },
+                    deal_record: {
+                        source: formData.source || null,
+                        deal_name: formData.dealName || null,
+                        pipeline: formData.pipeline || null,
+                        closing_date: formData.closingDate || null,
+                        description_of_reqs: formData.descriptionOfReqs || null,
+                        source_detail: formData.sourceDetail || null
+                    }
+                },
+                user_context: getUserContext(),
+                dry_run: true  // Always true for dry run
+            })
+        });
+
+        await updateProgress(4, 'Processing response...');
+
+        if (!response.ok) {
+            const error = await response.json().catch(() => ({}));
+            throw new Error(error.detail || `Server error: ${response.status}`);
+        }
+
+        const result = await response.json();
+        await updateProgress(5, 'Dry run complete!');
+
+        // Close progress modal
+        closeProgressModal();
+
+        // Show success message
+        const successMessage = document.getElementById('successMessage');
+        successMessage.innerHTML = `
+            <div class="success-content">
+                <h3>✅ Dry Run Successful!</h3>
+                <p><strong>NO records were created in Zoho CRM</strong></p>
+                <p>The full send flow was tested successfully:</p>
+                <ul>
+                    <li>✓ Form validation passed</li>
+                    <li>✓ Attachments processed</li>
+                    <li>✓ Data structured correctly</li>
+                    <li>✓ Backend accepted the request</li>
+                    <li>✓ Extraction and enrichment completed</li>
+                </ul>
+                <p style="margin-top: 15px;">
+                    <em>You can now safely use "Send" to create the actual records.</em>
+                </p>
+                ${result.correlation_id ? `<p style="font-size: 0.8em; color: #666;">Correlation ID: ${result.correlation_id}</p>` : ''}
+            </div>
+        `;
+        successMessage.style.display = 'block';
+
+        // Keep form visible
+        const previewForm = document.getElementById('previewForm');
+        if (previewForm) {
+            previewForm.style.display = 'block';
+        }
+
+    } catch (error) {
+        console.error('Dry run failed:', error);
+        closeProgressModal();
+        showNotification(`Dry run failed: ${error.message}`, 'error');
+    }
+}
+
+/**
  * Handle Send to Zoho button click
  */
 async function handleSendToZoho(overrideTestMode = false) {
@@ -2210,10 +2513,15 @@ function showTestSuccess(result) {
         progressOverlay.style.display = 'none';
     }
 
-    // Hide form and show both buttons
-    if (previewForm) {
-        previewForm.style.display = 'none';
-    }
+    // Populate form using the same normalization as live extraction
+    const normalizedFormData = normalizeExtractionForForm(extracted, result);
+    populateForm(normalizedFormData);
+
+    // Keep form visible after test - users need to see the extracted data
+    // Don't hide the form after test completion
+    // if (previewForm) {
+    //     previewForm.style.display = 'none';
+    // }
 
     const btnSend = document.getElementById('btnSend');
     const btnTestMode = document.getElementById('btnTestMode');
@@ -3849,6 +4157,21 @@ async function enrichWithFirecrawl(data, researchDomain) {
                         locationField.value = company.headquarters;
                         showFieldEnhanced('companyLocation', 'Firecrawl');
                         console.log('Updated company location:', company.headquarters);
+                    }
+
+                    // Parse headquarters if city/state not provided
+                    if (!company.city || !company.state) {
+                        const parsed = parseHeadquarters(company.headquarters);
+
+                        if (!company.city && parsed.city) {
+                            company.city = parsed.city;
+                            console.log('Parsed city from headquarters:', company.city);
+                        }
+
+                        if (!company.state && parsed.state) {
+                            company.state = parsed.state;
+                            console.log('Parsed state from headquarters:', company.state);
+                        }
                     }
                 }
 
