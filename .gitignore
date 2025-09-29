@@ -74,6 +74,7 @@ test_startup_report.json
 *.old
 temp/
 tmp/
+Screenshot*.png
 
 # Static files (if generated)
 static/
@@ -97,6 +98,7 @@ download_files_with_token.sh
 Thumbs.db
 .DS_Store
 desktop.ini
+*Zone.Identifier
 
 # Python specific
 pip-log.txt

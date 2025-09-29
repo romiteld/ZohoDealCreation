@@ -320,11 +320,6 @@ async function initializeTaskpane() {
             btnTestMode.addEventListener('click', () => handleSendToZoho(true));
         }
 
-        // Dry Run button - sends with dry_run flag but not test mode
-        const btnDryRun = document.getElementById('btnDryRun');
-        if (btnDryRun) {
-            btnDryRun.addEventListener('click', () => handleDryRunSend());
-        }
         
         // Natural language corrections
         document.getElementById('btnApplyCorrections').addEventListener('click', applyNaturalLanguageCorrections);
@@ -1091,6 +1086,61 @@ function parseHeadquarters(headquarters) {
 }
 
 /**
+ * Check if a domain/website belongs to internal company (should not be extracted as candidate data)
+ */
+function isInternalDomain(value) {
+    if (!value) return false;
+    const internalDomains = ['emailthewell.com', 'thewell.com', '@emailthewell.com', '@thewell.com'];
+    const lowerValue = value.toLowerCase();
+    return internalDomains.some(domain => lowerValue.includes(domain));
+}
+
+/**
+ * Clean and validate company website/email fields
+ */
+function cleanCompanyWebsite(website) {
+    if (!website) return '';
+    // Filter out internal domains
+    if (isInternalDomain(website)) return '';
+    // Filter out email addresses (should be websites)
+    if (website.includes('@')) return '';
+    return website;
+}
+
+/**
+ * Validate location field to prevent URLs/files from being populated
+ */
+function validateLocationField(location) {
+    if (!location || typeof location !== 'string') return '';
+
+    // Filter out URLs (HTTP/HTTPS prefixes)
+    if (location.toLowerCase().startsWith('http://') ||
+        location.toLowerCase().startsWith('https://')) {
+        return '';
+    }
+
+    // Filter out file paths/extensions
+    const fileExtensions = ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.jpg', '.png', '.gif'];
+    for (const ext of fileExtensions) {
+        if (location.toLowerCase().includes(ext)) {
+            return '';
+        }
+    }
+
+    // Filter out overly long values (likely not real locations)
+    if (location.length > 100) {
+        return '';
+    }
+
+    // Filter out values with suspicious patterns
+    if (location.includes('://') || location.includes('www.')) {
+        return '';
+    }
+
+    return location.trim();
+}
+
+/**
  * Normalize extraction payload into the structure populateForm expects.
  */
 function normalizeExtractionForForm(extracted, fallback = {}) {
@@ -1161,9 +1211,9 @@ function normalizeExtractionForForm(extracted, fallback = {}) {
         // Use fallback chain: contact location -> company location -> parsed headquarters
         contactCity: toSafeString(contact.city || company.city || parsedCity),
         contactState: toSafeString(contact.state || company.state || parsedState),
-        firmName: finalFirmName,
+        firmName: isInternalDomain(finalFirmName) ? '' : finalFirmName,
         companyPhone: toSafeString(company.phone || topLevel.company_phone),
-        companyWebsite: toSafeString(company.website || topLevel.company_website || topLevel.website),
+        companyWebsite: cleanCompanyWebsite(toSafeString(company.website || topLevel.company_website || topLevel.website)),
         companyOwner: toSafeString(company.detail || topLevel.companyOwner || topLevel.credit_person_name || topLevel.referrer_name),
         referrerName: toSafeString(topLevel.referrer_name || topLevel.referrerName || currentEmailData?.from?.displayName),
         referrerEmail: toSafeString(topLevel.referrer_email || topLevel.referrerEmail || currentEmailData?.from?.emailAddress),
@@ -1235,13 +1285,23 @@ function populateForm(data) {
         state = locationParts[1]?.trim() || '';
     }
 
+    // CRITICAL: Validate location fields to prevent URLs/files from being populated
+    city = validateLocationField(city);
+    state = validateLocationField(state);
+
     setValueWithConfidence('contactCity', city, data);
     setValueWithConfidence('contactState', state, data);
 
     // Company Information - now uses Firecrawl/Apollo enriched data
-    setValueWithConfidence('firmName', data.firmName || data.firm_name || data.company_name || '', data);
+    // Validate firm name to filter out internal domains
+    const firmName = isInternalDomain(data.firmName || data.firm_name || data.company_name || '')
+        ? '' : (data.firmName || data.firm_name || data.company_name || '');
+    setValueWithConfidence('firmName', firmName, data);
     setValueWithConfidence('companyPhone', data.companyPhone || data.company_phone || '', data);
-    setValueWithConfidence('companyWebsite', data.companyWebsite || data.company_website || '', data);
+
+    // Validate and clean company website
+    const website = cleanCompanyWebsite(data.companyWebsite || data.company_website || '');
+    setValueWithConfidence('companyWebsite', website, data);
 
     // Company owner information from structured backend data
     // Map to both fields for compatibility
@@ -1929,125 +1989,7 @@ function closeProgressModal() {
     document.getElementById('footer').style.display = 'flex';
 }
 
-/**
- * Handle Dry Run Send - full send flow but with dry_run flag
- * This allows testing the complete send flow without creating duplicates
- */
-async function handleDryRunSend() {
-    try {
-        // Validate form first
-        if (!validateForm()) {
-            return;
-        }
-
-        // Show progress modal
-        showProgressModal('Dry Run Send');
-        await updateProgress(1, 'Preparing dry run...');
-
-        // Get form data
-        const formData = getFormData();
-
-        // Get attachments using the proper content retrieval
-        await updateProgress(2, 'Processing attachments...');
-        const attachmentData = await getAttachmentContent();
-
-        // Send with dry_run flag
-        await updateProgress(3, 'Sending dry run request...');
-
-        const response = await fetch(`${API_BASE_URL}/intake/email`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                ...(API_KEY ? { 'X-API-Key': API_KEY } : {})
-            },
-            body: JSON.stringify({
-                sender_email: 'steve@emailthewell.com',
-                original_sender_email: currentEmailData?.from?.emailAddress || null,
-                sender_name: 'Steve Perry',
-                original_sender_name: currentEmailData?.from?.displayName || null,
-                subject: currentEmailData?.subject || 'Manual Entry',
-                body: currentEmailData?.body || 'Manual data entry - no email body available',
-                attachments: attachmentData,
-                ai_extraction: currentExtractedData || {},
-                user_corrections: {
-                    company_record: {
-                        company_name: formData.firmName || null,
-                        phone: formData.companyPhone || null,
-                        website: formData.companyWebsite || null,
-                        detail: formData.creditDetail || null,
-                        source: formData.companySource || null,
-                        source_detail: formData.sourceDetail || null,
-                        who_gets_credit: formData.whoGetsCredit || null
-                    },
-                    contact_record: {
-                        first_name: formData.contactFirstName || null,
-                        last_name: formData.contactLastName || null,
-                        email: formData.candidateEmail || null,
-                        phone: formData.candidatePhone || null,
-                        city: formData.contactCity || null,
-                        state: formData.contactState || null
-                    },
-                    deal_record: {
-                        source: formData.source || null,
-                        deal_name: formData.dealName || null,
-                        pipeline: formData.pipeline || null,
-                        closing_date: formData.closingDate || null,
-                        description_of_reqs: formData.descriptionOfReqs || null,
-                        source_detail: formData.sourceDetail || null
-                    }
-                },
-                user_context: getUserContext(),
-                dry_run: true  // Always true for dry run
-            })
-        });
-
-        await updateProgress(4, 'Processing response...');
-
-        if (!response.ok) {
-            const error = await response.json().catch(() => ({}));
-            throw new Error(error.detail || `Server error: ${response.status}`);
-        }
-
-        const result = await response.json();
-        await updateProgress(5, 'Dry run complete!');
-
-        // Close progress modal
-        closeProgressModal();
-
-        // Show success message
-        const successMessage = document.getElementById('successMessage');
-        successMessage.innerHTML = `
-            <div class="success-content">
-                <h3>✅ Dry Run Successful!</h3>
-                <p><strong>NO records were created in Zoho CRM</strong></p>
-                <p>The full send flow was tested successfully:</p>
-                <ul>
-                    <li>✓ Form validation passed</li>
-                    <li>✓ Attachments processed</li>
-                    <li>✓ Data structured correctly</li>
-                    <li>✓ Backend accepted the request</li>
-                    <li>✓ Extraction and enrichment completed</li>
-                </ul>
-                <p style="margin-top: 15px;">
-                    <em>You can now safely use "Send" to create the actual records.</em>
-                </p>
-                ${result.correlation_id ? `<p style="font-size: 0.8em; color: #666;">Correlation ID: ${result.correlation_id}</p>` : ''}
-            </div>
-        `;
-        successMessage.style.display = 'block';
-
-        // Keep form visible
-        const previewForm = document.getElementById('previewForm');
-        if (previewForm) {
-            previewForm.style.display = 'block';
-        }
-
-    } catch (error) {
-        console.error('Dry run failed:', error);
-        closeProgressModal();
-        showNotification(`Dry run failed: ${error.message}`, 'error');
-    }
-}
+// Dry Run functionality removed - using Test button instead which serves the same purpose
 
 /**
  * Handle Send to Zoho button click
@@ -2513,15 +2455,14 @@ function showTestSuccess(result) {
         progressOverlay.style.display = 'none';
     }
 
+    // CRITICAL: Ensure form is visible BEFORE populating it
+    if (previewForm) {
+        previewForm.style.display = 'block';  // Show form first
+    }
+
     // Populate form using the same normalization as live extraction
     const normalizedFormData = normalizeExtractionForForm(extracted, result);
     populateForm(normalizedFormData);
-
-    // Keep form visible after test - users need to see the extracted data
-    // Don't hide the form after test completion
-    // if (previewForm) {
-    //     previewForm.style.display = 'none';
-    // }
 
     const btnSend = document.getElementById('btnSend');
     const btnTestMode = document.getElementById('btnTestMode');

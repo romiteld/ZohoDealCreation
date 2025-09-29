@@ -122,6 +122,25 @@ class FirecrawlV2Agent:
                         "products": []
                     }
 
+                    # Parse headquarters into discrete city/state fields
+                    headquarters = enrichments["company"]["headquarters"]
+                    if headquarters:
+                        # Parse "City, State" or "City, State ZIP" format
+                        parts = headquarters.split(',')
+                        if len(parts) >= 2:
+                            enrichments["company"]["city"] = parts[0].strip()
+                            state_parts = parts[1].strip().split()
+                            enrichments["company"]["state"] = state_parts[0] if state_parts else None
+                            logger.info(f"Parsed headquarters '{headquarters}' into city: {enrichments['company']['city']}, state: {enrichments['company']['state']}")
+                        elif len(parts) == 1:
+                            # Single location string - use as city
+                            enrichments["company"]["city"] = parts[0].strip()
+                            logger.info(f"Using single location as city: {enrichments['company']['city']}")
+                    else:
+                        # Fallback to existing city/state if available
+                        enrichments["company"]["city"] = company_data.get("contact", {}).get("city")
+                        enrichments["company"]["state"] = company_data.get("contact", {}).get("state")
+
                     # Extract person/contact data if available
                     sender_name = email_data.get("sender_name", "")
                     company_name = company_data.get("company_name", "")

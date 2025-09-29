@@ -1353,6 +1353,8 @@ class EmailProcessingWorkflow:
                 'candidate_name': 50,
                 'job_title': 50,
                 'location': 50,
+                'contact_city': 50,
+                'contact_state': 30,
                 'company_guess': 50,
                 'referrer_name': 50,
                 'referrer_email': 100,

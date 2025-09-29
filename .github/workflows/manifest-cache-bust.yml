@@ -84,6 +84,9 @@ jobs:
     outputs:
       new_version: ${{ steps.version.outputs.new_version }}
       old_version: ${{ steps.version.outputs.old_version }}
+      version_committed: ${{ steps.commit_status.outputs.committed }}
+      pr_created: ${{ steps.pr_status.outputs.created }}
+      pr_url: ${{ steps.pr_status.outputs.url }}
     permissions:
       contents: write
     steps:
@@ -140,17 +143,97 @@ jobs:
           sed -i 's/\.html"/\.html?v='$NEW_VERSION'"/g' addin/manifest.xml
           sed -i 's/\.html?v=[^"]*"/\.html?v='$NEW_VERSION'"/g' addin/manifest.xml
 
-      - name: Commit version changes
+      - name: Check if we can push to branch
+        id: check_push
+        run: |
+          # Check if this is a PR or protected branch
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            echo "can_push=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Running in PR context - skipping direct push"
+          else
+            # Try to check if branch is protected
+            BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+            if [[ "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+              echo "can_push=false" >> $GITHUB_OUTPUT
+              echo "⚠️ Protected branch detected - will create PR instead"
+            else
+              echo "can_push=true" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+      - name: Commit version changes (direct push)
+        id: direct_commit
+        if: steps.check_push.outputs.can_push == 'true'
         run: |
           git config --local user.email "action@github.com"
           git config --local user.name "GitHub Action"
           git add addin/manifest.xml
+          if git commit -m "Auto-increment manifest version to ${{ steps.version.outputs.new_version }} [skip ci]"; then
+            git push
+            echo "success=true" >> $GITHUB_OUTPUT
+          else
+            echo "No changes to commit"
+            echo "success=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Create version branch and PR
+        id: create_pr
+        if: steps.check_push.outputs.can_push == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Create a new branch for the version update
+          BRANCH_NAME="ci/manifest-version-${{ steps.version.outputs.new_version }}"
+          git config --local user.email "action@github.com"
+          git config --local user.name "GitHub Action"
+          git checkout -b "$BRANCH_NAME"
+          git add addin/manifest.xml
           git commit -m "Auto-increment manifest version to ${{ steps.version.outputs.new_version }} [skip ci]" || exit 0
-          git push
+          git push origin "$BRANCH_NAME"
+
+          # Create PR using GitHub CLI
+          PR_URL=$(gh pr create \
+            --title "Auto-increment manifest version to ${{ steps.version.outputs.new_version }}" \
+            --body "This PR auto-increments the manifest version from ${{ steps.version.outputs.old_version }} to ${{ steps.version.outputs.new_version }}\n\n⚠️ **Important**: Deployment is blocked until this PR is merged.\n\nTriggered by: ${{ github.event_name }}\nCommit: ${{ github.sha }}" \
+            --base "${GITHUB_REF#refs/heads/}" \
+            --head "$BRANCH_NAME" 2>&1 | grep -o 'https://[^ ]*' || echo "")
+
+          if [[ -n "$PR_URL" ]]; then
+            echo "pr_url=$PR_URL" >> $GITHUB_OUTPUT
+            echo "created=true" >> $GITHUB_OUTPUT
+            echo "✅ PR created: $PR_URL"
+          else
+            echo "created=false" >> $GITHUB_OUTPUT
+            echo "⚠️ PR creation failed or already exists"
+          fi
+
+      - name: Set commit status output
+        id: commit_status
+        run: |
+          if [[ "${{ steps.check_push.outputs.can_push }}" == "true" ]] && [[ "${{ steps.direct_commit.outputs.success }}" == "true" ]]; then
+            echo "committed=true" >> $GITHUB_OUTPUT
+            echo "✅ Version committed to current branch"
+          else
+            echo "committed=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Version not committed to current branch - deployment will be skipped"
+          fi
+
+      - name: Set PR status output
+        id: pr_status
+        run: |
+          if [[ "${{ steps.check_push.outputs.can_push }}" == "false" ]]; then
+            echo "created=${{ steps.create_pr.outputs.created }}" >> $GITHUB_OUTPUT
+            echo "url=${{ steps.create_pr.outputs.pr_url }}" >> $GITHUB_OUTPUT
+          else
+            echo "created=false" >> $GITHUB_OUTPUT
+            echo "url=" >> $GITHUB_OUTPUT
+          fi
 
   clear-cache:
     needs: [detect-changes, increment-version]
-    if: needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true'
+    if: |
+      (needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true') &&
+      needs.increment-version.outputs.version_committed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Clear Redis cache
@@ -175,9 +258,40 @@ jobs:
             --retry 3 \
             --fail-with-body || echo "Cache warmup failed, continuing..."
 
+  check-credentials:
+    needs: [detect-changes, increment-version]
+    if: |
+      (needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true') &&
+      needs.increment-version.outputs.version_committed == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      has_azure_creds: ${{ steps.check.outputs.has_creds }}
+    steps:
+      - name: Check Azure credentials
+        id: check
+        run: |
+          if [[ -n "${{ env.AZURE_CLIENT_ID }}" && \
+                -n "${{ env.AZURE_CLIENT_SECRET }}" && \
+                -n "${{ env.AZURE_TENANT_ID }}" && \
+                -n "${{ env.AZURE_SUBSCRIPTION_ID }}" ]]; then
+            echo "has_creds=true" >> $GITHUB_OUTPUT
+            echo "✅ Azure credentials are configured"
+          else
+            echo "has_creds=false" >> $GITHUB_OUTPUT
+            echo "⚠️ Azure credentials are missing. Deployment will be skipped."
+            echo "To enable deployment, set the following secrets in your repository:"
+            echo "  - AZURE_CLIENT_ID"
+            echo "  - AZURE_CLIENT_SECRET"
+            echo "  - AZURE_TENANT_ID"
+            echo "  - AZURE_SUBSCRIPTION_ID"
+          fi
+
   build-and-deploy:
-    needs: [detect-changes, increment-version, clear-cache]
-    if: needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true'
+    needs: [detect-changes, increment-version, clear-cache, check-credentials]
+    if: |
+      (needs.detect-changes.outputs.manifest_changed == 'true' || needs.detect-changes.outputs.addin_files_changed == 'true') &&
+      needs.check-credentials.outputs.has_azure_creds == 'true' &&
+      needs.increment-version.outputs.version_committed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -194,7 +308,6 @@ jobs:
 
       - name: Log in to Azure
         uses: azure/login@v1
-        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
         with:
           creds: |
             {
@@ -205,7 +318,6 @@ jobs:
             }
 
       - name: Log in to Azure Container Registry
-        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
         run: |
           az acr login --name wellintakeacr0903
 
@@ -258,7 +370,10 @@ jobs:
           done
 
   post-deployment:
-    needs: [increment-version, build-and-deploy]
+    needs: [increment-version, build-and-deploy, check-credentials]
+    if: |
+      needs.check-credentials.outputs.has_azure_creds == 'true' &&
+      needs.increment-version.outputs.version_committed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Wait for service to be ready
@@ -333,12 +448,38 @@ jobs:
           echo "✅ All smoke tests passed"
 
   notify:
-    needs: [increment-version, build-and-deploy, post-deployment]
+    needs: [increment-version, build-and-deploy, post-deployment, check-credentials]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Notify deployment result
         run: |
+          # Check if version commit was skipped due to protected branch
+          if [[ "${{ needs.increment-version.outputs.version_committed }}" != "true" ]]; then
+            echo "⚠️ Deployment skipped: Version changes not committed to current branch"
+            echo ""
+            if [[ "${{ needs.increment-version.outputs.pr_created }}" == "true" ]]; then
+              echo "📝 A pull request has been created with the version changes:"
+              echo "   ${{ needs.increment-version.outputs.pr_url }}"
+              echo ""
+              echo "➡️ Next steps:"
+              echo "   1. Review and merge the PR"
+              echo "   2. The deployment will run automatically after merge"
+            else
+              echo "❌ Failed to create PR for version changes"
+              echo "   Please manually update the manifest version and retry"
+            fi
+            exit 0
+          fi
+
+          # Check if deployment was skipped due to missing credentials
+          if [[ "${{ needs.check-credentials.outputs.has_azure_creds }}" != "true" ]]; then
+            echo "⚠️ Deployment skipped: Azure credentials not configured"
+            echo "Version was updated but not deployed to Azure."
+            echo "Configure the required secrets to enable automatic deployment."
+            exit 0
+          fi
+
           if [[ "${{ needs.post-deployment.result }}" == "success" ]]; then
             echo "🎉 Deployment successful!"
             echo "📦 Version: ${{ needs.increment-version.outputs.old_version }} → ${{ needs.increment-version.outputs.new_version }}"
@@ -352,8 +493,12 @@ jobs:
           fi
 
   rollback:
-    needs: [increment-version, build-and-deploy, post-deployment]
-    if: failure() && needs.increment-version.outputs.old_version != ''
+    needs: [increment-version, build-and-deploy, post-deployment, check-credentials]
+    if: |
+      failure() &&
+      needs.increment-version.outputs.old_version != '' &&
+      needs.check-credentials.outputs.has_azure_creds == 'true' &&
+      needs.increment-version.outputs.version_committed == 'true'
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
@@ -363,7 +508,6 @@ jobs:
 
       - name: Log in to Azure
         uses: azure/login@v1
-        if: env.AZURE_CLIENT_ID != '' && env.AZURE_TENANT_ID != ''
         with:
           creds: |
             {
@@ -381,12 +525,19 @@ jobs:
           sed -i "s/<Version>${{ needs.increment-version.outputs.new_version }}<\/Version>/<Version>${{ needs.increment-version.outputs.old_version }}<\/Version>/g" addin/manifest.xml
           sed -i "s/v=${{ needs.increment-version.outputs.new_version }}/v=${{ needs.increment-version.outputs.old_version }}/g" addin/manifest.xml
           
-          # Commit rollback
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
-          git add addin/manifest.xml
-          git commit -m "Rollback manifest version to ${{ needs.increment-version.outputs.old_version }} [skip ci]"
-          git push
+          # Check if we can push rollback
+          BRANCH_NAME="${GITHUB_REF#refs/heads/}"
+          if [[ "${{ github.event_name }}" == "pull_request" || "$BRANCH_NAME" == "main" || "$BRANCH_NAME" == "master" ]]; then
+            echo "⚠️ Cannot push rollback to protected branch - manual intervention required"
+            echo "Please manually revert the manifest version to ${{ needs.increment-version.outputs.old_version }}"
+          else
+            # Commit rollback
+            git config --local user.email "action@github.com"
+            git config --local user.name "GitHub Action"
+            git add addin/manifest.xml
+            git commit -m "Rollback manifest version to ${{ needs.increment-version.outputs.old_version }} [skip ci]"
+            git push
+          fi
           
           # Try to rollback container deployment (best effort)
           PREVIOUS_IMAGE=$(az containerapp revision list \

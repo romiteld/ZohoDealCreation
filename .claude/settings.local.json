@@ -204,7 +204,13 @@
       "Bash(wsl az postgres flexible-server show:*)",
       "Bash(wsl az redis show:*)",
       "Bash(docker:*)",
-      "Bash(wsl az account show:*)"
+      "Bash(wsl az account show:*)",
+      "Bash(npm run validate:*)",
+      "Bash(node:*)",
+      "Bash(npm install)",
+      "Bash(npm run validate:json:*)",
+      "Bash(git push:*)",
+      "Bash(wsl az containerapp update:*)"
     ],
     "deny": [],
     "ask": [],

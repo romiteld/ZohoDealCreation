@@ -119,6 +119,7 @@
             content: "Test" !important;
         }
 
+
         #btnSend::after {
             content: "Send" !important;
         }
@@ -301,33 +302,42 @@
         }
         
         .footer {
-            padding: 12px 16px;
-            background: linear-gradient(to right, #ffffff, #f8fafc);
+            padding: 16px 20px;
+            background: linear-gradient(to top, #f8fafc, #ffffff);
             border-top: 1px solid #e2e8f0;
             display: flex;
-            gap: 8px;
+            gap: 12px;
             box-shadow: 0 -2px 10px rgba(0,0,0,0.05);
             flex-shrink: 0;
             align-items: center;
-            justify-content: space-between;
+            justify-content: center;
         }
 
         .btn {
-            font-size: 12px;
-            padding: 10px 16px;
-            border-radius: 6px;
+            font-size: 14px;
+            padding: 12px 20px;
+            border-radius: 8px;
             font-weight: 600;
-            border: none;
+            border: 1px solid transparent;
             cursor: pointer;
             transition: all 0.2s ease;
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 6px;
+            gap: 8px;
             letter-spacing: 0.3px;
             white-space: nowrap;
             position: relative;
             overflow: hidden;
+            min-height: 42px;
+            box-sizing: border-box;
+        }
+
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 13px;
+            min-height: 36px;
+            border-radius: 6px;
         }
 
         .btn::before {
@@ -351,44 +361,75 @@
         .btn-primary {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
-            box-shadow: 0 2px 4px rgba(102, 126, 234, 0.25);
-            flex: 1 1 auto;
-            max-width: 180px;
-            min-width: 120px;
+            box-shadow: 0 3px 8px rgba(102, 126, 234, 0.3);
+            border: 1px solid rgba(102, 126, 234, 0.2);
+            font-weight: 600;
+            flex: 1 1 0;
+            min-width: 85px;
+            max-width: 110px;
+        }
+
+        /* Ensure footer button container doesn't overflow */
+        .footer > div {
+            box-sizing: border-box;
+            overflow: hidden;
+            width: 100%;
+            max-width: 360px;
+        }
+
+        /* Responsive button sizing for footer */
+        .footer .btn {
+            flex: 1 1 0;
+            min-width: 85px;
+            max-width: 110px;
+            height: 44px;
+            padding: 12px 16px;
+            font-size: 14px;
+            font-weight: 600;
+            letter-spacing: 0.4px;
         }
 
         .btn-primary:hover {
             background: linear-gradient(135deg, #5a67d8 0%, #6b4098 100%);
             transform: translateY(-1px);
-            box-shadow: 0 4px 12px rgba(102, 126, 234, 0.35);
+            box-shadow: 0 5px 15px rgba(102, 126, 234, 0.4);
+            border-color: rgba(102, 126, 234, 0.3);
         }
 
         .btn-secondary {
-            background: #f1f5f9;
+            background: #f8fafc;
             color: #475569;
-            border: 1px solid #e2e8f0;
-            min-width: 80px;
+            border: 1.5px solid #e2e8f0;
+            box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+            flex: 1 1 0;
+            min-width: 85px;
+            max-width: 110px;
         }
 
         .btn-secondary:hover {
             background: #e2e8f0;
             border-color: #cbd5e1;
             transform: translateY(-1px);
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.08);
         }
 
         .btn-warning {
-            background: #fbbf24;
+            background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
             color: #78350f;
             font-weight: 600;
             border: 1px solid #fcd34d;
-            min-width: 100px;
+            box-shadow: 0 2px 6px rgba(251, 191, 36, 0.25);
+            flex: 1 1 0;
+            min-width: 85px;
+            max-width: 110px;
         }
 
         .btn-warning:hover {
-            background: #f59e0b;
+            background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
             border-color: #f59e0b;
             transform: translateY(-1px);
             color: white;
+            box-shadow: 0 4px 10px rgba(251, 191, 36, 0.35);
         }
 
         .btn-outline-success {
@@ -1111,6 +1152,25 @@
             background: #94a3b8;
         }
 
+        /* Media query for very narrow screens */
+        @media (max-width: 320px) {
+            .footer {
+                padding: 12px 16px;
+            }
+
+            .footer .btn {
+                padding: 10px 14px;
+                font-size: 12px;
+                min-width: 65px;
+                height: 38px;
+            }
+
+            .footer > div {
+                max-width: calc(100% - 8px);
+                gap: 6px;
+            }
+        }
+
     </style>
 </head>
 <body>
@@ -1188,17 +1248,17 @@
                         Describe corrections in natural language and click Apply
                     </small>
                 </div>
-                <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-                    <button type="button" class="btn btn-sm" style="background: #eff6ff; color: #2563eb; padding: 8px 14px; font-size: 13px;" id="btnApplyCorrections">
+                <div style="display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-top: 12px;">
+                    <button type="button" class="btn btn-sm" style="background: #eff6ff; color: #2563eb; border: 1px solid #dbeafe; width: 100%;" id="btnApplyCorrections">
                         🤖 Apply Corrections
                     </button>
-                    <button type="button" class="btn btn-sm" style="background: #f3f4f6; color: #6b7280; padding: 8px 14px; font-size: 13px;" id="btnSuggestFixes">
+                    <button type="button" class="btn btn-sm" style="background: #f3f4f6; color: #6b7280; border: 1px solid #e5e7eb; width: 100%;" id="btnSuggestFixes">
                         💡 Suggest Fixes
                     </button>
-                    <button type="button" class="btn btn-sm" style="background: #f0f9ff; color: #0284c7; padding: 8px 14px; font-size: 13px;" id="btnWebSearchClient">
+                    <button type="button" class="btn btn-sm" style="background: #f0f9ff; color: #0284c7; border: 1px solid #e0f2fe; width: 100%;" id="btnWebSearchClient">
                         🔍 Web Search
                     </button>
-                    <button type="button" class="btn btn-sm" style="background: #f0fdf4; color: #16a34a; padding: 8px 14px; font-size: 13px; display: none;" id="btnApolloEnrich">
+                    <button type="button" class="btn btn-sm" style="background: #f0fdf4; color: #16a34a; border: 1px solid #dcfce7; width: 100%; display: none;" id="btnApolloEnrich">
                         🚀 Enrich
                     </button>
                 </div>
@@ -1392,7 +1452,7 @@
                 </div>
                 <div class="collapsible-content" id="additionalSection">
                     <div class="mb-3">
-                        <button type="button" class="btn btn-sm btn-outline-secondary" id="btnAddField">
+                        <button type="button" class="btn btn-sm" style="background: #f0f9ff; color: #3b82f6; border: 1.5px solid #bfdbfe; font-weight: 600; padding: 10px 20px;" id="btnAddField">
                             + Add Field
                         </button>
                     </div>
@@ -1428,9 +1488,9 @@
                         <label class="form-label">Default Value (optional)</label>
                         <input type="text" class="form-control" id="newFieldValue">
                     </div>
-                    <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-primary" id="btnConfirmAddField">Add</button>
-                        <button type="button" class="btn btn-secondary" id="btnCancelAddField">Cancel</button>
+                    <div style="display: flex; gap: 10px; margin-top: 12px; justify-content: flex-end;">
+                        <button type="button" class="btn btn-sm btn-secondary" id="btnCancelAddField" style="min-width: 80px;">Cancel</button>
+                        <button type="button" class="btn btn-sm btn-primary" id="btnConfirmAddField" style="min-width: 80px;">Add</button>
                     </div>
                 </div>
             </div>
@@ -1489,10 +1549,10 @@
     </div>
     
     <div class="footer" id="footer" style="display: none;">
-        <div style="display: flex; gap: 8px; width: 100%;">
-            <button type="button" class="btn btn-secondary" id="btnCancel" style="flex: 1; max-width: 80px;">Cancel</button>
-            <button type="button" class="btn btn-warning" id="btnTestMode" style="flex: 1; max-width: 80px;">Test</button>
-            <button type="button" class="btn btn-primary" id="btnSend" style="flex: 1; max-width: 80px;">Send</button>
+        <div style="display: flex; gap: 12px; justify-content: center; align-items: center; width: 100%;">
+            <button type="button" class="btn btn-secondary" id="btnCancel" style="flex: 1 1 0; max-width: 100px;">Cancel</button>
+            <button type="button" class="btn btn-warning" id="btnTestMode" style="flex: 1 1 0; max-width: 100px;">Test</button>
+            <button type="button" class="btn btn-primary" id="btnSend" style="flex: 1 1 0; max-width: 100px;">Send</button>
         </div>
     </div>
     
@@ -1521,6 +1581,6 @@
 
     <!-- Include the taskpane JavaScript -->
     <script src="config.js"></script>
-    <script src="taskpane.js?v=fix-20250924"></script>
+    <script src="taskpane.js?v=2.0.0.26&t=1727580300&r=6297"></script>
 </body>
 </html>
