@@ -354,16 +354,7 @@ async function initializeTaskpane() {
 /**
  * Show error message to user
  */
-function showError(message) {
-    console.error('Showing error:', message);
-    const errorDiv = document.getElementById('errorMessage');
-    if (errorDiv) {
-        errorDiv.textContent = message;
-        errorDiv.style.display = 'block';
-    }
-    // Hide loading state
-    showLoadingState(false);
-}
+// Removed duplicate showError function - see line 2514 for the main implementation
 
 /**
  * Auto-generate Deal Name based on Steve's format
@@ -1080,6 +1071,10 @@ function parseHeadquarters(headquarters) {
             }
         }
     }
+
+    // Sanitize results to avoid returning URLs or file paths
+    city = validateLocationField(city);
+    state = validateLocationField(state);
 
     console.log('DEBUG - Parsed headquarters result - city:', city, 'state:', state);
     return { city, state };
@@ -2008,6 +2003,11 @@ async function handleSendToZoho(overrideTestMode = false) {
         document.getElementById('previewForm').style.display = 'none';
         document.getElementById('progressSection').style.display = 'block';
         document.getElementById('progressOverlay').style.display = 'block';
+        // Explicitly show progress-container when starting processing
+        const progressContainer = document.querySelector('.progress-container');
+        if (progressContainer) {
+            progressContainer.style.display = 'block';
+        }
         document.getElementById('btnSend').style.display = 'none';
         document.getElementById('btnCancel').style.display = 'none';
         
@@ -2368,6 +2368,21 @@ function showDuplicate(result) {
     warningMessage.style.borderColor = '#ffc107';
     warningMessage.style.color = '#856404';
 
+    // Hide progress section and overlay
+    const progressSection = document.getElementById('progressSection');
+    if (progressSection) {
+        progressSection.style.display = 'none';
+    }
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'none';
+    }
+    // Also explicitly hide the progress-container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+
     // Highlight the Apollo Enrich button for duplicate records
     const enrichButton = document.getElementById('btnApolloEnrich');
     if (enrichButton) {
@@ -2455,6 +2470,12 @@ function showTestSuccess(result) {
         progressOverlay.style.display = 'none';
     }
 
+    // Also explicitly hide the progress-container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+
     // CRITICAL: Ensure form is visible BEFORE populating it
     if (previewForm) {
         previewForm.style.display = 'block';  // Show form first
@@ -2495,6 +2516,21 @@ function showSuccess(result) {
     `;
     successMessage.style.display = 'block';
 
+    // Hide progress section and overlay
+    const progressSection = document.getElementById('progressSection');
+    if (progressSection) {
+        progressSection.style.display = 'none';
+    }
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'none';
+    }
+    // Also explicitly hide the progress-container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+
     // btnClose removed
 }
 
@@ -2502,6 +2538,7 @@ function showSuccess(result) {
  * Show error message
  */
 function showError(message) {
+    console.error('Showing error:', message);
     const errorMessage = document.getElementById('errorMessage');
     if (errorMessage) {
         errorMessage.innerHTML = `<strong>❌ Error:</strong> ${message}`;
@@ -2511,6 +2548,24 @@ function showError(message) {
         // Fallback to notification
         showNotification(message, 'error');
     }
+
+    // Hide progress section and overlay
+    const progressSection = document.getElementById('progressSection');
+    if (progressSection) {
+        progressSection.style.display = 'none';
+    }
+    const progressOverlay = document.getElementById('progressOverlay');
+    if (progressOverlay) {
+        progressOverlay.style.display = 'none';
+    }
+    // Also explicitly hide the progress-container
+    const progressContainer = document.querySelector('.progress-container');
+    if (progressContainer) {
+        progressContainer.style.display = 'none';
+    }
+
+    // Hide loading state
+    showLoadingState(false);
 }
 
 /**
@@ -4118,20 +4173,28 @@ async function enrichWithFirecrawl(data, researchDomain) {
 
                 // Update city and state from company data
                 if (company.city) {
+                    const cleanedCity = validateLocationField(company.city);
                     const cityField = document.getElementById('contactCity');
-                    if (cityField && !cityField.value) {  // Only update if empty
-                        cityField.value = company.city;
-                        showFieldEnhanced('contactCity', 'Firecrawl');
-                        console.log('Updated city from company:', company.city);
+                    if (cleanedCity) {
+                        company.city = cleanedCity;
+                        if (cityField && !cityField.value) {  // Only update if empty
+                            cityField.value = cleanedCity;
+                            showFieldEnhanced('contactCity', 'Firecrawl');
+                            console.log('Updated city from company:', cleanedCity);
+                        }
                     }
                 }
 
                 if (company.state) {
+                    const cleanedState = validateLocationField(company.state);
                     const stateField = document.getElementById('contactState');
-                    if (stateField && !stateField.value) {  // Only update if empty
-                        stateField.value = company.state;
-                        showFieldEnhanced('contactState', 'Firecrawl');
-                        console.log('Updated state from company:', company.state);
+                    if (cleanedState) {
+                        company.state = cleanedState;
+                        if (stateField && !stateField.value) {  // Only update if empty
+                            stateField.value = cleanedState;
+                            showFieldEnhanced('contactState', 'Firecrawl');
+                            console.log('Updated state from company:', cleanedState);
+                        }
                     }
                 }
             }
