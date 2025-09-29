@@ -52,7 +52,7 @@ Make sure Redis and PostgreSQL are available (see [Development Guide](#developme
 ## Key Capabilities
 
 ### Intake & Enrichment
-- Multi-stage LangGraph pipeline (extract → research → validate) powered by GPT-5 tiers.
+- Multi-stage LangGraph pipeline (extract -> research -> validate) powered by GPT-5 tiers.
 - Firecrawl v2 “supercharged” enrichment with company HQ, revenue, funding, tech stack, and leadership insights.
 - Apollo.io enrichment for contact-level details (phone, LinkedIn, titles) with smart throttling.
 
@@ -79,98 +79,260 @@ Make sure Redis and PostgreSQL are available (see [Development Guide](#developme
 
 ## Architecture
 
+- FastAPI orchestrates LangGraph pipelines within Azure Container Apps, while the Outlook add-in provides the human-in-the-loop control surface.
+- Redis and PostgreSQL back persistent enrichment results; Azure Blob storage captures attachments and static assets.
+- Azure OpenAI, Firecrawl, Apollo, and Azure Maps supply enrichment signals, with OAuth proxying and Azure Key Vault safeguarding secrets.
+- GitHub Actions delivers container builds and warm cache scripts to keep endpoints responsive.
+
+> **Diagram legend** - blue: operators, dark gray: platform services, amber: data stores, violet: third-party integrations, green: observability & ops.
+
 ### System Context (C4 Level 1)
 
 ```mermaid
-C4Context
-    title "System Context"
+flowchart LR
+    classDef actor fill:#E3F2FD,stroke:#1E40AF,color:#0B1F4B,stroke-width:1px;
+    classDef platform fill:#F8FAFC,stroke:#0F172A,color:#0F172A,stroke-width:1px;
+    classDef datastore fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:1px;
+    classDef external fill:#FCE7F3,stroke:#C026D3,color:#701A75,stroke-width:1px;
+    classDef ops fill:#DCFCE7,stroke:#15803D,color:#064E3B,stroke-width:1px;
 
-    Person(user, "Recruiter / Operator")
-    System(outlookAddin, "Outlook Add-in", "Human-in-the-loop taskpane")
-    System_Boundary(platform, "Well Intake Platform") {
-        System(apiCore, "FastAPI Service", "LangGraph orchestration, REST APIs")
-        System(oauthProxy, "OAuth Proxy", "Credential broker & hardened ingress")
-        System(redisCache, "Redis", "Low-latency cache")
-        System(pgDb, "PostgreSQL", "Transactional + pgvector store")
-        System(blobStorage, "Azure Blob", "Attachment storage")
-    }
+    subgraph Operator["Operator Workspace"]
+        Outlook["Outlook Taskpane Add-in\n(JavaScript + Office.js)"]
+    end
+    class Outlook actor;
 
-    System_Ext(zoho, "Zoho CRM", "Downstream CRM")
-    System_Ext(openai, "Azure OpenAI", "GPT-5 family")
-    System_Ext(firecrawl, "Firecrawl API", "Web research")
-    System_Ext(apollo, "Apollo.io API", "Contact enrichment")
-    System_Ext(azureMaps, "Azure Maps", "Geocoding & reverse geocoding")
+    subgraph Platform["Well Intake Platform\n(Azure Container Apps)"]
+        OAuth["OAuth Proxy\n(Flask ingress, token broker)"]
+        API["FastAPI Core\n(LangGraph orchestration)"]
+        Cache["Redis Cache"]
+        DB["PostgreSQL + pgvector"]
+        Blob["Azure Blob Storage\n(Attachments, manifests)"]
+        Jobs["Async Jobs & Scripts\n(Cache warmers, enrichers)"]
+    end
+    class OAuth,API,Jobs platform;
+    class Cache,DB,Blob datastore;
 
-    Rel(user, outlookAddin, "Compose / review / send")
-    Rel(outlookAddin, oauthProxy, "HTTPS (auth headers hidden)")
-    Rel(oauthProxy, apiCore, "Forward authenticated requests")
-    Rel(apiCore, redisCache, "Cache extracted payloads")
-    Rel(apiCore, pgDb, "Persist enriched records")
-    Rel(apiCore, blobStorage, "Store attachments")
-    Rel(apiCore, zoho, "Create CRM objects")
-    Rel(apiCore, openai, "LLM prompts")
-    Rel(apiCore, firecrawl, "Company intel")
-    Rel(apiCore, apollo, "Contact enrichment")
-    Rel(apiCore, azureMaps, "Geocoding lookups")
+    subgraph AIProviders["AI & Enrichment Providers"]
+        OpenAI["Azure OpenAI\n(GPT-5 models)"]
+        Firecrawl["Firecrawl API"]
+        Apollo["Apollo.io API"]
+        Maps["Azure Maps"]
+    end
+    class OpenAI,Firecrawl,Apollo,Maps external;
+
+    CRM["Zoho CRM"]
+    class CRM external;
+
+    Insights["Application Insights / Logging Sink"]
+    class Insights ops;
+
+    Vault["Azure Key Vault"]
+    class Vault external;
+
+    Outlook -->|"OAuth 2.0 + REST"| OAuth
+    OAuth -->|"Session hand-off\n(Forward auth headers)"| API
+    API -->|"Cache lookups"| Cache
+    API -->|"Persist deals + embeddings"| DB
+    API -->|"Upload attachments"| Blob
+    API -->|"Create/update records"| CRM
+    API -->|"LLM prompts"| OpenAI
+    API -->|"Company research"| Firecrawl
+    API -->|"Contact enrichment"| Apollo
+    API -->|"Geocode addresses"| Maps
+    API -->|"Structured telemetry"| Insights
+    OAuth -->|"Secret fetch"| Vault
+    API -->|"Secret fetch"| Vault
+    Jobs -->|"Backfill / cache warm"| API
+    Outlook -->|"Static assets"| Blob
 ```
 
-### Container View (C4 Level 2)
+### Intake Runtime (Primary Sequence)
 
 ```mermaid
-C4Container
-    title "Container View"
+sequenceDiagram
+    participant User as Recruiter / Operator
+    participant Addin as Outlook Add-in
+    participant Proxy as OAuth Proxy
+    participant API as FastAPI Core
+    participant Redis as Redis Cache
+    participant LLM as Azure OpenAI
+    participant Enrich as Firecrawl / Apollo / Azure Maps
+    participant PG as PostgreSQL
+    participant Blob as Azure Blob
+    participant Zoho as Zoho CRM
 
-    Person(user, "Recruiter")
-    Container(outlookAddin, "Outlook Taskpane", "TypeScript + Office.js")
-    Container(oauthProxy, "OAuth Proxy", "Flask", "Centralized auth & routing")
-    Container(apiCore, "FastAPI Service", "Python", "Email intake, AI orchestration")
-    Container(redisCache, "Redis", "Cache", "C³ confidence & rate limiting")
-    Container(pgDb, "PostgreSQL", "Database", "CRM-ready data + pgvector")
-    Container(blobStorage, "Azure Blob", "Storage", "Attachments")
-
-    Container_Ext(zoho, "Zoho CRM", "External")
-    Container_Ext(openai, "Azure OpenAI", "External")
-    Container_Ext(firecrawl, "Firecrawl", "External")
-    Container_Ext(apollo, "Apollo.io", "External")
-    Container_Ext(azureMaps, "Azure Maps", "External")
-
-    Rel(user, outlookAddin, "Extract / edit / send")
-    Rel(outlookAddin, oauthProxy, "REST calls")
-    Rel(oauthProxy, apiCore, "Forward + inject credentials")
-    Rel(apiCore, redisCache, "Read/Write cache")
-    Rel(apiCore, pgDb, "Persist entities")
-    Rel(apiCore, blobStorage, "Upload files")
-    Rel(apiCore, zoho, "Zoho REST API")
-    Rel(apiCore, openai, "LLM requests")
-    Rel(apiCore, firecrawl, "Research API")
-    Rel(apiCore, apollo, "Enrichment API")
-    Rel(apiCore, azureMaps, "Geocoding API")
+    User->>Addin: Confirm extracted values in taskpane
+    Addin->>Proxy: HTTPS POST /intake (JWT + payload)
+    Proxy->>API: Forward request with signed platform token
+    API->>Redis: Check cached enrichment bundle
+    Redis-->>API: Cache miss (first run)
+    API->>LLM: Prompt LangGraph extraction + validation
+    API->>Enrich: Fetch company, contact, and geocode data
+    Enrich-->>API: Enrichment payloads (batched)
+    API->>Blob: Upload attachments & taskpane notes
+    API->>PG: Persist normalized deal package (JSONB + vectors)
+    API->>Redis: Cache response for preview / retries
+    API->>Zoho: Create/update Account, Contact, Deal
+    Zoho-->>API: Confirm CRM operations
+    API-->>Addin: Success payload with confidence scores
+    Addin-->>User: Render confirmation banner + deep links
 ```
 
-### Component View (C4 Level 3 – FastAPI Core)
+### Container Responsibilities (C4 Level 2)
 
 ```mermaid
-C4Component
-    title "FastAPI Core Components"
+flowchart TB
+    classDef container fill:#FFFFFF,stroke:#0F172A,color:#111827,stroke-width:1px;
+    classDef ext fill:#F3E8FF,stroke:#7C3AED,color:#4C1D95,stroke-width:1px;
+    classDef data fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:1px;
 
-    Container_Boundary(core, "FastAPI Service") {
-        Component(router, "API Router", "FastAPI", "Public & internal endpoints")
-        Component(langgraphMgr, "LangGraph Manager", "Python", "3-node workflow orchestration")
-        Component(cacheMgr, "Cache Manager", "Python", "Confidence scoring + Redis IO")
-        Component(dbMgr, "DB Enhancer", "Python", "pgvector access + business persistence")
-        Component(businessRules, "Business Rules", "Python", "Deal naming, dedupe, validation")
-        Component(integrations, "Integrations", "Python", "Zoho / Apollo / Firecrawl / Azure Maps clients")
-        Component(attachments, "Attachment Service", "Python", "Blob upload + metadata")
-        Component(monitoring, "Monitoring", "Python", "Telemetry + cache warmers")
-    }
+    subgraph AddIn["Outlook Taskpane"]
+        UI["Taskpane UI\n(Vanilla JS + Office.js)"]
+        Commands["Command Surface\n(Ribbon buttons)"]
+        Manifest["Manifest + Assets"]
+    end
+    class AddIn,UI,Commands,Manifest container;
 
-    Rel(router, langgraphMgr, "Trigger extraction pipeline")
-    Rel(router, cacheMgr, "Lookup & store results")
-    Rel(router, dbMgr, "Persist records")
-    Rel(langgraphMgr, businessRules, "Apply validation")
-    Rel(langgraphMgr, integrations, "External API calls")
-    Rel(attachments, integrations, "Attachment references")
+    subgraph Proxy["OAuth Proxy"]
+        FlaskApp["Flask App"]
+        TokenSvc["Token Broker\n(Zoho + internal)"]
+        Policy["Policy Guardrails\n(IP allow list, rate limits)"]
+    end
+    class Proxy,FlaskApp,TokenSvc,Policy container;
+
+    subgraph FastAPI["FastAPI Core"]
+        Router["API Routers\n(/intake, /cache, /health)"]
+        LangGraph["LangGraph Orchestrator"]
+        Services["Domain Services\n(normalizers, dedupe)"]
+        Integrations["Integration Clients\n(Zoho, Firecrawl, Apollo, Maps)"]
+        Background["Background Tasks\n(cache warmers, backfills)"]
+        Telemetry["Telemetry\n(logging, metrics)"]
+    end
+    class FastAPI,Router,LangGraph,Services,Integrations,Background,Telemetry container;
+
+    subgraph DataPlane["Data Plane"]
+        RedisNode["Redis"]
+        Postgres["PostgreSQL + pgvector"]
+        BlobStore["Azure Blob\n(attachments, manifests)"]
+    end
+    class DataPlane,RedisNode,Postgres,BlobStore data;
+
+    subgraph External["External Systems"]
+        ZohoAPI["Zoho CRM"]
+        OpenAIAPI["Azure OpenAI"]
+        FirecrawlAPI["Firecrawl"]
+        ApolloAPI["Apollo.io"]
+        MapsAPI["Azure Maps"]
+        KeyVault["Azure Key Vault"]
+        Insights["Application Insights"]
+    end
+    class External,ZohoAPI,OpenAIAPI,FirecrawlAPI,ApolloAPI,MapsAPI,KeyVault,Insights ext;
+
+    UI --> FlaskApp
+    Commands --> FlaskApp
+    Manifest --> BlobStore
+    FlaskApp --> Policy
+    Policy --> TokenSvc
+    TokenSvc --> Router
+    Router --> LangGraph
+    LangGraph --> Services
+    Services --> Integrations
+    Services --> Postgres
+    Services --> RedisNode
+    Integrations --> ZohoAPI
+    Integrations --> OpenAIAPI
+    Integrations --> FirecrawlAPI
+    Integrations --> ApolloAPI
+    Integrations --> MapsAPI
+    Background --> RedisNode
+    Background --> BlobStore
+    TokenSvc --> KeyVault
+    TokenSvc --> ZohoAPI
+    Router --> Telemetry
+    Telemetry --> Insights
 ```
+
+### FastAPI Core Component Map (C4 Level 3)
+
+```mermaid
+flowchart LR
+    classDef comp fill:#EFF6FF,stroke:#1D4ED8,color:#0B1F4B,stroke-width:1px;
+    classDef boundary stroke:#0F172A,stroke-width:1.5px,fill:#FFFFFF,color:#111827;
+
+    subgraph Boundary["FastAPI Service"]
+        subgraph RouterLayer["Router Layer"]
+            Public["Public Routers\n(intake, attachments)"]
+            Internal["Internal Routers\n(cache, warmup, health)"]
+        end
+        subgraph WorkflowLayer["Workflow & Domain"]
+            GraphMgr["LangGraph Manager\n(orchestrates extract -> enrich -> validate)"]
+            Rules["Business Rules\n(deal naming, dedupe, gating)"]
+            Normalizers["Normalizers\n(email -> CRM schema)"]
+            Confidence["Confidence Engine\n(scoring + human overrides)"]
+        end
+        subgraph IntegrationLayer["Integration Adapters"]
+            ZohoClient["Zoho Client"]
+            FirecrawlClient["Firecrawl Client"]
+            ApolloClient["Apollo Client"]
+            MapsClient["Azure Maps Client"]
+            OpenAIClient["Azure OpenAI Client"]
+        end
+        subgraph PersistenceLayer["Persistence & Cache"]
+            Repo["Repository Layer\n(SQLModel + pgvector)"]
+            CacheMgr["Cache Manager\n(Redis IO, TTL policy)"]
+            BlobSvc["Attachment Service\n(Blob uploads + metadata)"]
+        end
+        subgraph ObservabilityLayer["Observability"]
+            Logging["Structured Logging"]
+            Metrics["Metrics Exporters"]
+            Alerts["Alert Hooks\n(health + SLA)"]
+        end
+    end
+    class Boundary,RouterLayer,WorkflowLayer,IntegrationLayer,PersistenceLayer,ObservabilityLayer boundary;
+    class Public,Internal,GraphMgr,Rules,Normalizers,Confidence,ZohoClient,FirecrawlClient,ApolloClient,MapsClient,OpenAIClient,Repo,CacheMgr,BlobSvc,Logging,Metrics,Alerts comp;
+
+    Public --> GraphMgr
+    Internal --> CacheMgr
+    GraphMgr --> Rules
+    GraphMgr --> Normalizers
+    GraphMgr --> Confidence
+    Rules --> Repo
+    Normalizers --> Repo
+    Confidence --> CacheMgr
+    CacheMgr --> Repo
+    Repo --> ZohoClient
+    ZohoClient --> Repo
+    GraphMgr --> OpenAIClient
+    GraphMgr --> FirecrawlClient
+    GraphMgr --> ApolloClient
+    GraphMgr --> MapsClient
+    BlobSvc --> Repo
+    BlobSvc --> CacheMgr
+    Logging --> Metrics
+    Metrics --> Alerts
+    Public --> Logging
+    Public --> Metrics
+```
+
+### Data & Integration Catalogue
+
+| Category | Surface | Purpose | Notes |
+|----------|---------|---------|-------|
+| Platform Data | PostgreSQL (`deals`, `contacts`, `attachments`, `embeddings`) | Source of truth for CRM pushes, replay safety, vector search | `pgvector` drives similarity matching & deduping |
+| Platform Data | Redis (`intake:*`, `manifest:*`) | Sub-second previews, duplicate suppression, manifest caching | TTL tuned for 2–12h depending on stage |
+| Platform Data | Azure Blob (`attachments/`, `manifests/`) | Attachment storage, Outlook static file hosting | Versioned with cache-busting to avoid stale manifests |
+| Integrations | Zoho CRM REST APIs | Account/Contact/Deal creation, idempotent updates | OAuth tokens managed by proxy, backoff on 429s |
+| Integrations | Azure OpenAI (`gpt-5`, `gpt-4o-mini`) | Field extraction, validation, summarization | Prompt templates live in `app/prompts/` |
+| Integrations | Firecrawl API | Company research, website parsing | Batched to minimize request volume |
+| Integrations | Apollo.io API | Contact enrichment, phone/email validation | Smart throttling with daily quota guardrails |
+| Integrations | Azure Maps | Geocoding, timezone inference | Optional feature flag via `ENABLE_AZURE_MAPS` |
+| Observability | Application Insights | Centralized telemetry, trace correlation | Configured through deployment pipeline |
+
+### Deployment & Operations Snapshot
+
+- GitHub Actions builds the Outlook add-in, Docker images, and runs manifest cache-bust workflows prior to promoting new revisions to Azure Container Apps.
+- Cache warmers populate Redis and blob metadata immediately post-deploy to keep first-run latency low.
+- Emergency rollback scripts shift traffic to the previous container revision and invalidate Redis keys to maintain consistency.
 
 
 ## Development Guide
