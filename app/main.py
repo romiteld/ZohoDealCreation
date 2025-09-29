@@ -3731,7 +3731,7 @@ async def get_manifest(request: Request):
             media_type="application/xml; charset=utf-8",
             headers={
                 "Cache-Control": "public, max-age=3600",
-                "X-Manifest-Version": "1.5.0"
+                "X-Manifest-Version": "2.0.0.26"
             }
         )
     
@@ -3749,7 +3749,7 @@ async def get_manifest_json(request: Request):
             media_type="application/json; charset=utf-8",
             headers={
                 "Cache-Control": "public, max-age=3600",
-                "X-Manifest-Version": "1.5.0",
+                "X-Manifest-Version": "2.0.0.26",
                 "X-Manifest-Type": "unified"
             }
         )

@@ -6,13 +6,13 @@
            xsi:type="MailApp">
   
   <Id>d2422753-f7f6-4a4a-9e1e-7512f37a50e5</Id>
-  <Version>2.0.0.25</Version>
+  <Version>2.0.0.26</Version>
   <ProviderName>The Well Recruiting Solutions</ProviderName>
   <DefaultLocale>en-US</DefaultLocale>
   <DisplayName DefaultValue="The Well - Send to Zoho"/>
   <Description DefaultValue="Process recruitment emails and automatically create candidate records in Zoho CRM."/>
-  <IconUrl DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png"/>
-  <HighResolutionIconUrl DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png"/>
+  <IconUrl DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png?v=2.0.0.26&amp;t=1727580300"/>
+  <HighResolutionIconUrl DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png?v=2.0.0.26&amp;t=1727580300"/>
   <SupportUrl DefaultValue="https://thewell.solutions/"/>
   
   <AppDomains>
@@ -35,7 +35,7 @@
   <FormSettings>
     <Form xsi:type="ItemRead">
       <DesktopSettings>
-        <SourceLocation DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.html?v=2.0.0.25"/>
+        <SourceLocation DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.html?v=2.0.0.26&amp;t=1727580300"/>
         <RequestedHeight>250</RequestedHeight>
       </DesktopSettings>
     </Form>
@@ -90,14 +90,14 @@
       
       <Resources>
         <bt:Images>
-          <bt:Image id="Icon.16x16" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png"/>
-          <bt:Image id="Icon.32x32" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png"/>
-          <bt:Image id="Icon.80x80" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png"/>
+          <bt:Image id="Icon.16x16" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png?v=2.0.0.26&amp;t=1727580300"/>
+          <bt:Image id="Icon.32x32" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png?v=2.0.0.26&amp;t=1727580300"/>
+          <bt:Image id="Icon.80x80" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png?v=2.0.0.26&amp;t=1727580300"/>
         </bt:Images>
         
         <bt:Urls>
-          <bt:Url id="Commands.Url" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.html?v=2.0.0.25"/>
-          <bt:Url id="Taskpane.Url" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.html?v=2.0.0.25"/>
+          <bt:Url id="Commands.Url" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.html?v=2.0.0.26&amp;t=1727580300"/>
+          <bt:Url id="Taskpane.Url" DefaultValue="https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.html?v=2.0.0.26&amp;t=1727580300"/>
         </bt:Urls>
         
         <bt:ShortStrings>

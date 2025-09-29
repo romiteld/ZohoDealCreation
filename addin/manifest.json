@@ -2,7 +2,7 @@
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.23/MicrosoftTeams.schema.json",
   "manifestVersion": "1.23",
   "id": "d2422753-f7f6-4a4a-9e1e-7512f37a50e5",
-  "version": "1.5.0",
+  "version": "2.0.0.26",
   "name": {
     "short": "The Well - Send to Zoho",
     "full": "The Well Recruiting Solutions - Zoho Integration"
@@ -70,15 +70,15 @@
                   "icons": [
                     {
                       "size": 16,
-                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png"
+                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png?v=2.0.0.26&t=1727580300"
                     },
                     {
                       "size": 32,
-                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png"
+                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png?v=2.0.0.26&t=1727580300"
                     },
                     {
                       "size": 80,
-                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png"
+                      "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png?v=2.0.0.26&t=1727580300"
                     }
                   ],
                   "controls": [
@@ -93,15 +93,15 @@
                       "icons": [
                         {
                           "size": 16,
-                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png"
+                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-16.png?v=2.0.0.26&t=1727580300"
                         },
                         {
                           "size": 32,
-                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png"
+                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-32.png?v=2.0.0.26&t=1727580300"
                         },
                         {
                           "size": 80,
-                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png"
+                          "url": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/icon-80.png?v=2.0.0.26&t=1727580300"
                         }
                       ],
                       "supertip": {
@@ -130,8 +130,8 @@
           "id": "TaskpaneRuntime",
           "type": "general",
           "code": {
-            "page": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.html?v=1.5.0",
-            "script": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.js"
+            "page": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.html?v=2.0.0.26&t=1727580300",
+            "script": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/taskpane.js?v=2.0.0.26&t=1727580300"
           },
           "lifetime": "short",
           "actions": [
@@ -155,8 +155,8 @@
           "id": "CommandsRuntime",
           "type": "general",
           "code": {
-            "page": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.html?v=1.5.0",
-            "script": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.js"
+            "page": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.html?v=2.0.0.26&t=1727580300",
+            "script": "https://well-intake-api-dnajdub4azhjcgc3.z03.azurefd.net/commands.js?v=2.0.0.26&t=1727580300"
           },
           "lifetime": "short",
           "actions": [
