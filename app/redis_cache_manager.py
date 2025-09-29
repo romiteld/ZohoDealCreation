@@ -603,7 +603,7 @@ class RedisCacheManager:
     def get_health_summary(self) -> str:
         """
         Get a simple health status summary for monitoring.
-        
+
         Returns:
             Human-readable health status
         """
@@ -617,6 +617,74 @@ class RedisCacheManager:
             return "healthy"
         else:
             return "disconnected"
+
+    async def get(self, key: str) -> Optional[str]:
+        """
+        Generic get method for retrieving cached values.
+
+        Args:
+            key: Cache key
+
+        Returns:
+            Cached value as string or None if not found
+        """
+        if not self._connected or not self.client:
+            await self.connect()
+            if not self._connected:
+                return None
+
+        try:
+            value = await self.client.get(key)
+            if value:
+                self.metrics.hits += 1
+                logger.debug(f"Cache hit for key: {key}")
+            else:
+                self.metrics.misses += 1
+                logger.debug(f"Cache miss for key: {key}")
+            return value
+        except Exception as e:
+            logger.error(f"Error getting cache key {key}: {e}")
+            self.metrics.errors += 1
+            return None
+
+    async def set(self, key: str, value: str, ttl: Optional[timedelta] = None, expire: Optional[int] = None) -> bool:
+        """
+        Generic set method for caching values.
+
+        Args:
+            key: Cache key
+            value: Value to cache
+            ttl: Time to live as timedelta (preferred)
+            expire: TTL in seconds (backward compatibility)
+
+        Returns:
+            Success status
+        """
+        if not self._connected or not self.client:
+            await self.connect()
+            if not self._connected:
+                return False
+
+        try:
+            # Determine TTL
+            if ttl:
+                expire_seconds = int(ttl.total_seconds())
+            elif expire:
+                expire_seconds = expire
+            else:
+                expire_seconds = int(self.default_ttl.total_seconds())
+
+            await self.client.setex(
+                key,
+                expire_seconds,
+                value
+            )
+            logger.debug(f"Cached key: {key} with TTL: {expire_seconds}s")
+            return True
+        except Exception as e:
+            logger.error(f"Error setting cache key {key}: {e}")
+            self.metrics.errors += 1
+            return False
 
 
 # Singleton instance

@@ -210,7 +210,17 @@
       "Bash(npm install)",
       "Bash(npm run validate:json:*)",
       "Bash(git push:*)",
-      "Bash(wsl az containerapp update:*)"
+      "Bash(wsl az containerapp update:*)",
+      "Bash(wsl az provider show --namespace Microsoft.Maps --query \"registrationState\" -o tsv)",
+      "Bash(wsl az provider register --namespace Microsoft.Maps --wait)",
+      "Bash(wsl az maps account create:*)",
+      "Bash(wsl az maps account keys list:*)",
+      "Bash(wsl az keyvault secret set --vault-name well-intake-kv --name AzureMapsKey --value \"4r0Px64O25sd3sMZoPLZkT3MarsQOzkhcIkOxE7iNnk4xLtJwOIeJQQJ99BIACYeBjFW8ypnAAAgAZMP1wVf\" --description \"Azure Maps primary subscription key\" --content-type \"text/plain\" --output none)",
+      "Bash(wsl az keyvault secret show:*)",
+      "Bash(API_KEY=\"4r0Px64O25sd3sMZoPLZkT3MarsQOzkhcIkOxE7iNnk4xLtJwOIeJQQJ99BIACYeBjFW8ypnAAAgAZMP1wVf\")",
+      "Bash(wsl az maps account show:*)",
+      "Bash(wsl az containerapp revision show:*)",
+      "Bash(wsl az containerapp ingress traffic set:*)"
     ],
     "deny": [],
     "ask": [],

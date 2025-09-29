@@ -61,6 +61,14 @@ class DealRecord(BaseModel):
     source_detail: Optional[str] = Field(None, description="Source detail (e.g., FutureProof 2026)")
     description_of_reqs: Optional[str] = Field(None, description="Description of requirements/needs")
 
+class GeoResult(BaseModel):
+    """Geocoding result from Azure Maps."""
+    latitude: Optional[float] = Field(None, description="Latitude coordinate")
+    longitude: Optional[float] = Field(None, description="Longitude coordinate")
+    address: Optional[Dict[str, Any]] = Field(None, description="Address components")
+    formatted_address: Optional[str] = Field(None, description="Full formatted address")
+    confidence: Optional[float] = Field(None, description="Geocoding confidence score")
+
 class ExtractedData(BaseModel):
     """Main extracted data structure with Steve's 3-record format and financial advisor enhancements"""
     company_record: Optional[CompanyRecord] = Field(None, description="Company information")

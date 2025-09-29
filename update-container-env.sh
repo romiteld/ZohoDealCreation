@@ -33,6 +33,12 @@ az containerapp update \
     "ZOHO_DEFAULT_OWNER_EMAIL=$ZOHO_DEFAULT_OWNER_EMAIL" \
     "USE_LANGGRAPH=true" \
     "LOG_LEVEL=INFO" \
+    "ENABLE_AZURE_MAPS=true" \
+    "AZURE_MAPS_BASE_URL=https://atlas.microsoft.com" \
+    "AZURE_MAPS_API_VERSION=1.0" \
+    "AZURE_MAPS_KEY_SECRET_NAME=AzureMapsKey" \
+    "AZURE_MAPS_DEFAULT_COUNTRY=US" \
+    "AZURE_MAPS_CACHE_TTL_SEC=86400" \
   --output json
 
 echo "Environment variables updated successfully!"

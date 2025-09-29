@@ -98,6 +98,14 @@ class ExtractionConfig:
     # Apollo enrichment configuration
     apollo_api_key: Optional[str] = None
 
+    # Azure Maps Configuration
+    enable_azure_maps: bool = False  # Disabled by default
+    azure_maps_base_url: str = "https://atlas.microsoft.com"
+    azure_maps_api_version: str = "1.0"
+    azure_maps_key_secret_name: str = "AzureMapsKey"
+    azure_maps_default_country: str = "US"
+    azure_maps_cache_ttl_sec: int = 86400  # 24 hours
+
 @dataclass
 class SecurityConfig:
     """Security and authentication configuration"""
@@ -280,7 +288,14 @@ class ConfigManager:
             azure_openai_api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
             azure_openai_deployment=os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini"),
             # Apollo enrichment configuration
-            apollo_api_key=self._get_secret("apollo-api-key", "APOLLO_API_KEY")
+            apollo_api_key=self._get_secret("apollo-api-key", "APOLLO_API_KEY"),
+            # Azure Maps Configuration
+            enable_azure_maps=os.getenv("ENABLE_AZURE_MAPS", "false").lower() == "true",
+            azure_maps_base_url=os.getenv("AZURE_MAPS_BASE_URL", "https://atlas.microsoft.com"),
+            azure_maps_api_version=os.getenv("AZURE_MAPS_API_VERSION", "1.0"),
+            azure_maps_key_secret_name=os.getenv("AZURE_MAPS_KEY_SECRET_NAME", "AzureMapsKey"),
+            azure_maps_default_country=os.getenv("AZURE_MAPS_DEFAULT_COUNTRY", "US"),
+            azure_maps_cache_ttl_sec=int(os.getenv("AZURE_MAPS_CACHE_TTL_SEC", "86400"))
         )
         
         logger.info(f"Extraction configuration loaded - LangExtract: {self.extraction.use_langextract}, A/B Testing: {self.extraction.a_b_testing_enabled}")

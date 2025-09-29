@@ -7,7 +7,7 @@ import os
 import json
 import logging
 import asyncio
-from typing import Dict, Optional, Any, List, TypedDict, Annotated
+from typing import Dict, Optional, Any, List, TypedDict, Annotated, Tuple
 import operator
 from openai import AsyncOpenAI
 from pydantic import BaseModel, Field
@@ -88,6 +88,11 @@ class EmailProcessingState(TypedDict):
     
     # Learning context for feedback
     learning_context: Optional[Dict[str, Any]]  # Context for learning system
+
+    # Geocoding fields
+    location_hint: Optional[str]  # Location extracted from email
+    coordinates: Optional[Tuple[float, float]]  # If coordinates provided
+    geo: Optional[Dict[str, Any]]  # GeoResult data
 
 
 class ExtractionOutput(BaseModel):
@@ -1998,6 +2003,66 @@ class EmailProcessingWorkflow:
             except Exception as e:
                 logger.warning(f"Enhanced enrichment with Serper failed: {e}, continuing with existing data")
 
+            # 🗺️ Azure Maps Geocoding Integration
+            config = get_extraction_config()
+            if config.enable_azure_maps:
+                try:
+                    from app.integrations.azure_maps import get_azure_maps_client
+
+                    # Extract location hint from various sources
+                    location_hint = None
+
+                    # Try to get location from extraction result
+                    if extracted.get('location'):
+                        location_hint = extracted.get('location')
+                    # Or from contact record city/state
+                    elif extracted.get('contact_record', {}).get('city'):
+                        city = extracted.get('contact_record', {}).get('city')
+                        state = extracted.get('contact_record', {}).get('state', '')
+                        location_hint = f"{city}, {state}".strip(', ')
+                    # Or from research result
+                    elif research_result.get('location'):
+                        location_hint = research_result.get('location')
+
+                    # Skip if location hint looks like a URL
+                    if location_hint and not self._is_url(location_hint):
+                        logger.info(f"🗺️ Geocoding location hint: {location_hint}")
+                        azure_maps = await get_azure_maps_client()
+
+                        geo_results = await azure_maps.geocode_address(
+                            query=location_hint,
+                            country_filter=config.azure_maps_default_country
+                        )
+
+                        if geo_results and geo_results[0]:
+                            state['geo'] = geo_results[0]
+                            logger.info(f"✓ Geocoded to: {geo_results[0].get('address', {}).get('freeformAddress')}")
+
+                            # Also update research result with geocoded location
+                            if geo_results[0].get('address'):
+                                address = geo_results[0]['address']
+                                if address.get('municipality'):
+                                    research_result['city'] = address.get('municipality')
+                                if address.get('countrySubdivisionName'):
+                                    research_result['state'] = address.get('countrySubdivisionName')
+
+                    # Handle reverse geocoding if coordinates provided
+                    if state.get('coordinates'):
+                        lat, lon = state['coordinates']
+                        logger.info(f"🗺️ Reverse geocoding: {lat}, {lon}")
+
+                        azure_maps = await get_azure_maps_client()
+                        reverse_result = await azure_maps.reverse_geocode(lat, lon)
+
+                        if reverse_result:
+                            state['geo'] = reverse_result
+                            logger.info(f"✓ Reverse geocoded to: {reverse_result.get('formatted_address')}")
+
+                except ImportError:
+                    logger.debug("Azure Maps integration not available")
+                except Exception as e:
+                    logger.error(f"Azure Maps geocoding failed: {e}")
+
             return {
                 "company_research": research_result,
                 "messages": [{"role": "assistant", "content": f"Researched: {research_result}"}]
@@ -2033,6 +2098,12 @@ class EmailProcessingWorkflow:
                 "messages": [{"role": "assistant", "content": f"Researched: {research_result}"}]
             }
     
+    def _is_url(self, text: str) -> bool:
+        """Check if text looks like a URL."""
+        if not text:
+            return False
+        return any(x in text.lower() for x in ['http://', 'https://', '.com', '.org', '.net', '.io'])
+
     async def validate_and_clean(self, state: EmailProcessingState) -> Dict:
         """Third node: Validate and clean the extracted data"""
         logger.info("---VALIDATION AGENT---")

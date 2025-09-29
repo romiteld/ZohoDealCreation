@@ -1138,41 +1138,35 @@ function cleanCompanyWebsite(website) {
 function validateLocationField(location) {
     if (!location || typeof location !== 'string') return '';
 
-    // First, strip markdown links and HTML tags
-    location = location.replace(/\[[^\]]*\]\([^)]+\)/g, '')    // strip markdown links
-                      .replace(/<\/?[^>]+>/g, '')           // strip HTML tags
-                      .replace(/[^\w\s,.-]/g, ' ')          // kill leftover junk
-                      .replace(/\s+/g, ' ')                  // normalize whitespace
-                      .trim();
+    let sanitized = location.trim();
 
-    // If nothing left after sanitization, return empty
-    if (!location) return '';
+    // Strip markdown links, HTML tags, and obvious URLs
+    sanitized = sanitized.replace(/\[[^\]]*\]\([^\)]+\)/gi, ' ')
+                         .replace(/<[^>]*>/g, ' ')
+                         .replace(/https?:\/\/[^\s]+/gi, ' ')
+                         .replace(/www\.[^\s]+/gi, ' ');
 
-    // Filter out URLs (HTTP/HTTPS prefixes)
-    if (location.toLowerCase().startsWith('http://') ||
-        location.toLowerCase().startsWith('https://')) {
+    // Remove file extensions and undesired characters
+    const forbiddenExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.zip'];
+    const lowerSanitized = sanitized.toLowerCase();
+    if (forbiddenExtensions.some(ext => lowerSanitized.includes(ext))) {
         return '';
     }
 
-    // Filter out file paths/extensions
-    const fileExtensions = ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.jpg', '.png', '.gif'];
-    for (const ext of fileExtensions) {
-        if (location.toLowerCase().includes(ext)) {
-            return '';
-        }
-    }
+    // Remove leftover markdown/LaTeX characters and normalize whitespace
+    sanitized = sanitized.replace(/[\[\]\(\)_*`~]/g, ' ')
+                         .replace(/\s+/g, ' ')
+                         .trim();
 
-    // Filter out overly long values (likely not real locations)
-    if (location.length > 100) {
+    // Guard against long garbage strings or residual URLs
+    if (sanitized.length === 0 || sanitized.length > 100) {
+        return '';
+    }
+    if (/^https?:/i.test(sanitized) || sanitized.includes('://')) {
         return '';
     }
 
-    // Filter out values with suspicious patterns
-    if (location.includes('://') || location.includes('www.')) {
-        return '';
-    }
-
-    return location;
+    return sanitized;
 }
 
 /**

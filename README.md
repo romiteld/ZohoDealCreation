@@ -71,6 +71,11 @@ Make sure Redis and PostgreSQL are available (see [Development Guide](#developme
 - Azure Container Apps hosting with GitHub Actions pipeline (version bumping + cache busting).
 - Emergency rollback workflow for instant traffic shift to previous revisions.
 
+### Geocoding & Location Intelligence
+- Optional Azure Maps integration for forward/reverse geocoding.
+- Automated address normalization and city/state enrichment during company research.
+- Configurable country bias, caching (24h TTL), and feature flag via `ENABLE_AZURE_MAPS`.
+
 
 ## Architecture
 
@@ -94,6 +99,7 @@ C4Context
     System_Ext(openai, "Azure OpenAI", "GPT-5 family")
     System_Ext(firecrawl, "Firecrawl API", "Web research")
     System_Ext(apollo, "Apollo.io API", "Contact enrichment")
+    System_Ext(azureMaps, "Azure Maps", "Geocoding & reverse geocoding")
 
     Rel(user, outlookAddin, "Compose / review / send")
     Rel(outlookAddin, oauthProxy, "HTTPS (auth headers hidden)")
@@ -105,6 +111,7 @@ C4Context
     Rel(apiCore, openai, "LLM prompts")
     Rel(apiCore, firecrawl, "Company intel")
     Rel(apiCore, apollo, "Contact enrichment")
+    Rel(apiCore, azureMaps, "Geocoding lookups")
 ```
 
 ### Container View (C4 Level 2)
@@ -125,6 +132,7 @@ C4Container
     Container_Ext(openai, "Azure OpenAI", "External")
     Container_Ext(firecrawl, "Firecrawl", "External")
     Container_Ext(apollo, "Apollo.io", "External")
+    Container_Ext(azureMaps, "Azure Maps", "External")
 
     Rel(user, outlookAddin, "Extract / edit / send")
     Rel(outlookAddin, oauthProxy, "REST calls")
@@ -136,6 +144,7 @@ C4Container
     Rel(apiCore, openai, "LLM requests")
     Rel(apiCore, firecrawl, "Research API")
     Rel(apiCore, apollo, "Enrichment API")
+    Rel(apiCore, azureMaps, "Geocoding API")
 ```
 
 ### Component View (C4 Level 3 – FastAPI Core)
@@ -150,7 +159,7 @@ C4Component
         Component(cacheMgr, "Cache Manager", "Python", "Confidence scoring + Redis IO")
         Component(dbMgr, "DB Enhancer", "Python", "pgvector access + business persistence")
         Component(businessRules, "Business Rules", "Python", "Deal naming, dedupe, validation")
-        Component(integrations, "Integrations", "Python", "Zoho / Apollo / Firecrawl clients")
+        Component(integrations, "Integrations", "Python", "Zoho / Apollo / Firecrawl / Azure Maps clients")
         Component(attachments, "Attachment Service", "Python", "Blob upload + metadata")
         Component(monitoring, "Monitoring", "Python", "Telemetry + cache warmers")
     }
@@ -190,8 +199,11 @@ python app/admin/seed_policies.py
 - `ZOHO_CLIENT_ID`, `ZOHO_CLIENT_SECRET`, `ZOHO_REFRESH_TOKEN`
 - `FIRECRAWL_API_KEY`, `APOLLO_API_KEY`
 - `REDIS_URL`, `DATABASE_URL`
+- Optional geocoding: `ENABLE_AZURE_MAPS`, `AZURE_MAPS_KEY` (or Key Vault secret), `AZURE_MAPS_DEFAULT_COUNTRY`
 
 For the Outlook add-in, set `API_BASE_URL` and `API_KEY` in `addin/config.js` or `.env` depending on deployment target.
+
+> Detailed geocoding setup lives in [`docs/geo/azure_maps.md`](docs/geo/azure_maps.md).
 
 ### Useful Commands
 

@@ -26,36 +26,27 @@ def sanitize_location_field(location: Optional[str]) -> str:
     if not location or not isinstance(location, str):
         return ""
 
-    # Strip markdown links and HTML tags
-    location = re.sub(r'\[[^\]]*\]\([^)]+\)', '', location)  # strip markdown links
-    location = re.sub(r'</?[^>]+>', '', location)           # strip HTML tags
-    location = re.sub(r'[^\w\s,.-]', ' ', location)          # kill leftover junk
-    location = re.sub(r'\s+', ' ', location)                 # normalize whitespace
-    location = location.strip()
+    sanitized = location.strip()
 
-    # If nothing left after sanitization, return empty
-    if not location:
+    sanitized = re.sub(r'\[[^\]]*\]\([^\)]+\)', ' ', sanitized)
+    sanitized = re.sub(r'<[^>]*>', ' ', sanitized)
+    sanitized = re.sub(r'https?://[^\s]+', ' ', sanitized)
+    sanitized = re.sub(r'www\.[^\s]+', ' ', sanitized)
+
+    forbidden_extensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.zip']
+    lower_sanitized = sanitized.lower()
+    if any(ext in lower_sanitized for ext in forbidden_extensions):
         return ""
 
-    # Filter out URLs (HTTP/HTTPS prefixes)
-    if location.lower().startswith(('http://', 'https://')):
+    sanitized = re.sub(r'[\[\]\(\)_*`~]', ' ', sanitized)
+    sanitized = re.sub(r'\s+', ' ', sanitized).strip()
+
+    if not sanitized or len(sanitized) > 100:
+        return ""
+    if sanitized.lower().startswith(('http://', 'https://')) or '://' in sanitized:
         return ""
 
-    # Filter out file paths/extensions
-    file_extensions = ['.pdf', '.doc', '.docx', '.txt', '.html', '.htm', '.jpg', '.png', '.gif']
-    for ext in file_extensions:
-        if ext in location.lower():
-            return ""
-
-    # Filter out overly long values (likely not real locations)
-    if len(location) > 100:
-        return ""
-
-    # Filter out values with suspicious patterns
-    if '://' in location or 'www.' in location:
-        return ""
-
-    return location
+    return sanitized
 
 
 class FirecrawlV2Agent:
