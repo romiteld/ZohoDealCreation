@@ -658,16 +658,16 @@ flowchart LR
 
 ```mermaid
 flowchart TD
-    Start([Inbound Publish Request]) --> LoadCache{C³ Entry\nExists?}
+    Start([Inbound Publish Request]) --> LoadCache{C³ Entry<br/>Exists?}
 
     LoadCache -->|No| FullBuild[Full Build Path]
-    LoadCache -->|Yes| CalcMargin[Calculate Margin\nδ = 1 - P(risk)]
+    LoadCache -->|Yes| CalcMargin["Calculate Margin<br/>δ = 1 - P(risk)"]
 
-    CalcMargin --> CompareEmbed[Compare Embedding\nSimilarity]
-    CompareEmbed --> CheckFields{Field\nDrift?}
+    CalcMargin --> CompareEmbed[Compare Embedding<br/>Similarity]
+    CompareEmbed --> CheckFields{Field<br/>Drift?}
 
     CheckFields -->|High drift| SelectiveRebuild[Selective Rebuild]
-    CheckFields -->|Low drift| CheckMargin{Margin >\nδ-bound?}
+    CheckFields -->|Low drift| CheckMargin{"Margin ><br/>δ-bound?"}
 
     CheckMargin -->|Yes| CacheHit[✓ Reuse Cached Artifact]
     CheckMargin -->|No| SelectiveRebuild
@@ -678,16 +678,16 @@ flowchart TD
     FullBuild --> CreateSpans[Create Span Context]
     CreateSpans --> VoITProcess
 
-    VoITProcess --> SortSpans[Sort by Uncertainty\nretrieval_dispersion +\nrule_conflicts + c3_margin]
+    VoITProcess --> SortSpans["Sort by Uncertainty<br/>retrieval_dispersion +<br/>rule_conflicts + c3_margin"]
 
-    SortSpans --> BudgetLoop{Budget > 0 &\nQuality < Target?}
+    SortSpans --> BudgetLoop{"Budget > 0 &<br/>Quality < Target?"}
 
-    BudgetLoop -->|Yes| EvalActions[Evaluate Actions:\n1. Reuse cached\n2. Small LLM\n3. Tool call\n4. Deep LLM]
+    BudgetLoop -->|Yes| EvalActions["Evaluate Actions:<br/>1. Reuse cached<br/>2. Small LLM<br/>3. Tool call<br/>4. Deep LLM"]
 
-    EvalActions --> CalcVOI[Calculate VOI:\nqgain - λ*cost - μ*latency]
+    EvalActions --> CalcVOI["Calculate VOI:<br/>qgain - λ*cost - μ*latency"]
     CalcVOI --> SelectAction[Select Max VOI Action]
     SelectAction --> ApplyAction[Apply Action]
-    ApplyAction --> UpdateQuality[Update Span Quality\nDeduct Budget]
+    ApplyAction --> UpdateQuality[Update Span Quality<br/>Deduct Budget]
     UpdateQuality --> BudgetLoop
 
     BudgetLoop -->|No| Assemble[Assemble Artifact]
@@ -792,39 +792,39 @@ flowchart TD
 ```mermaid
 graph TB
     subgraph Sources["Data Sources (Aggregated from CRM Vault)"]
-        ZohoCRM[Zoho CRM Records\n"Vault" candidates]
-        Resume[Resume Attachments\nStored in CRM]
-        Transcript[Zoom Transcripts\nMeeting recordings]
-        ZoomNotes[Zoom AI Notes\nMeeting summaries]
-        CRMNotes[Historical CRM Notes\nRecruiter observations]
-        Web[Web Research\nFirecrawl enrichment]
+        ZohoCRM["Zoho CRM Records<br/>'Vault' candidates"]
+        Resume[Resume Attachments<br/>Stored in CRM]
+        Transcript[Zoom Transcripts<br/>Meeting recordings]
+        ZoomNotes[Zoom AI Notes<br/>Meeting summaries]
+        CRMNotes[Historical CRM Notes<br/>Recruiter observations]
+        Web[Web Research<br/>Firecrawl enrichment]
     end
 
     subgraph Aggregation["Data Aggregation Layer"]
-        Fetch[Fetch Vault Candidates\nfrom Zoho]
-        Enrich[Enrich with Attachments\n+ Transcripts + Notes]
-        Extract[Evidence Extraction\nFinancial patterns (AUM, prod)]
+        Fetch[Fetch Vault Candidates<br/>from Zoho]
+        Enrich["Enrich with Attachments<br/>+ Transcripts + Notes"]
+        Extract["Evidence Extraction<br/>Financial patterns (AUM, prod)"]
     end
 
     subgraph Optimization["🚨 VoIT + C³ Optimization (Cross-Cutting)"]
-        C3Check{C³ Cache Check\nProbabilistic reuse}
-        VoITProc[VoIT Processing\nAdaptive depth allocation]
+        C3Check{"C³ Cache Check<br/>Probabilistic reuse"}
+        VoITProc[VoIT Processing<br/>Adaptive depth allocation]
     end
 
     subgraph Formatting["Locked Format Generation"]
-        Template[Brandon's Template\n‼️ 🔔 📍 + 3-5 bullets]
-        Validate[Format Validator\nEmoji + bullet rules]
-        Evidence[Evidence Linking\nNo hallucinations allowed]
+        Template["Brandon's Template<br/>‼️ 🔔 📍 + 3-5 bullets"]
+        Validate[Format Validator<br/>Emoji + bullet rules]
+        Evidence[Evidence Linking<br/>No hallucinations allowed]
     end
 
     subgraph Output["Digest Card Output"]
-        EmailDigest[Email Campaign\nAdvisor-specific alerts]
-        HTMLCard[HTML Digest Cards\nAdvisor_Vault_Candidate_Alerts.html]
+        EmailDigest[Email Campaign<br/>Advisor-specific alerts]
+        HTMLCard[HTML Digest Cards<br/>Advisor_Vault_Candidate_Alerts.html]
     end
 
     subgraph Storage["Persistence"]
-        Redis[(Redis\n7d TTL)]
-        PG[(PostgreSQL\nCanonical Records)]
+        Redis[("Redis<br/>7d TTL")]
+        PG[("PostgreSQL<br/>Canonical Records")]
     end
 
     ZohoCRM --> Fetch
@@ -2241,5 +2241,11 @@ Include `pytest --cov=app --cov-report=term-missing` for coverage when assessing
 
 ---
 
-_CLAUDE.md contains assistant configuration details and should remain in the repository._
+## License
+
+**Proprietary and Confidential**
+
+Copyright © 2025 The Well Recruiting Solutions. All rights reserved.
+
+This software and associated documentation files (the "Software") are the proprietary property of The Well Recruiting Solutions. Unauthorized copying, distribution, modification, or use of this Software, via any medium, is strictly prohibited without the express written permission of The Well Recruiting Solutions.
 

@@ -224,7 +224,8 @@
       "Bash(do echo -n \"$file: \")",
       "Read(//d/Development/Web/wealth/frontend/src/components/**)",
       "Read(//d/Development/Web/wealth/frontend/**)",
-      "Bash(wsl az containerapp logs show:*)"
+      "Bash(wsl az containerapp logs show:*)",
+      "Bash(git pull:*)"
     ],
     "deny": [],
     "ask": [],

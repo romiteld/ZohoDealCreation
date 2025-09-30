@@ -51,6 +51,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Configuration** (`addin/config.js`): Environment and API settings
 - **Static Assets** (`addin/icon-*.png`): Add-in icons and resources
 
+## Project Structure
+
+### Directory Organization
+- `app/` - FastAPI APIs, LangGraph pipelines, integration clients
+  - Entry points: `app/main.py`, `app/langgraph_manager.py`
+- `addin/` - Outlook Add-in frontend (JavaScript, HTML, manifest)
+  - Primary file: `addin/taskpane.js`
+- `oauth_service/` - Flask OAuth proxy for Zoho token brokering
+- `tests/` - pytest suites with integration and browser test harnesses
+  - `tests/integration/` - End-to-end tests
+  - `tests/fixtures/` - Shared test fixtures
+- `docs/` - Architecture Decision Records (ADRs) and technical docs
+- `scripts/` - Deployment scripts, database utilities, automation
+- `migrations/` - Alembic database migration files
+- `static/` & `templates/` - Shared UI resources and Jinja2 templates
+
+### Naming Conventions
+- **Python**: PEP 8, 4 spaces, `snake_case`, type hints where practical
+- **JavaScript**: 2-space indentation, `camelCase`, avoid hyphens in filenames
+- **Config/Prompts**: lowercase with hyphens (e.g., `app/prompts/deal_summary.txt`)
+- **Test files**: `test_<feature>.py` pattern
+
+### Code Quality Standards
+- **Formatting**: Use `black`, `isort`, `ruff` for Python; `npm run lint` for JavaScript
+- **Coverage**: Target ≥85% on business-critical modules using `pytest --cov=app --cov-report=term-missing`
+- **Type Safety**: Add type hints to new Python functions; validate with `mypy`
+
 ## Essential Commands
 
 ### Outlook Add-in Development
@@ -189,9 +216,39 @@ curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainera
 # View logs
 az containerapp logs show --name well-intake-api --resource-group TheWell-Infra-East --follow
 
-# GitHub Actions deployment (preferred but currently disabled)
-# Push to main branch would trigger deploy-production.yml workflow
+# GitHub Actions deployment (automated)
+# Workflows: manifest-cache-bust.yml (active), deploy-production.yml (disabled)
 # Manual workflow dispatch available in GitHub Actions tab
+```
+
+### CI/CD Workflows
+
+**Active Workflows:**
+```bash
+# Manifest Cache-Bust & Deploy (.github/workflows/manifest-cache-bust.yml)
+# Triggers: Changes to addin/manifest.xml, *.html, *.js, *.css
+# Actions:
+# 1. Auto-increments manifest version (MAJOR.MINOR.PATCH.BUILD)
+# 2. Clears Redis cache and warms with new version
+# 3. Builds and deploys Docker image to Azure Container Apps
+# 4. Runs health checks and smoke tests
+# 5. Automatic rollback on failure
+
+# Manual trigger with custom version increment:
+# GitHub Actions > Manifest Cache-Bust & Deploy > Run workflow
+
+# Required GitHub Secrets:
+# AZURE_CLIENT_ID, AZURE_TENANT_ID, AZURE_SUBSCRIPTION_ID, API_KEY
+```
+
+**Disabled Workflows:**
+- `deploy-production.yml` - Full production deployment
+- `deploy-simple.yml` - Simplified deployment flow
+
+**Emergency Rollback:**
+```bash
+# Use emergency-rollback.yml workflow for critical issues
+# GitHub Actions > Emergency Rollback > Run workflow > Select revision
 ```
 
 ### API Testing
@@ -217,6 +274,37 @@ python -m app.jobs.talentwell_curator --audience steve_perry --days 7
 # Test Zoom transcript fetching
 python -c "from app.zoom_client import ZoomClient; import asyncio; client = ZoomClient(); asyncio.run(client.fetch_meeting_recording('MEETING_ID'))"
 ```
+
+## Authentication & OAuth Architecture
+
+### OAuth Proxy Service
+The system uses a **dual-authentication architecture** to protect credentials and simplify client integration:
+
+**Client-Facing API** (well-zoho-oauth-v2.azurewebsites.net):
+- **No API key required** for Outlook Add-in clients
+- Flask App Service acts as OAuth proxy
+- Automatic credential injection for backend requests
+- Token management with 55-minute Redis cache TTL
+- Rate limiting: 100 req/min per IP
+
+**Backend API** (well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io):
+- Requires `X-API-Key` header for direct access
+- Only OAuth proxy has backend API key
+- Clients never see or store API keys
+- Container Apps environment with auto-scaling
+
+**Authentication Flow:**
+1. Client sends request to OAuth proxy (no auth required)
+2. Proxy retrieves cached OAuth token from Redis (or refreshes from Zoho)
+3. Proxy injects API key and forwards request to backend API
+4. Backend processes with LangGraph and returns results
+5. Proxy forwards response to client
+
+**Key Vault Integration:**
+- Managed Identity for Container Apps
+- No stored credentials in code or config files
+- Automatic token rotation by Azure platform
+- `ZOHO_DEFAULT_OWNER_EMAIL` used for owner assignment (never hardcode IDs)
 
 ## LangGraph Workflow
 
@@ -434,3 +522,36 @@ az containerapp update --name well-intake-api \
 - **Issue**: Search queries failing without parentheses
 - **Solution**: Added parentheses to search criteria in `integrations.py`
 - **Pattern**: `(Website:equals:{website})`
+
+## Git & Pull Request Guidelines
+
+### Commit Messages
+- **Format**: Imperative mood, ≤65 characters (e.g., "Add redis cache guard")
+- **Body**: Add detailed explanations when touching multiple services
+- **Examples**:
+  - ✅ "Fix city/state preservation in data cleaning"
+  - ✅ "Add OAuth proxy architecture documentation"
+  - ❌ "Fixed bugs" (too vague)
+  - ❌ "Updated files" (not descriptive)
+
+### Pull Request Requirements
+1. **Summary**: Describe behavior changes and motivation
+2. **Impact**: List affected endpoints, manifests, or components
+3. **Testing**: Document validation steps (`pytest`, `npm run lint`, etc.)
+4. **Screenshots**: Attach UI changes (taskpane, forms) as GIFs/images
+5. **Configuration**: Flag any `.env` changes or manual deployment tasks
+6. **Links**: Reference Azure Boards/Jira tickets if applicable
+
+### Validation Checklist
+```bash
+# Before submitting PR:
+pytest --cov=app --cov-report=term-missing  # ≥85% coverage required
+npm run lint --prefix addin                 # No linting errors
+npm run validate:all                        # Manifests valid
+./run_tests.sh                              # CI automation passes
+```
+
+### Security Notes
+- **Never commit secrets** - Use `.env.local` templates and Azure Key Vault
+- **Rotate tokens** after accidental exposure via `oauth_service` configs
+- **Refresh cache** after manifest/key changes using cache-bust deployment
