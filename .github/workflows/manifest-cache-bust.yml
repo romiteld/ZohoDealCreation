@@ -21,12 +21,13 @@ on:
 
 env:
   AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-  AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
   AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
   AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
   CONTAINER_REGISTRY: wellintakeacr0903.azurecr.io
   CONTAINER_APP_NAME: well-intake-api
   RESOURCE_GROUP: TheWell-Infra-East
+  ACR_USERNAME: ${{ secrets.ACR_USERNAME }}
+  ACR_PASSWORD: ${{ secrets.ACR_PASSWORD }}
   API_ENDPOINT: https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io
   API_KEY: ${{ secrets.API_KEY }}
 
@@ -270,9 +271,8 @@ jobs:
       - name: Check Azure credentials
         id: check
         run: |
-          if [[ -n "${{ env.AZURE_CLIENT_ID }}" && \
-                -n "${{ env.AZURE_CLIENT_SECRET }}" && \
-                -n "${{ env.AZURE_TENANT_ID }}" && \
+          if [[ -n "${{ env.ACR_USERNAME }}" && \
+                -n "${{ env.ACR_PASSWORD }}" && \
                 -n "${{ env.AZURE_SUBSCRIPTION_ID }}" ]]; then
             echo "has_creds=true" >> $GITHUB_OUTPUT
             echo "✅ Azure credentials are configured"
@@ -280,9 +280,8 @@ jobs:
             echo "has_creds=false" >> $GITHUB_OUTPUT
             echo "⚠️ Azure credentials are missing. Deployment will be skipped."
             echo "To enable deployment, set the following secrets in your repository:"
-            echo "  - AZURE_CLIENT_ID"
-            echo "  - AZURE_CLIENT_SECRET"
-            echo "  - AZURE_TENANT_ID"
+            echo "  - ACR_USERNAME (Azure Container Registry username)"
+            echo "  - ACR_PASSWORD (Azure Container Registry password)"
             echo "  - AZURE_SUBSCRIPTION_ID"
           fi
 
@@ -306,20 +305,20 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Azure
-        uses: azure/login@v1
-        with:
-          creds: |
-            {
-              "clientId": "${{ env.AZURE_CLIENT_ID }}",
-              "clientSecret": "${{ env.AZURE_CLIENT_SECRET }}",
-              "subscriptionId": "${{ env.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId": "${{ env.AZURE_TENANT_ID }}"
-            }
-
       - name: Log in to Azure Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.CONTAINER_REGISTRY }}
+          username: ${{ env.ACR_USERNAME }}
+          password: ${{ env.ACR_PASSWORD }}
+
+      - name: Log in to Azure CLI
         run: |
-          az acr login --name wellintakeacr0903
+          az login --service-principal \
+            -u ${{ env.ACR_USERNAME }} \
+            -p ${{ env.ACR_PASSWORD }} \
+            --tenant ${{ env.AZURE_TENANT_ID }}
+          az account set --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Build and push Docker image
         env:
@@ -506,16 +505,13 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Log in to Azure
-        uses: azure/login@v1
-        with:
-          creds: |
-            {
-              "clientId": "${{ env.AZURE_CLIENT_ID }}",
-              "clientSecret": "${{ env.AZURE_CLIENT_SECRET }}",
-              "subscriptionId": "${{ env.AZURE_SUBSCRIPTION_ID }}",
-              "tenantId": "${{ env.AZURE_TENANT_ID }}"
-            }
+      - name: Log in to Azure CLI
+        run: |
+          az login --service-principal \
+            -u ${{ env.ACR_USERNAME }} \
+            -p ${{ env.ACR_PASSWORD }} \
+            --tenant ${{ env.AZURE_TENANT_ID }}
+          az account set --subscription ${{ env.AZURE_SUBSCRIPTION_ID }}
 
       - name: Rollback to previous version
         run: |
