@@ -960,18 +960,18 @@ async function extractEmailData(item) {
             attachments: []
         };
         
-        // Get body content
+        // Get body content - use HTML to capture forwarded email content
         item.body.getAsync(
-            Office.CoercionType.Text,
+            Office.CoercionType.Html,
             async (bodyResult) => {
                 if (bodyResult.status === Office.AsyncResultStatus.Succeeded) {
                     emailData.body = bodyResult.value;
-                    
-                    // Get attachments
+
+                    // Get attachments including itemAttachments (forwarded emails)
                     if (item.attachments && item.attachments.length > 0) {
                         emailData.attachments = await getAttachments(item);
                     }
-                    
+
                     resolve(emailData);
                 } else {
                     reject(new Error('Failed to get email body'));
