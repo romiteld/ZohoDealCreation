@@ -640,11 +640,22 @@ async def ensure_learning_services_ready() -> bool:
         return False
 
 
+async def get_database_connection():
+    """
+    FastAPI dependency for getting a database connection.
+    Yields an asyncpg connection from the connection manager pool.
+    """
+    manager = await get_connection_manager()
+    async with manager.pool.acquire() as connection:
+        yield connection
+
+
 # Export main classes and functions
 __all__ = [
     'DatabaseConnectionManager',
     'ConnectionConfig',
     'ConnectionHealth',
     'get_connection_manager',
+    'get_database_connection',
     'ensure_learning_services_ready'
 ]
