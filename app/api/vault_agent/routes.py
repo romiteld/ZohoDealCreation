@@ -86,13 +86,13 @@ async def ingest_record(request: IngestRequest) -> Dict[str, str]:
         
         # Generate unique locator
         locator = f"VAULT-{uuid.uuid4()}"
-        
+
         # Get Redis client
-        cache_mgr = get_cache_manager()
-        if cache_mgr and cache_mgr.redis_client:
+        cache_mgr = await get_cache_manager()
+        if cache_mgr and cache_mgr.client:
             # Store canonical record
             key = f"vault:record:{locator}"
-            await cache_mgr.redis_client.hset(
+            await cache_mgr.client.hset(
                 key,
                 mapping={
                     "canonical": json.dumps(canonical),
@@ -100,7 +100,7 @@ async def ingest_record(request: IngestRequest) -> Dict[str, str]:
                     "created_at": str(time.time())
                 }
             )
-            await cache_mgr.redis_client.expire(key, 86400 * 7)  # 7 day TTL
+            await cache_mgr.client.expire(key, 86400 * 7)  # 7 day TTL
             
             logger.info(f"Ingested record: {locator} from source: {request.source}")
         
@@ -117,13 +117,13 @@ async def publish_record(request: PublishRequest) -> Dict[str, Any]:
     fetch → C³ reuse-or-rebuild → VoIT allocate → return output summaries
     """
     try:
-        cache_mgr = get_cache_manager()
-        if not cache_mgr or not cache_mgr.redis_client:
+        cache_mgr = await get_cache_manager()
+        if not cache_mgr or not cache_mgr.client:
             raise HTTPException(status_code=503, detail="Cache service unavailable")
-        
+
         # Fetch canonical record
         key = f"vault:record:{request.locator}"
-        record_data = await cache_mgr.redis_client.hgetall(key)
+        record_data = await cache_mgr.client.hgetall(key)
         
         if not record_data:
             raise HTTPException(status_code=404, detail=f"Record not found: {request.locator}")
@@ -140,7 +140,7 @@ async def publish_record(request: PublishRequest) -> Dict[str, Any]:
         # Try C³ cache if enabled
         artifact = None
         if os.getenv("FEATURE_C3", "false").lower() == "true":
-            entry = await load_c3_entry(cache_mgr.redis_client, cache_key)
+            entry = await load_c3_entry(cache_mgr.client, cache_key)
             
             if entry:
                 # C³ gate decision
@@ -203,7 +203,7 @@ async def publish_record(request: PublishRequest) -> Dict[str, Any]:
                         "template_version": "v1"
                     }
                 )
-                await save_c3_entry(cache_mgr.redis_client, cache_key, new_entry)
+                await save_c3_entry(cache_mgr.client, cache_key, new_entry)
         
         # Generate channel-specific results
         results = {}
