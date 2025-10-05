@@ -155,10 +155,17 @@ pytest tests/apollo/             # Apollo.io integration tests
 pytest tests/firecrawl/          # Firecrawl integration tests
 pytest tests/integration/        # End-to-end integration tests
 pytest tests/production/         # Production environment tests
-pytest tests/zoom/              # Zoom integration tests
+pytest tests/zoom/               # Zoom integration tests
+pytest tests/talentwell/         # TalentWell curator, privacy, and AI tests
+
+# Run TalentWell-specific tests
+pytest tests/talentwell/test_data_quality.py      # Privacy mode, compensation, location
+pytest tests/talentwell/test_bullet_ranking.py    # Growth extraction, sentiment scoring
+pytest tests/talentwell/test_privacy_integration.py  # Full end-to-end privacy tests
 
 # Run pytest with coverage
 pytest --cov=app --cov-report=html
+pytest --cov=app.jobs.talentwell_curator --cov-report=term-missing  # Curator coverage
 
 # Run specific service tests
 pytest -m redis                  # Redis cache tests
@@ -469,6 +476,39 @@ VOIT_BUDGET=5.0             # Processing budget
 TARGET_QUALITY=0.9          # Target quality score
 ```
 
+## Feature Flags
+
+Feature flags allow gradual rollout of new functionality. Defaults live in `app/config/feature_flags.py` and can be overridden in `.env.local`.
+
+### Privacy Features (Approved – 2025-10-05)
+
+#### `PRIVACY_MODE` (default: `true`)
+- Company anonymization (`"Morgan Stanley" → "Major wirehouse"`)
+- Strict compensation normalization (`Target comp: $XXK–$YYK OTE`)
+- Location bullet suppression to avoid duplicating header fields
+- Rollback: set `PRIVACY_MODE=false` and restart the Container App
+
+### AI Features
+
+#### `FEATURE_GROWTH_EXTRACTION` (default: `true`)
+- Extracts growth metrics such as "grew book 40% YoY" or "top 5% performer"
+- High-priority category (0.95 weight) in bullet ranking
+
+#### `FEATURE_LLM_SENTIMENT` (default: `false`)
+- Enables sentiment-weighted bullet scoring (0.85–1.15 multiplier)
+- Current implementation uses keyword heuristics; GPT-5 integration pending
+- Positive sentiment = 5–15% boost, negative sentiment = 5–15% penalty
+
+### Performance Features
+
+#### `FEATURE_ASYNC_ZOHO` (default: `false`)
+⚠️ **Do not enable** – async client is blocked until Zoho call sites are refactored
+- See `docs/decisions/talentwell-privacy-rollout.md` for status
+
+### UX Features (Phase 3 – not implemented)
+- `FEATURE_AUDIENCE_FILTERING`
+- `FEATURE_CANDIDATE_SCORING`
+
 ## TalentWell Curator System
 
 ### Overview
@@ -533,6 +573,20 @@ az containerapp update --name well-intake-api \
 ```
 
 ## Recent Critical Fixes
+
+### TalentWell Privacy & AI Enhancement Rollout (2025-10-05)
+- **Privacy Mode Enabled**: Company anonymization, strict compensation formatting, location bullet suppression
+- **Implementation**:
+  - Company names → generic descriptors ("Major wirehouse", "Large RIA")
+  - Compensation → "Target comp: $XXK–$YYK OTE" format
+  - Location only in header, filtered from bullets
+- **AI Enhancements**:
+  - Growth extraction: Parses "grew 40% YoY" and "$1B → $1.5B" patterns
+  - Sentiment scoring: 5–15% boost/penalty based on candidate enthusiasm
+- **Feature Flags**: `PRIVACY_MODE=true`, `FEATURE_GROWTH_EXTRACTION=true`, `FEATURE_LLM_SENTIMENT=false`
+- **Files**: `app/config/feature_flags.py`, `app/jobs/talentwell_curator.py`, `docs/decisions/talentwell-privacy-rollout.md`
+- **Testing**: `tests/talentwell/test_data_quality.py`, `tests/talentwell/test_bullet_ranking.py`, `tests/talentwell/test_privacy_integration.py`
+- **Rollback**: Set `PRIVACY_MODE=false` in Azure Container Apps environment variables
 
 ### Teams Bot Improvements (2025-10-04)
 - **Issue**: Analytics command showed "unsupported card" error in Teams

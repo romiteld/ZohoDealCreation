@@ -220,6 +220,45 @@ This system introduces **two groundbreaking algorithms** that optimize AI conten
 - **Quality Enforcement** - Validates all output against format requirements before delivery
 - **Leverages VoIT + C³** - Uses the platform's optimization algorithms for efficient processing
 
+### Privacy & Data Quality Features
+**Feature-flagged privacy enhancements for TalentWell candidate digests** (✅ Production: 2025-10-05)
+
+- **Company Anonymization** (`PRIVACY_MODE=true`)
+  - Transforms identifying company names into generic descriptors
+  - Example: "Morgan Stanley" → "Major wirehouse", "Small RIA Shop" → "Mid-sized RIA"
+  - Size-based categorization using AUM when available
+  - Protects candidate privacy while preserving context for advisors
+
+- **Strict Compensation Formatting**
+  - Normalizes all compensation data to "Target comp: $XXK–$YYK OTE" format
+  - Parses various input formats: ranges, single values, "all-in", "base + bonus"
+  - Handles edge cases: "1.5M" → "$1500K OTE", "negotiable" → "Target comp: negotiable"
+  - Prevents raw candidate phrasing from appearing in digests
+
+- **Location Bullet Suppression**
+  - Location appears only in card header, never duplicated in bullets
+  - Prevents redundant "Location: New York, NY" bullet points
+  - Maintains clean, focused bullet point lists
+
+- **AUM Privacy Rounding**
+  - Rounds AUM to privacy-preserving ranges: "$5B+", "$1B–$5B", "$500M–$1B", "$100M–$500M"
+  - Prevents exact book size disclosure while maintaining advisor context
+
+- **AI Enhancement Features**
+  - **Growth Extraction** (`FEATURE_GROWTH_EXTRACTION=true`) - Parses "grew 40% YoY" and "$1B → $1.5B" patterns from transcripts
+  - **Sentiment Scoring** (`FEATURE_LLM_SENTIMENT=false`) - 5-15% boost/penalty based on candidate enthusiasm (keyword-based)
+  - **Score-Based Ranking** - Composite scoring prioritizes growth metrics, sentiment, and evidence quality
+
+- **Rollback Capability**
+  - Set `PRIVACY_MODE=false` in Azure Container Apps environment variables
+  - Instant revert to original behavior without code deployment
+  - Feature flags stored in `app/config/feature_flags.py`
+
+- **Comprehensive Test Coverage** - 51 tests across 3 suites
+  - `tests/talentwell/test_data_quality.py` (15 tests) - Privacy mode unit tests
+  - `tests/talentwell/test_bullet_ranking.py` (29 tests) - Growth extraction, sentiment scoring
+  - `tests/talentwell/test_privacy_integration.py` (7 tests) - Full end-to-end integration tests
+
 
 ## Architecture
 
@@ -1800,9 +1839,14 @@ flowchart TB
             CardValidator["card_validator.py\n(DigestCard format ‼️🔔📍)"]
             QualityMetrics["quality_metrics.py\n(Scoring)"]
         end
+
+        subgraph PrivacyFeatures["Privacy & AI Features (NEW)"]
+            FeatureFlags["feature_flags.py\n(PRIVACY_MODE, GROWTH, SENTIMENT)"]
+            PrivacyMethods["talentwell_curator.py\n(_anonymize_company, _standardize_compensation,\n_extract_growth_metrics, _analyze_sentiment)"]
+        end
     end
-    class VaultAgentFeature,VaultAPI,VaultAggregation,VaultJobs,VaultExtract,VaultValidation core
-    class VaultRoutes,VaultModels,Normalizer,Aggregator,TalentWellCurator,BatchProcessor,EvidenceExtractor,FinancialPatterns,CardValidator,QualityMetrics core
+    class VaultAgentFeature,VaultAPI,VaultAggregation,VaultJobs,VaultExtract,VaultValidation,PrivacyFeatures core
+    class VaultRoutes,VaultModels,Normalizer,Aggregator,TalentWellCurator,BatchProcessor,EvidenceExtractor,FinancialPatterns,CardValidator,QualityMetrics,FeatureFlags,PrivacyMethods core
 
     subgraph LangGraphPipeline["🤖 LangGraph Pipeline (app/)"]
         direction TB
@@ -1960,6 +2004,8 @@ flowchart TB
     EvidenceExtractor --> FinancialPatterns
     TalentWellCurator --> CardValidator
     CardValidator --> QualityMetrics
+    TalentWellCurator --> FeatureFlags
+    TalentWellCurator --> PrivacyMethods
 
     %% LangGraph connections
     LangGraphMgr --> BusinessRules
@@ -2193,10 +2239,72 @@ npm run lint --prefix addin
 
 ## Testing
 
-- **Python unit/integration tests**: `pytest`
-- **Selective suites**: `pytest tests/test_addin_endpoints.py`
-- **Smoke test script**: `./run_tests.sh`
-- **Front-end** (manual) – load the Outlook add-in with Office 365 developer tenant and exercise Test/Send flows.
+### Test Organization
+The test suite is organized by feature area with comprehensive coverage across unit, integration, and end-to-end tests.
+
+```bash
+# Run all tests
+pytest
+
+# Run specific test suites by directory
+pytest tests/apollo/             # Apollo.io integration tests
+pytest tests/firecrawl/          # Firecrawl v2 integration tests
+pytest tests/integration/        # End-to-end integration tests
+pytest tests/production/         # Production environment smoke tests
+pytest tests/talentwell/         # TalentWell curator, privacy, AI features
+pytest tests/zoom/              # Zoom API integration tests
+
+# Run add-in endpoint tests
+pytest tests/test_addin_endpoints.py
+
+# Coverage reporting
+pytest --cov=app --cov-report=term-missing
+pytest --cov=app --cov-report=html  # HTML report in htmlcov/
+```
+
+### TalentWell Test Suite
+Privacy and AI enhancement features have comprehensive test coverage (51 tests):
+
+```bash
+# Run all TalentWell tests
+pytest tests/talentwell/ -v
+
+# Privacy mode and data quality (15 tests)
+pytest tests/talentwell/test_data_quality.py -v
+# Tests: company anonymization, strict compensation formatting,
+#        location bullet suppression, rollback behavior
+
+# Growth extraction and sentiment scoring (29 tests)
+pytest tests/talentwell/test_bullet_ranking.py -v
+# Tests: percentage patterns ("grew 40% YoY"), dollar ranges ("$1B → $1.5B"),
+#        edge cases, sentiment analysis, score-based ranking
+
+# End-to-end integration tests (7 tests)
+pytest tests/talentwell/test_privacy_integration.py -v
+# Tests: full digest generation with privacy mode, rollback behavior,
+#        growth + privacy interaction, compensation edge cases, AUM rounding
+
+# Coverage for TalentWell curator
+pytest --cov=app.jobs.talentwell_curator --cov-report=term-missing
+```
+
+### Test Patterns & Best Practices
+- **Monkeypatching** - Feature flags are tested using `monkeypatch.setattr(curator_module, "PRIVACY_MODE", True)`
+- **AsyncMock** - Zoho client and Redis dependencies mocked with `AsyncMock()`
+- **Fixtures** - Shared fixtures in `tests/fixtures/` for sample deals, transcripts, CRM data
+- **Parameterized Tests** - Edge cases tested with `@pytest.mark.parametrize`
+- **Integration Tests** - Full end-to-end scenarios with mocked external dependencies
+
+### Manual Testing
+- **Outlook Add-in** - Load add-in with Office 365 developer tenant, test Send/Test flows
+- **Teams Bot** - Test commands in Teams: `digest`, `preferences`, `analytics`, `help`
+- **Smoke Tests** - Automated smoke test script: `./run_tests.sh`
+
+### CI/CD Testing
+GitHub Actions workflows run tests automatically on:
+- Pull requests to `main` branch
+- Manifest changes (triggers `manifest-cache-bust.yml`)
+- Manual workflow dispatch
 
 Include `pytest --cov=app --cov-report=term-missing` for coverage when assessing dead code before deletion.
 

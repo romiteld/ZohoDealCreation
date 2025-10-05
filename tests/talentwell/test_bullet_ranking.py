@@ -9,8 +9,9 @@ import pytest
 from unittest.mock import Mock, AsyncMock, patch
 from typing import List
 
+import app.jobs.talentwell_curator as curator_module
 from app.jobs.talentwell_curator import TalentWellCurator, DigestCard, BulletPoint
-from app.extract.evidence import EvidenceExtractor
+from app.extract.evidence import EvidenceExtractor, BulletCategory
 
 
 class TestBulletRanking:
@@ -502,3 +503,188 @@ class TestBulletRanking:
         bullets = await curator._extract_transcript_evidence("test transcript")
         assert len(bullets) == 1
         assert bullets[0].text == "Test bullet"
+
+    def test_growth_extraction_feature_flag(self, monkeypatch, curator):
+        """Verify growth extraction obeys the feature flag toggle."""
+
+        text = "Grew book 40% YoY and doubled production"
+
+        monkeypatch.setattr(curator_module, "FEATURE_GROWTH_EXTRACTION", True, raising=False)
+        bullets_enabled = curator._extract_growth_metrics(text)
+        assert any("Grew book" in b.text for b in bullets_enabled)
+
+        monkeypatch.setattr(curator_module, "FEATURE_GROWTH_EXTRACTION", False, raising=False)
+        bullets_disabled = curator._extract_growth_metrics(text)
+        assert bullets_disabled == []
+
+    def test_growth_metrics_extraction_patterns(self, monkeypatch, curator):
+        """Ensure common growth phrases map to expected bullet text."""
+
+        monkeypatch.setattr(curator_module, "FEATURE_GROWTH_EXTRACTION", True, raising=False)
+
+        patterns = {
+            "Increased AUM by 25% year over year": "Increased AUM by 25% YoY",
+            "Book grew by 15%": "Book grew by 15%",
+            "Top 5% performer in region": "Top 5% performer",
+            "Tripled client base in 3 years": "Tripled client base",
+        }
+
+        for raw_text, expected in patterns.items():
+            bullets = curator._extract_growth_metrics(raw_text)
+            assert any(expected in b.text for b in bullets), f"Expected '{expected}' for '{raw_text}'"
+
+    def test_growth_extraction_dollar_range(self, monkeypatch, curator):
+        """Test growth extraction from dollar range patterns."""
+        monkeypatch.setattr(curator_module, "FEATURE_GROWTH_EXTRACTION", True, raising=False)
+
+        # Test $XB → $YB pattern
+        text1 = "Grew from $1.2B to $1.8B in AUM over 2 years"
+        bullets1 = curator._extract_growth_metrics(text1, source="Transcript")
+        assert len(bullets1) > 0, "Should extract growth from dollar range"
+        # Should calculate ~50% growth
+        assert any("50%" in b.text or "1.2B" in b.text for b in bullets1)
+
+        # Test $XM → $YM pattern
+        text2 = "Increased production from $800K to $1.2M"
+        bullets2 = curator._extract_growth_metrics(text2, source="Transcript")
+        assert len(bullets2) > 0, "Should extract growth from M/K range"
+        assert any("50%" in b.text or "800K" in b.text or "1.2M" in b.text for b in bullets2)
+
+    def test_growth_extraction_edge_cases(self, monkeypatch, curator):
+        """Test growth extraction handles edge cases gracefully."""
+        monkeypatch.setattr(curator_module, "FEATURE_GROWTH_EXTRACTION", True, raising=False)
+
+        # No growth mentioned
+        text1 = "Has 20 years experience in wealth management"
+        bullets1 = curator._extract_growth_metrics(text1, source="Transcript")
+        assert bullets1 == [], "Should return empty list when no growth found"
+
+        # Empty text
+        bullets2 = curator._extract_growth_metrics("", source="Transcript")
+        assert bullets2 == [], "Should handle empty text"
+
+        # None text
+        bullets3 = curator._extract_growth_metrics(None, source="Transcript")
+        assert bullets3 == [], "Should handle None text"
+
+        # Malformed percentage
+        text4 = "Grew by % last year"
+        bullets4 = curator._extract_growth_metrics(text4, source="Transcript")
+        # Should either find nothing or handle gracefully
+        assert isinstance(bullets4, list), "Should return list even with malformed text"
+
+    @pytest.mark.asyncio
+    async def test_analyze_candidate_sentiment_positive(self, curator):
+        """Test sentiment analysis detects positive keywords."""
+        transcript = """
+        I'm very excited about this opportunity. Looking forward to building
+        my practice and working with a great team. Enthusiastic about the
+        growth potential here.
+        """
+
+        result = await curator._analyze_candidate_sentiment(transcript)
+
+        assert result['score'] > 0.5, "Should detect positive sentiment"
+        assert result['enthusiasm_score'] > 0.5, "Should detect enthusiasm"
+        assert result['concerns_detected'] is False, "Should not detect concerns"
+
+    @pytest.mark.asyncio
+    async def test_analyze_candidate_sentiment_negative(self, curator):
+        """Test sentiment analysis detects negative keywords."""
+        transcript = """
+        I'm concerned about the compensation structure. Worried about the
+        transition timeline and uncertain about the support model.
+        Not confident this is the right fit.
+        """
+
+        result = await curator._analyze_candidate_sentiment(transcript)
+
+        assert result['score'] < 0.5, "Should detect negative sentiment"
+        assert result['concerns_detected'] is True, "Should detect concerns"
+
+    @pytest.mark.asyncio
+    async def test_analyze_candidate_sentiment_neutral(self, curator):
+        """Test sentiment analysis handles neutral content."""
+        transcript = """
+        Currently managing $2B in AUM with 150 clients. Have Series 7, 66 licenses.
+        Based in New York Metro area.
+        """
+
+        result = await curator._analyze_candidate_sentiment(transcript)
+
+        # Neutral should be around 0.5
+        assert 0.4 <= result['score'] <= 0.6, "Should return neutral sentiment for factual content"
+        assert result['concerns_detected'] is False, "Should not detect concerns in neutral content"
+
+    @pytest.mark.asyncio
+    async def test_analyze_candidate_sentiment_empty(self, curator):
+        """Test sentiment analysis handles empty/None input."""
+        # Empty string
+        result1 = await curator._analyze_candidate_sentiment("")
+        assert result1['score'] == 0.5, "Should return neutral for empty string"
+
+        # None
+        result2 = await curator._analyze_candidate_sentiment(None)
+        assert result2['score'] == 0.5, "Should return neutral for None"
+
+    def test_sentiment_weighted_scoring(self, monkeypatch, curator):
+        """Sentiment multiplier should adjust scores only when feature enabled."""
+
+        bullet = BulletPoint(text="AUM: $1B", confidence=0.95, source="CRM")
+        curator.evidence_extractor.categorize_bullet.return_value = BulletCategory.FINANCIAL_METRIC
+
+        sentiment_payload = {
+            'score': 0.9,
+            'enthusiasm_score': 0.8,
+            'concerns_detected': False
+        }
+
+        monkeypatch.setattr(curator_module, "FEATURE_LLM_SENTIMENT", False, raising=False)
+        baseline = curator._score_bullet(bullet, sentiment=sentiment_payload)
+
+        monkeypatch.setattr(curator_module, "FEATURE_LLM_SENTIMENT", True, raising=False)
+        boosted = curator._score_bullet(bullet, sentiment=sentiment_payload)
+
+        assert boosted >= baseline
+
+    def test_sentiment_boost_positive_candidate(self, monkeypatch, curator):
+        """Positive sentiment should provide an explicit boost."""
+
+        bullet = BulletPoint(text="Grew revenue 50% YoY", confidence=0.92, source="Transcript")
+        curator.evidence_extractor.categorize_bullet.return_value = BulletCategory.GROWTH_ACHIEVEMENT
+
+        positive_sentiment = {
+            'score': 0.85,
+            'enthusiasm_score': 0.9,
+            'concerns_detected': False
+        }
+
+        monkeypatch.setattr(curator_module, "FEATURE_LLM_SENTIMENT", True, raising=False)
+        boosted = curator._score_bullet(bullet, sentiment=positive_sentiment)
+
+        monkeypatch.setattr(curator_module, "FEATURE_LLM_SENTIMENT", False, raising=False)
+        baseline = curator._score_bullet(bullet, sentiment=positive_sentiment)
+
+        assert boosted > baseline
+        assert boosted <= 1.0
+
+    def test_sentiment_penalty_negative_candidate(self, monkeypatch, curator):
+        """Negative sentiment should reduce the score when enabled."""
+
+        bullet = BulletPoint(text="Production: $800K", confidence=0.9, source="CRM")
+        curator.evidence_extractor.categorize_bullet.return_value = BulletCategory.FINANCIAL_METRIC
+
+        negative_sentiment = {
+            'score': 0.25,
+            'enthusiasm_score': 0.2,
+            'concerns_detected': True
+        }
+
+        monkeypatch.setattr(curator_module, "FEATURE_LLM_SENTIMENT", True, raising=False)
+        penalized = curator._score_bullet(bullet, sentiment=negative_sentiment)
+
+        monkeypatch.setattr(curator_module, "FEATURE_LLM_SENTIMENT", False, raising=False)
+        baseline = curator._score_bullet(bullet, sentiment=negative_sentiment)
+
+        assert penalized < baseline
+        assert penalized >= 0.0

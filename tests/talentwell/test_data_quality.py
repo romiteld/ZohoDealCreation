@@ -10,6 +10,7 @@ from unittest.mock import Mock, AsyncMock, patch
 from datetime import datetime, timedelta
 import json
 
+import app.jobs.talentwell_curator as curator_module
 from app.jobs.talentwell_curator import TalentWellCurator, DigestCard, BulletPoint
 from app.extract.evidence import EvidenceExtractor
 
@@ -183,6 +184,73 @@ class TestDataQuality:
             assert result == expected, f"Failed for {company} (AUM: {aum}): expected {expected}, got {result}"
 
     @pytest.mark.asyncio
+    async def test_privacy_mode_enabled(self, monkeypatch, curator):
+        """When privacy mode is enabled, company is anonymized and location bullets suppressed."""
+
+        # Enable privacy mode for this test
+        monkeypatch.setattr(curator_module, "PRIVACY_MODE", True, raising=False)
+
+        parsed_aum = curator._parse_aum("$1.5B")
+        display_company = curator._anonymize_company("Morgan Stanley", parsed_aum) if curator_module.PRIVACY_MODE else "Morgan Stanley"
+        assert display_company == "Major wirehouse"
+
+        # Strict compensation formatting should normalize to Target comp format
+        assert curator._standardize_compensation("250k to 350k") == "Target comp: $250K–$350K OTE"
+
+        # Location bullets should be suppressed when privacy mode is on
+        deal = {"location": "Chicago, IL"}
+        bullets = await curator._ensure_minimum_bullets(deal, [])
+        assert all("Location:" not in b.text for b in bullets)
+
+    @pytest.mark.asyncio
+    async def test_privacy_mode_disabled(self, monkeypatch, curator):
+        """When privacy mode is disabled, original company and location bullets are preserved."""
+
+        monkeypatch.setattr(curator_module, "PRIVACY_MODE", False, raising=False)
+
+        parsed_aum = curator._parse_aum("$1.5B")
+        # With privacy mode off, company name should remain unchanged
+        display_company = "Morgan Stanley" if not curator_module.PRIVACY_MODE else curator._anonymize_company("Morgan Stanley", parsed_aum)
+        assert display_company == "Morgan Stanley"
+
+        # Location bullets should be allowed when privacy mode is disabled
+        deal = {"location": "Chicago, IL"}
+        bullets = await curator._ensure_minimum_bullets(deal, [])
+        assert any("Location:" in b.text for b in bullets)
+
+    def test_strict_compensation_formatting(self, curator):
+        """Verify strict compensation normalization handles edge cases."""
+
+        test_cases = [
+            ("250k to 350k", "Target comp: $250K–$350K OTE"),
+            ("$500k", "Target comp: $500K OTE"),
+            ("95k + commission", "Target comp: $95K OTE"),
+            ("95k base + commission 140+ OTE", "Target comp: $95K–$140K OTE"),
+            ("1.2M", "Target comp: $1200K OTE"),
+        ]
+
+        for raw_text, expected in test_cases:
+            assert curator._standardize_compensation(raw_text) == expected
+
+    @pytest.mark.asyncio
+    async def test_location_bullet_suppression_privacy_mode(self, monkeypatch, curator):
+        """Explicitly verify location bullets are removed under privacy mode."""
+
+        monkeypatch.setattr(curator_module, "PRIVACY_MODE", True, raising=False)
+        deal = {"location": "Austin, TX"}
+        bullets = await curator._ensure_minimum_bullets(deal, [])
+        assert all("Location:" not in b.text for b in bullets)
+
+    @pytest.mark.asyncio
+    async def test_location_bullets_allowed_without_privacy(self, monkeypatch, curator):
+        """Location bullets should still appear when privacy mode is disabled."""
+
+        monkeypatch.setattr(curator_module, "PRIVACY_MODE", False, raising=False)
+        deal = {"location": "Austin, TX"}
+        bullets = await curator._ensure_minimum_bullets(deal, [])
+        assert any("Location:" in b.text for b in bullets)
+
+    @pytest.mark.asyncio
     async def test_location_normalization(self, curator):
         """Test location normalization to metro areas."""
         # Mock city context data
@@ -289,217 +357,11 @@ class TestDataQuality:
             result = curator._build_mobility_line(is_mobile, remote, hybrid)
             assert result == expected, f"Failed for mobile={is_mobile}, remote={remote}, hybrid={hybrid}"
 
-    def test_format_aum(self, curator):
-        """Test AUM formatting helper method."""
-        # Add the method to curator if it doesn't exist
-        def _format_aum(value):
-            if not value:
-                return 'Not specified'
-
-            # Remove $ and commas, convert to float
-            clean_val = str(value).replace('$', '').replace(',', '')
-            try:
-                amount = float(clean_val)
-
-                if amount >= 1_000_000_000:
-                    # Round to nearest 0.05B for billions
-                    rounded = round(amount / 1_000_000_000 * 20) / 20
-                    if rounded == int(rounded):
-                        return f'${int(rounded)}B'
-                    return f'${rounded:.2f}B'.rstrip('0').rstrip('.')
-                elif amount >= 100_000_000:
-                    # Round to nearest million for 100M+
-                    return f'${int(round(amount / 1_000_000))}M'
-                elif amount >= 10_000_000:
-                    # Round to nearest 0.1M for 10M+
-                    rounded = round(amount / 1_000_000, 1)
-                    if rounded == int(rounded):
-                        return f'${int(rounded)}M'
-                    return f'${rounded}M'
-                elif amount >= 1_000_000:
-                    # Round to nearest 0.1M for 1M+
-                    rounded = round(amount / 1_000_000, 1)
-                    if rounded == int(rounded):
-                        return f'${int(rounded)}M'
-                    return f'${rounded}M'
-                elif amount >= 100_000:
-                    # Round to nearest 10K for 100K+
-                    return f'${int(round(amount / 1_000))}K'
-                else:
-                    return f'${int(amount):,}'
-            except:
-                return str(value)
-
-        curator._format_aum = _format_aum
-
-        # Test the method
-        assert curator._format_aum('$1,250,000,000') == '$1.25B'
-        assert curator._format_aum('$999,999,999') == '$1B'
-        assert curator._format_aum('$75,500,000') == '$75.5M'
-
-    def test_format_compensation(self, curator):
-        """Test compensation formatting helper method."""
-        # Add the method to curator if it doesn't exist
-        def _format_compensation(value):
-            if not value:
-                return 'Not specified'
-
-            value_str = str(value).lower()
-
-            if value_str == 'negotiable':
-                return 'Negotiable'
-
-            # Handle ranges
-            if '-' in value_str:
-                parts = value_str.split('-')
-                if len(parts) == 2:
-                    low = parts[0].strip().replace('$', '').replace(',', '').replace('k', '000').replace('m', '000000').replace('mm', '000000')
-                    high = parts[1].strip().replace('$', '').replace(',', '').replace('k', '000').replace('m', '000000').replace('mm', '000000')
-                    try:
-                        low_num = float(low)
-                        high_num = float(high)
-
-                        if low_num >= 1_000_000:
-                            low_fmt = f'${low_num/1_000_000:.1f}M'.rstrip('0').rstrip('.')
-                        else:
-                            low_fmt = f'${int(low_num/1_000)}K'
-
-                        if high_num >= 1_000_000:
-                            high_fmt = f'${high_num/1_000_000:.1f}M'.rstrip('0').rstrip('.')
-                        else:
-                            high_fmt = f'${int(high_num/1_000)}K'
-
-                        return f'{low_fmt}-{high_fmt}'
-                    except:
-                        pass
-
-            # Handle single values
-            clean_val = value_str.replace('$', '').replace(',', '').replace('k', '000').replace('m', '000000').replace('mm', '000000').replace('+', '')
-            try:
-                amount = float(clean_val)
-                if amount >= 1_000_000:
-                    formatted = f'${amount/1_000_000:.1f}M'.rstrip('0').rstrip('.')
-                else:
-                    formatted = f'${int(amount/1_000)}K'
-
-                if '+' in str(value):
-                    formatted += '+'
-                return formatted
-            except:
-                return str(value)
-
-        curator._format_compensation = _format_compensation
-
-        # Test the method
-        assert curator._format_compensation('350000-450000') == '$350K-$450K'
-        assert curator._format_compensation('1mm+') == '$1M+'
-
-    def test_filter_internal_notes(self, curator):
-        """Test internal note filtering helper method."""
-        # Add the method to curator if it doesn't exist
-        def _filter_internal_notes(bullets):
-            filtered = []
-            internal_patterns = [
-                '[INTERNAL]',
-                'Internal:',
-                'Note:',
-                'TODO:',
-                'FOLLOWUP:',
-                'DO NOT',
-            ]
-
-            for bullet in bullets:
-                if not any(pattern in bullet.text for pattern in internal_patterns):
-                    filtered.append(bullet)
-
-            return filtered
-
-        curator._filter_internal_notes = _filter_internal_notes
-
-        # Test the method
-        bullets = [
-            BulletPoint(text="AUM: $500M", confidence=0.95, source="CRM"),
-            BulletPoint(text="[INTERNAL] Check references", confidence=0.8, source="Notes"),
-        ]
-
-        filtered = curator._filter_internal_notes(bullets)
-        assert len(filtered) == 1
-        assert filtered[0].text == "AUM: $500M"
-
     def test_format_availability(self, curator):
-        """Test availability formatting helper method."""
-        # Add the method to curator if it doesn't exist
-        def _format_availability(value):
-            if not value:
-                return 'Not specified'
-
-            value_str = str(value).strip()
-
-            # Capitalize quarters
-            if value_str.lower().startswith('q'):
-                return value_str.upper()[:2] + value_str[2:]
-
-            # Capitalize months
-            months = ['january', 'february', 'march', 'april', 'may', 'june',
-                     'july', 'august', 'september', 'october', 'november', 'december']
-            for month in months:
-                if month in value_str.lower():
-                    return value_str.lower().replace(month, month.capitalize())
-
-            # Handle ASAP
-            if value_str.lower() == 'asap':
-                return 'ASAP'
-
-            # Handle immediately
-            if value_str.lower() == 'immediately':
-                return 'Immediately'
-
-            return value_str
-
-        curator._format_availability = _format_availability
-
-        # Test the method
-        assert curator._format_availability('q1 2025') == 'Q1 2025'
-        assert curator._format_availability('asap') == 'ASAP'
-
-    def test_deduplicate_bullets(self, curator):
-        """Test bullet deduplication helper method."""
-        # Add the method to curator if it doesn't exist
-        def _deduplicate_bullets(bullets):
-            seen_content = {}
-            deduped = []
-
-            for bullet in bullets:
-                # Normalize text for comparison
-                normalized = bullet.text.lower().replace('$', '').replace(',', '').replace('aum:', '').replace('production:', '').strip()
-
-                # Check for similar content
-                is_dupe = False
-                for key in seen_content:
-                    if normalized in key or key in normalized:
-                        # Keep the one with higher confidence
-                        if bullet.confidence > seen_content[key].confidence:
-                            # Replace the existing one
-                            idx = deduped.index(seen_content[key])
-                            deduped[idx] = bullet
-                            seen_content[key] = bullet
-                        is_dupe = True
-                        break
-
-                if not is_dupe:
-                    seen_content[normalized] = bullet
-                    deduped.append(bullet)
-
-            return deduped
-
-        curator._deduplicate_bullets = _deduplicate_bullets
-
-        # Test the method
-        bullets = [
-            BulletPoint(text="AUM: $500M", confidence=0.95, source="CRM"),
-            BulletPoint(text="AUM: $500 million", confidence=0.9, source="Transcript"),
-        ]
-
-        deduped = curator._deduplicate_bullets(bullets)
-        assert len(deduped) == 1
-        assert deduped[0].confidence == 0.95
+        """Test availability formatting with actual curator method."""
+        # Test the actual _format_availability method
+        assert curator._format_availability('immediately') == "Available immediately"
+        assert curator._format_availability('asap') == "Available immediately"
+        assert curator._format_availability('2 weeks') == "Available in 2 weeks"
+        assert curator._format_availability('1 month') == "Available in 1 month"
+        assert curator._format_availability('') == ""

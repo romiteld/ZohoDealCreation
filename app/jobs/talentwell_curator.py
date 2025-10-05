@@ -20,7 +20,7 @@ from app.extract.evidence import EvidenceExtractor, BulletPoint
 from app.templates.ast import ASTCompiler
 from app.bandits.subject_bandit import SubjectLineBandit as SubjectBandit
 from app.integrations import get_zoho_headers, fetch_deal_from_zoho
-from app.config import VoITConfig
+from app.config import VoITConfig, PRIVACY_MODE, FEATURE_GROWTH_EXTRACTION, FEATURE_LLM_SENTIMENT
 
 logger = logging.getLogger(__name__)
 
@@ -421,7 +421,12 @@ class TalentWellCurator:
 
             # Normalize location to metro area
             location = await self._normalize_location(location)
-            
+
+            # Parse AUM for privacy-aware company anonymization
+            parsed_aum = None
+            if deal.get('book_size_aum'):
+                parsed_aum = self._parse_aum(str(deal['book_size_aum']))
+
             # Build mobility line from CRM fields
             mobility_line = self._build_mobility_line(
                 deal.get('is_mobile', False),
@@ -503,6 +508,9 @@ class TalentWellCurator:
                 transcript_text
             )
             
+            # Analyze candidate sentiment from transcript EARLY for bullet ranking
+            sentiment = await self._analyze_candidate_sentiment(transcript_text)
+
             # CRITICAL: Ensure we have 3-5 bullets from ALL data sources
             if len(bullets) < 3:
                 logger.warning(f"Only {len(bullets)} bullets for candidate {candidate_name}, extracting from ALL sources")
@@ -511,16 +519,28 @@ class TalentWellCurator:
                 if transcript_text:
                     bullets = await self._extract_more_from_transcript(bullets, transcript_text, deal, voit_result.get('enhanced_data', {}))
 
+                    # Extract growth metrics from transcript (feature-flagged)
+                    growth_bullets = self._extract_growth_metrics(transcript_text, source="Transcript")
+                    for gb in growth_bullets:
+                        if len(bullets) < 5:
+                            bullets.append(gb)
+
                 # Extract from resume data if available
                 if len(bullets) < 3 and deal.get('resume_text'):
                     bullets = await self._extract_from_resume(bullets, deal.get('resume_text'), deal)
 
-                # Still need more? Add from available CRM fields
-                if len(bullets) < 3:
-                    bullets = await self._ensure_minimum_bullets(deal, bullets)
+                    # Extract growth metrics from resume (feature-flagged)
+                    resume_growth = self._extract_growth_metrics(deal.get('resume_text'), source="Resume")
+                    for gb in resume_growth:
+                        if len(bullets) < 5:
+                            bullets.append(gb)
 
-                # If STILL less than 3, add generic professional bullets
+                # Still need more? Add from available CRM fields (pass sentiment for ranking)
                 if len(bullets) < 3:
+                    bullets = await self._ensure_minimum_bullets(deal, bullets, sentiment=sentiment)
+
+                # If STILL less than 3, add generic professional bullets (suppress location in privacy mode)
+                if len(bullets) < 3 and not PRIVACY_MODE:
                     if deal.get('location'):
                         bullets.append(BulletPoint(
                             text=f"Location: {deal['location']}",
@@ -530,15 +550,15 @@ class TalentWellCurator:
             elif len(bullets) > 5:
                 bullets = bullets[:5]  # Take top 5
 
-            # Analyze candidate sentiment from transcript
-            sentiment = await self._analyze_candidate_sentiment(transcript_text)
+            # Apply privacy mode if enabled - anonymize company name
+            display_company = self._anonymize_company(company, parsed_aum) if PRIVACY_MODE else company
 
             # Create card with Brandon's format + sentiment analysis
             card = DigestCard(
                 deal_id=deal.get('id'),
                 candidate_name=candidate_name,
                 job_title=job_title,
-                company=company,
+                company=display_company,
                 location=f"{location} {mobility_line}",
                 bullets=bullets,
                 metro_area=location,  # Already normalized
@@ -669,56 +689,59 @@ class TalentWellCurator:
 
     def _standardize_compensation(self, raw_text: str) -> str:
         """
-        MINIMAL standardization of compensation - preserves candidate's exact wording.
+        STRICT normalization to: "Target comp: $XXK–$YYK OTE"
 
-        Only applies these formatting rules:
-        1. Add $ prefix if missing (95k → $95k)
-        2. Capitalize K/M/B units (95k → $95K)
-        3. Add "base" before "+ commission/bonus" if not present (95k + commission → $95K base + commission)
-        4. Standardize "all in" → "OTE" (abbreviation only)
+        Extracts all dollar amounts and standardizes to OTE format.
+        Approved by stakeholder 2025-10-05.
 
-        CRITICAL: Does NOT interpret or change structure. Preserves candidate's exact phrasing.
         Examples:
-        - "95k + commission" → "$95K base + commission"
-        - "$750k all in" → "$750K OTE"
-        - "200-250k base + bonus" → "$200-250K base + bonus"
+        - "95k + commission" → "Target comp: $95K OTE"
+        - "$750k all in" → "Target comp: $750K OTE"
+        - "200-250k base + bonus" → "Target comp: $200K–$250K OTE"
+        - "95k base + commission 140+ OTE" → "Target comp: $95K–$140K OTE"
         """
         if not raw_text:
             return ""
 
-        # Work with original text to preserve structure
-        result = raw_text.strip()
+        # Extract all dollar amounts with units (K, M, B)
+        # Pattern matches: $95k, 750K, 1.5M, etc.
+        pattern = r'\$?(\d+(?:,\d{3})*(?:\.\d+)?)\s*([kKmMbB])?'
+        matches = re.findall(pattern, raw_text)
 
-        # 1. Capitalize K, M, B units while preserving everything else
-        # Handle decimals like 1.5m and ranges like 200-250k
-        result = re.sub(r'([\d.]+)k\b', lambda m: f"{m.group(1)}K", result, flags=re.IGNORECASE)
-        result = re.sub(r'([\d.]+)m\b', lambda m: f"{m.group(1)}M", result, flags=re.IGNORECASE)
-        result = re.sub(r'([\d.]+)b\b', lambda m: f"{m.group(1)}B", result, flags=re.IGNORECASE)
+        if not matches:
+            # No parseable amounts - return prefixed original
+            return f"Target comp: {raw_text}"
 
-        # 2. Add $ prefix to the FIRST amount that doesn't have it
-        # Match number (with optional decimal) and optional range (200-250K)
-        # Only replace first occurrence to avoid adding $ to bonus/commission amounts
-        # Negative lookbehind: not after $ or digit
-        result = re.sub(r'(?<![$\d])([\d.]+(?:-[\d.]+)?)(K|M|B)', r'$\1\2', result, count=1)
+        # Parse amounts to dollars
+        amounts = []
+        for num_str, unit in matches:
+            # Remove commas and convert to float
+            num = float(num_str.replace(',', ''))
 
-        # 3. Standardize "all in" to "OTE" (abbreviation standardization only)
-        result = re.sub(r'\ball in\b', 'OTE', result, flags=re.IGNORECASE)
-        result = re.sub(r'\ball-in\b', 'OTE', result, flags=re.IGNORECASE)
+            # Apply multiplier based on unit
+            multiplier_map = {
+                'k': 1_000,
+                'm': 1_000_000,
+                'b': 1_000_000_000
+            }
+            if unit:
+                num *= multiplier_map.get(unit.lower(), 1)
 
-        # 4. Add "base" before "+ commission" or "+ bonus" if not already present
-        # Only if pattern is: "$XXK + commission/bonus" without "base"
-        if re.search(r'\+\s*(commission|bonus)', result, re.IGNORECASE) and \
-           not re.search(r'\bbase\b', result, re.IGNORECASE):
-            # Insert "base" after the first amount and before the "+"
-            result = re.sub(
-                r'(\$\d+[\d\-]*[KMB])\s*(\+)',
-                r'\1 base \2',
-                result,
-                count=1,
-                flags=re.IGNORECASE
-            )
+            # Convert to integer dollars
+            amounts.append(int(num))
 
-        return result
+        # Format based on number of amounts found
+        if len(amounts) >= 2:
+            # Range format: use min and max
+            low = min(amounts)
+            high = max(amounts)
+            return f"Target comp: ${low//1000}K–${high//1000}K OTE"
+        elif amounts:
+            # Single amount
+            return f"Target comp: ${amounts[0]//1000}K OTE"
+        else:
+            # Fallback for unparseable
+            return f"Target comp: {raw_text}"
 
     def _is_internal_note(self, text: str) -> bool:
         """
@@ -816,17 +839,18 @@ class TalentWellCurator:
         scores = [b.confidence for b in bullets]
         return sum(scores) / len(scores)
 
-    def _score_bullet(self, bullet: BulletPoint) -> float:
+    def _score_bullet(self, bullet: BulletPoint, sentiment: Optional[Dict[str, Any]] = None) -> float:
         """
-        Calculate composite score for bullet ranking.
+        Calculate composite score for bullet ranking with optional sentiment weighting.
 
         Score factors:
         1. Category priority (0.0-1.0): Financial metrics > Licenses > Experience > Availability > Compensation
         2. Confidence score (0.0-1.0): From evidence extraction
         3. Source reliability (0.0-1.0): CRM > Extraction > Inferred
         4. Evidence quality bonus (+0.1 per evidence source, max +0.3)
+        5. Sentiment multiplier (0.85-1.15): Boosts/penalizes based on candidate sentiment
 
-        Final score: (priority * 0.4) + (confidence * 0.4) + (source * 0.15) + (evidence_bonus * 0.05)
+        Final score: base_score * sentiment_multiplier
         Range: 0.0 to 1.0
         """
         # Category priority weights (aligned with Brandon's requirements)
@@ -842,6 +866,12 @@ class TalentWellCurator:
             'MOBILITY': 0.35,             # Location preferences
             'COMPENSATION': 0.30          # Salary expectations (lowest priority)
         }
+
+        # Filter header field duplicates - these should NEVER appear as bullets
+        text_lower = bullet.text.lower()
+        header_duplicate_keywords = ['location:', 'current firm:', 'current role:', 'current company:']
+        if any(keyword in text_lower for keyword in header_duplicate_keywords):
+            return 0.0  # Zero score = filtered out during ranking
 
         # Determine category priority
         # Auto-categorize if category not set or is default
@@ -869,15 +899,51 @@ class TalentWellCurator:
         evidence_count = len(bullet.evidence) if hasattr(bullet, 'evidence') and bullet.evidence else 0
         evidence_bonus = min(0.3, evidence_count * 0.1)
 
-        # Calculate composite score
-        composite_score = (
+        # Calculate base composite score
+        base_score = (
             (category_priority * 0.4) +
             (confidence * 0.4) +
             (source_reliability * 0.15) +
             (evidence_bonus * 0.05)
         )
 
-        return round(composite_score, 3)
+        # Apply sentiment multiplier if sentiment analysis available and feature flag enabled
+        sentiment_multiplier = 1.0  # Default: no adjustment
+        if sentiment and FEATURE_LLM_SENTIMENT:
+            # Sentiment score ranges from 0.0 (negative) to 1.0 (positive)
+            sentiment_score = sentiment.get('score', 0.5)
+            enthusiasm = sentiment.get('enthusiasm_score', 0.5)
+            concerns = sentiment.get('concerns_detected', False)
+
+            # Calculate multiplier based on sentiment components
+            # Positive sentiment (0.7-1.0) → 1.05-1.15 boost
+            # Neutral sentiment (0.4-0.7) → 0.95-1.05 (minimal impact)
+            # Negative sentiment (0.0-0.4) → 0.85-0.95 penalty
+            if sentiment_score >= 0.7:
+                # Positive candidate: boost by up to 15%
+                sentiment_multiplier = 1.05 + (sentiment_score - 0.7) * 0.33  # 0.7→1.05, 1.0→1.15
+            elif sentiment_score >= 0.4:
+                # Neutral: minimal impact
+                sentiment_multiplier = 0.95 + (sentiment_score - 0.4) * 0.33  # 0.4→0.95, 0.7→1.05
+            else:
+                # Negative candidate: penalty up to 15%
+                sentiment_multiplier = 0.85 + sentiment_score * 0.25  # 0.0→0.85, 0.4→0.95
+
+            # Additional enthusiasm boost (up to +5%)
+            enthusiasm_boost = min(0.05, enthusiasm * 0.05)
+            sentiment_multiplier += enthusiasm_boost
+
+            # Concern penalty (if red flags detected, -10%)
+            if concerns:
+                sentiment_multiplier *= 0.9
+
+            # Clamp multiplier to [0.85, 1.15] range
+            sentiment_multiplier = max(0.85, min(1.15, sentiment_multiplier))
+
+        # Final score = base * sentiment
+        final_score = base_score * sentiment_multiplier
+
+        return round(min(1.0, final_score), 3)  # Cap at 1.0
 
     async def _analyze_candidate_sentiment(self, transcript: Optional[str]) -> Dict[str, Any]:
         """
@@ -993,24 +1059,32 @@ class TalentWellCurator:
 
         return result
 
-    def _rank_bullets_by_score(self, bullets: List[BulletPoint], top_n: int = 5) -> List[BulletPoint]:
+    def _rank_bullets_by_score(self, bullets: List[BulletPoint], top_n: int = 5, sentiment: Optional[Dict[str, Any]] = None) -> List[BulletPoint]:
         """
         Rank bullets by composite score and return top N.
 
         Steps:
-        1. Calculate score for each bullet
+        1. Calculate score for each bullet (with optional sentiment weighting)
         2. Sort by score (descending)
         3. Return top N bullets
         4. Log ranking decisions for debugging
+
+        Args:
+            bullets: List of bullet points to rank
+            top_n: Number of top bullets to return (default: 5)
+            sentiment: Optional sentiment analysis results for weighting
         """
         if not bullets:
             return []
 
-        # Score each bullet
+        # Score each bullet (with optional sentiment weighting)
         scored_bullets = [
-            (bullet, self._score_bullet(bullet))
+            (bullet, self._score_bullet(bullet, sentiment=sentiment))
             for bullet in bullets
         ]
+
+        # Filter out zero-scored bullets (header duplicates) BEFORE sorting
+        scored_bullets = [(b, s) for b, s in scored_bullets if s > 0.0]
 
         # Sort by score (descending)
         scored_bullets.sort(key=lambda x: x[1], reverse=True)
@@ -1574,25 +1648,31 @@ class TalentWellCurator:
 
         # CRITICAL: Never add fake data - only return what we actually have
         # If we have less than 3 real bullets, that's acceptable per user requirement
-        # Use score-based ranking to select the best bullets (max 5)
+        # Use score-based ranking with sentiment weighting to select the best bullets (max 5)
         if len(bullets) > 5:
-            logger.info(f"Ranking {len(bullets)} bullets using composite scoring...")
-            bullets = self._rank_bullets_by_score(bullets, top_n=5)
+            logger.info(f"Ranking {len(bullets)} bullets using composite scoring with sentiment weighting...")
+            bullets = self._rank_bullets_by_score(bullets, top_n=5, sentiment=sentiment)
         elif bullets:
             # Even if we have <=5 bullets, rank them for consistency
-            bullets = self._rank_bullets_by_score(bullets, top_n=min(5, len(bullets)))
+            bullets = self._rank_bullets_by_score(bullets, top_n=min(5, len(bullets)), sentiment=sentiment)
 
         return bullets
     
     async def _ensure_minimum_bullets(
         self,
         deal: Dict[str, Any],
-        existing_bullets: List[BulletPoint]
+        existing_bullets: List[BulletPoint],
+        sentiment: Optional[Dict[str, Any]] = None
     ) -> List[BulletPoint]:
         """
         CRITICAL: Only add real data, never fake data per user requirement.
         Return whatever bullets we have - even if less than the target.
         Only add bullets if we have actual verified data from CRM.
+
+        Args:
+            deal: Deal record from Zoho CRM
+            existing_bullets: Bullets already extracted
+            sentiment: Optional sentiment analysis for bullet ranking
         """
         bullets = list(existing_bullets)
 
@@ -1617,7 +1697,8 @@ class TalentWellCurator:
                 ))
 
         # Add location only if we have real location data (important for compliance/licensing)
-        if len(bullets) < 5:
+        # SUPPRESS in privacy mode to prevent header field duplication
+        if len(bullets) < 5 and not PRIVACY_MODE:
             location = None
             if deal.get('location') and deal['location'].strip():
                 location = deal['location']
@@ -1775,6 +1856,99 @@ class TalentWellCurator:
                 ))
 
         return bullets
+
+    def _extract_growth_metrics(self, text: str, source: str = "Transcript") -> List[BulletPoint]:
+        """
+        Extract growth achievement metrics from text (transcript or resume).
+
+        Patterns recognized:
+        - "grew book 40% YoY" → "Grew book by 40% YoY"
+        - "increased AUM by 25%" → "Increased AUM by 25%"
+        - "doubled production" → "Doubled production"
+        - "tripled client base" → "Tripled client base"
+
+        Feature flag: FEATURE_GROWTH_EXTRACTION (default: true)
+        Category: GROWTH_ACHIEVEMENT (priority 0.95)
+        """
+        bullets = []
+
+        if not text or not FEATURE_GROWTH_EXTRACTION:
+            return bullets
+
+        import re
+        text_lower = text.lower()
+
+        # Growth percentage patterns
+        growth_patterns = [
+            # "grew book/AUM/assets by X%"
+            (r'grew\s+(?:book|aum|assets|production|revenue|client\s+base)?\s*(?:by\s+)?(\d+)%\s*(?:YoY|year[- ]over[- ]year|annually)?',
+             lambda m: f"Grew book by {m.group(1)}% {'YoY' if 'yoy' in m.group(0).lower() or 'year' in m.group(0).lower() else ''}".strip()),
+
+            # "increased AUM/production by X%"
+            (r'increased\s+(?:aum|production|assets|revenue|client\s+base)\s+by\s+(\d+)%\s*(?:YoY|year[- ]over[- ]year|annually)?',
+             lambda m: f"Increased AUM by {m.group(1)}% {'YoY' if 'yoy' in m.group(0).lower() or 'year' in m.group(0).lower() else ''}".strip()),
+
+            # "book grew X%"
+            (r'(?:book|aum|assets|production|revenue)\s+grew\s+(?:by\s+)?(\d+)%\s*(?:YoY|year[- ]over[- ]year|annually)?',
+             lambda m: f"Book grew by {m.group(1)}% {'YoY' if 'yoy' in m.group(0).lower() or 'year' in m.group(0).lower() else ''}".strip()),
+
+            # "X% growth in book/AUM"
+            (r'(\d+)%\s+(?:annual\s+)?growth\s+in\s+(?:book|aum|assets|production|revenue)',
+             lambda m: f"{m.group(1)}% annual growth in book"),
+
+            # Multiplier patterns: "doubled", "tripled", "quadrupled"
+            (r'(doubled|tripled|quadrupled)\s+(?:book|aum|assets|production|revenue|client\s+base)',
+             lambda m: f"{m.group(1).capitalize()} {m.group(0).split()[-1]}"),
+        ]
+
+        for pattern, formatter in growth_patterns:
+            matches = re.finditer(pattern, text_lower)
+            for match in matches:
+                if len(bullets) >= 2:  # Max 2 growth bullets to avoid redundancy
+                    break
+
+                try:
+                    formatted_text = formatter(match)
+                    # Avoid duplicates
+                    if not any(b.text.lower().startswith(formatted_text[:20].lower()) for b in bullets):
+                        bullets.append(BulletPoint(
+                            text=formatted_text,
+                            confidence=0.90,  # High confidence for explicit growth statements
+                            source=source,
+                            category='GROWTH_ACHIEVEMENT'
+                        ))
+                except Exception as e:
+                    logger.warning(f"Failed to format growth metric: {e}")
+                    continue
+
+        # Achievement rankings: "top X%", "top X performer"
+        ranking_patterns = [
+            (r'top\s+(\d+)%\s+(?:performer|producer|advisor|of\s+team)',
+             lambda m: f"Top {m.group(1)}% performer"),
+            (r'ranked\s+(?:#|number\s+)?(\d+)\s+(?:in|of|nationally|at\s+firm)',
+             lambda m: f"Ranked #{m.group(1)} nationally" if 'nationally' in m.group(0).lower() else f"Ranked #{m.group(1)} at firm"),
+        ]
+
+        for pattern, formatter in ranking_patterns:
+            matches = re.finditer(pattern, text_lower)
+            for match in matches:
+                if len(bullets) >= 2:
+                    break
+
+                try:
+                    formatted_text = formatter(match)
+                    if not any(b.text.lower().startswith(formatted_text[:15].lower()) for b in bullets):
+                        bullets.append(BulletPoint(
+                            text=formatted_text,
+                            confidence=0.85,
+                            source=source,
+                            category='PERFORMANCE_RANKING'
+                        ))
+                except Exception as e:
+                    logger.warning(f"Failed to format ranking metric: {e}")
+                    continue
+
+        return bullets[:2]  # Return max 2 growth bullets
 
     async def _extract_from_resume(self, existing_bullets: List[BulletPoint], resume_text: str, deal: Dict[str, Any]) -> List[BulletPoint]:
         """Extract bullets from resume text."""
