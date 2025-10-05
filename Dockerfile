@@ -45,6 +45,7 @@ COPY --from=builder --chown=appuser:appuser /root/.local /home/appuser/.local
 COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser addin/ ./addin/
 COPY --chown=appuser:appuser scripts/ ./scripts/
+COPY --chown=appuser:appuser migrations/ ./migrations/
 
 # Create static directory (may not exist in repo due to .gitignore)
 RUN mkdir -p ./static/icons && chown -R appuser:appuser ./static
