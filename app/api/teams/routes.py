@@ -886,7 +886,7 @@ async def run_database_migration(
     migration_name: str,
     _: bool = Depends(require_debug_mode),
     db: asyncpg.Connection = Depends(get_db_connection),
-    x_api_key: str = Header(...)
+    x_api_key: str = Header(..., alias="X-API-Key")
 ):
     """
     Run a database migration.

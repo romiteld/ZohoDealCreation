@@ -646,7 +646,7 @@ async def get_database_connection():
     Yields an asyncpg connection from the connection manager pool.
     """
     manager = await get_connection_manager()
-    async with manager.pool.acquire() as connection:
+    async with manager.main_pool.acquire() as connection:
         yield connection
 
 
