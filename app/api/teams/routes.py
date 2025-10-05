@@ -233,15 +233,9 @@ async def teams_webhook(request: Request):
                                 raise  # Re-raise to ensure it's logged
 
                     elif turn_context.activity.type == ActivityTypes.invoke:
-                        response = await handle_invoke_activity(turn_context.activity, db)
-                        if response:
-                            # Create proper Activity from response dict
-                            activity_response = Activity(
-                                type=response.get("type", "message"),
-                                text=response.get("text"),
-                                attachments=response.get("attachments")
-                            )
-                            await turn_context.send_activity(activity_response)
+                        # Invoke activities require InvokeResponse, not regular messages
+                        # The handler will send messages directly via turn_context
+                        await handle_invoke_activity(turn_context, db)
                     elif turn_context.activity.type == ActivityTypes.conversation_update:
                         response = await handle_conversation_update(turn_context.activity, db)
                         if response:
@@ -296,14 +290,11 @@ async def handle_message_activity(
     message_text = (activity.text or "").strip().lower()
 
     # Handle commands
-    if any(greeting in message_text for greeting in ["hello", "hi", "hey", "help"]):
-        # TEST: Send simple text response first to verify bot communication works
-        return MessageFactory.text(f"Hello {user_name}! I received your help command. Bot is working!")
-
-        # TODO: Re-enable card after confirming text works
-        # card = create_welcome_card(user_name.split()[0] if user_name else "there")
-        # attachment = CardFactory.adaptive_card(card["content"])
-        # return MessageFactory.attachment(attachment)
+    if any(greeting in message_text for greeting in ["hello", "hi", "hey"]):
+        # Welcome card
+        card = create_welcome_card(user_name.split()[0] if user_name else "there")
+        attachment = CardFactory.adaptive_card(card["content"])
+        return MessageFactory.attachment(attachment)
 
     elif message_text.startswith("help"):
         card = create_help_card()
@@ -352,20 +343,20 @@ async def handle_message_activity(
             WHERE conversation_id = $2 AND activity_id = $3
         """, "help_card", conversation_id, activity.id)
 
-        return {
-            "type": "message",
-            "text": "I didn't understand that command. Here's what I can do:",
-            "attachments": [card]
-        }
+        attachment = CardFactory.adaptive_card(card["content"])
+        response = MessageFactory.attachment(attachment)
+        response.text = "I didn't understand that command. Here's what I can do:"
+        return response
 
 
 async def handle_invoke_activity(
-    activity: Activity,
+    turn_context: TurnContext,
     db: asyncpg.Connection
-) -> Dict[str, Any]:
+):
     """Handle Adaptive Card button clicks (invoke actions)."""
 
     try:
+        activity = turn_context.activity
         # Extract action data
         action_data = activity.value or {}
         action = action_data.get("action", "")
@@ -376,9 +367,11 @@ async def handle_invoke_activity(
 
         logger.info(f"Invoke action: {action} from user {user_email}")
 
+        response = None
+
         if action == "generate_digest_preview":
             audience = action_data.get("audience", "global")
-            return await generate_digest_preview(
+            response = await generate_digest_preview(
                 user_id=user_id,
                 user_email=user_email,
                 conversation_id=conversation_id,
@@ -392,7 +385,7 @@ async def handle_invoke_activity(
             audience = action_data.get("audience", "global")
             dry_run = action_data.get("dry_run", False)
 
-            return await generate_full_digest(
+            response = await generate_full_digest(
                 user_id=user_id,
                 user_email=user_email,
                 request_id=request_id,
@@ -411,7 +404,7 @@ async def handle_invoke_activity(
                 "max_candidates": action_data.get("max_candidates", 6)
             }
 
-            return await generate_digest_preview(
+            response = await generate_digest_preview(
                 user_id=user_id,
                 user_email=user_email,
                 conversation_id=conversation_id,
@@ -420,9 +413,13 @@ async def handle_invoke_activity(
                 filters=filters
             )
 
+        elif action == "show_preferences":
+            # Show preferences card
+            response = await show_user_preferences(user_id, user_email, activity.from_property.name or "User", db)
+
         elif action == "save_preferences":
             # Save user preferences
-            return await save_user_preferences(
+            response = await save_user_preferences(
                 user_id=user_id,
                 user_email=user_email,
                 preferences=action_data,
@@ -431,18 +428,17 @@ async def handle_invoke_activity(
 
         else:
             logger.warning(f"Unknown invoke action: {action}")
-            return {
-                "type": "message",
-                "text": f"Unknown action: {action}"
-            }
+            response = MessageFactory.text(f"Unknown action: {action}")
+
+        # Send response if we have one
+        if response:
+            await turn_context.send_activity(response)
 
     except Exception as e:
         logger.error(f"Error handling invoke: {e}", exc_info=True)
         error_card = create_error_card(str(e))
-        return {
-            "type": "message",
-            "attachments": [error_card]
-        }
+        attachment = CardFactory.adaptive_card(error_card["content"])
+        await turn_context.send_activity(MessageFactory.attachment(attachment))
 
 
 async def handle_conversation_update(
@@ -458,13 +454,10 @@ async def handle_conversation_update(
                 # User added bot
                 user_name = member.name or "there"
                 card = create_welcome_card(user_name)
+                attachment = CardFactory.adaptive_card(card["content"])
+                return MessageFactory.attachment(attachment)
 
-                return {
-                    "type": "message",
-                    "attachments": [card]
-                }
-
-    return {"status": "ok"}
+    return None  # No response needed
 
 
 async def generate_digest_preview(
@@ -560,28 +553,23 @@ async def generate_digest_preview(
         """, len(cards_metadata), len(cards_metadata),
             json.dumps(cards_metadata), execution_time_ms, request_id)
 
-        # Create preview card
+        # Create preview card using CardFactory
         card = create_digest_preview_card(
             cards_metadata=cards_metadata,
             audience=audience,
             request_id=request_id
         )
+        attachment = CardFactory.adaptive_card(card["content"])
 
         # Add test mode warning if applicable
         if test_recipient_email:
             # Prepend test mode message
-            test_warning = f"⚠️ TEST MODE: Digest will be sent to {test_recipient_email}\n\n"
-            # Add warning to card title if possible, or return text + card
-            return {
-                "type": "message",
-                "text": test_warning,
-                "attachments": [card]
-            }
+            test_warning = f"⚠️ TEST MODE: Digest will be sent to {test_recipient_email}"
+            response = MessageFactory.attachment(attachment)
+            response.text = test_warning
+            return response
 
-        return {
-            "type": "message",
-            "attachments": [card]
-        }
+        return MessageFactory.attachment(attachment)
 
     except Exception as e:
         logger.error(f"Error generating digest preview: {e}", exc_info=True)
@@ -596,10 +584,8 @@ async def generate_digest_preview(
         """, str(e), request_id)
 
         error_card = create_error_card(f"Failed to generate digest: {str(e)}")
-        return {
-            "type": "message",
-            "attachments": [error_card]
-        }
+        attachment = CardFactory.adaptive_card(error_card["content"])
+        return MessageFactory.attachment(attachment)
 
 
 async def generate_full_digest(
@@ -664,11 +650,7 @@ async def generate_full_digest(
 
     except Exception as e:
         logger.error(f"Error generating full digest: {e}", exc_info=True)
-        error_card = create_error_card(str(e))
-        return {
-            "type": "message",
-            "attachments": [error_card]
-        }
+        return MessageFactory.text(f"❌ Error generating digest: {str(e)}")
 
 
 async def show_user_preferences(
@@ -701,25 +683,20 @@ async def show_user_preferences(
                 WHERE user_id = $1
             """, user_id)
 
-        # Create preferences card
+        # Create preferences card using CardFactory
         card = create_preferences_card(
             current_audience=prefs["default_audience"],
             digest_frequency=prefs["digest_frequency"],
             notifications_enabled=prefs["notification_enabled"]
         )
-
-        return {
-            "type": "message",
-            "attachments": [card]
-        }
+        attachment = CardFactory.adaptive_card(card["content"])
+        return MessageFactory.attachment(attachment)
 
     except Exception as e:
         logger.error(f"Error showing preferences: {e}", exc_info=True)
         error_card = create_error_card(str(e))
-        return {
-            "type": "message",
-            "attachments": [error_card]
-        }
+        attachment = CardFactory.adaptive_card(error_card["content"])
+        return MessageFactory.attachment(attachment)
 
 
 async def save_user_preferences(
@@ -812,10 +789,8 @@ async def show_analytics(
     except Exception as e:
         logger.error(f"Error showing analytics: {e}", exc_info=True)
         error_card = create_error_card(str(e))
-        return {
-            "type": "message",
-            "attachments": [error_card]
-        }
+        attachment = CardFactory.adaptive_card(error_card["content"])
+        return MessageFactory.attachment(attachment)
 
 
 # REST API endpoints for external access
