@@ -51,6 +51,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Configuration** (`addin/config.js`): Environment and API settings
 - **Static Assets** (`addin/icon-*.png`): Add-in icons and resources
 
+### Teams Bot Integration Components
+- **Webhook Endpoint** (`app/api/teams/routes.py`): Bot Framework activity handlers (message, invoke, conversationUpdate)
+- **Adaptive Cards** (`app/api/teams/adaptive_cards.py`): Interactive UI cards (welcome, help, digest preview, preferences, error)
+- **Database Schema** (`migrations/005_teams_integration_tables.sql`): 4 tables + 2 analytics views
+- **VoIT Configuration** (`app/config/voit_config.py`): Shared model tier selection and cost tracking
+- **TalentWell Curator** (`app/jobs/talentwell_curator.py`): Score-based ranking, retry logic, sentiment analysis
+
+**Teams Bot Commands:**
+- `help` - Display formatted help card with command documentation
+- `digest [audience]` - Generate candidate digest preview (audiences: advisors, c_suite, global)
+- `digest <email>` - Test mode - route digest to specific email for validation
+- `preferences` - View/edit default audience, frequency, and notification settings
+- `analytics` - View usage statistics and recent activity
+
+**Candidate Filtering Logic:**
+- Filters by **job title keywords** (not owner email)
+- `advisors` → Financial/Wealth/Investment Advisor keywords
+- `c_suite` → CEO, CFO, VP, Director, Executive keywords
+- `global` → All candidates (no filter)
+
 ## Project Structure
 
 ### Directory Organization
@@ -399,6 +419,17 @@ Pattern: `"[Job Title] ([Location]) - [Firm Name]"`
 - **Icon Requirements**: Must provide 16px, 32px, and 80px PNG icons
 - **App Domains**: All API endpoints must be listed in `<AppDomains>` section
 
+### Teams Adaptive Cards Design Constraints
+⚠️ **Microsoft Teams Adaptive Card Best Practices**:
+- **Text Wrapping**: Always set `"wrap": true` on TextBlock elements to prevent truncation on mobile
+- **Column Layouts**: Use `"width": "stretch"` for flexible content, `"width": "auto"` for buttons
+- **Visual Hierarchy**: Use Container elements with `"separator": true` for section breaks
+- **Mobile First**: Design for narrow screens (≤450px), will scale up to desktop
+- **Action Limits**: Maximum 6 primary actions, use Action.ShowCard for sub-actions
+- **FactSet**: Use for key-value pairs instead of bullet lists for cleaner presentation
+- **Spacing**: Use `"spacing": "Medium"` between major sections, `"Small"` for related items
+- **Plain Text**: Teams doesn't support markdown in plain text responses, use TextBlock formatting instead
+
 ## Environment Variables
 
 Required in `.env.local`:
@@ -501,24 +532,32 @@ az containerapp update --name well-intake-api \
   --revision-suffix "v$(date +%Y%m%d-%H%M%S)"
 ```
 
-## Recent Critical Fixes (2025-09-27)
+## Recent Critical Fixes
 
-### City/State Preservation Fix
+### Teams Bot Improvements (2025-10-04)
+- **Issue**: Analytics command showed "unsupported card" error in Teams
+- **Solution**: Changed from markdown to plain text formatting in `app/api/teams/routes.py:753-768`
+- **Issue**: Filtering by owner email instead of candidate type
+- **Solution**: Implemented job title keyword filtering in `app/integrations.py:1535-1656`
+- **Issue**: Help card had poor visual presentation
+- **Solution**: Redesigned using Microsoft Adaptive Cards best practices with containers, separators, FactSet
+
+### City/State Preservation Fix (2025-09-27)
 - **Issue**: City/state fields were being stripped during data cleaning
 - **Solution**: Added modern fields to `field_limits` in `langgraph_manager.py:1333`
 - **Files**: `app/langgraph_manager.py`, `addin/taskpane.js`
 
-### Pipeline Lock Fix
+### Pipeline Lock Fix (2025-09-27)
 - **Issue**: Pipeline dropdown allowed wrong values
 - **Solution**: Changed to readonly input locked to "Sales Pipeline"
 - **File**: `addin/taskpane.html:644`
 
-### Referrer Contamination Fix
+### Referrer Contamination Fix (2025-09-27)
 - **Issue**: Internal emails triggering referral source
 - **Solution**: Filter metadata emails in `business_rules.py:68`
 - **Domains**: `@emailthewell.com`, `@thewell.com`
 
-### Zoho Deduplication Fix
+### Zoho Deduplication Fix (2025-09-27)
 - **Issue**: Search queries failing without parentheses
 - **Solution**: Added parentheses to search criteria in `integrations.py`
 - **Pattern**: `(Website:equals:{website})`

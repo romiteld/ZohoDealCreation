@@ -41,12 +41,13 @@
 **Well Intake** is an enterprise-grade AI-powered recruiting automation platform that transforms Outlook emails into enriched Zoho CRM records in under 3 seconds. Built on Azure Container Apps with intelligent cost optimization through the Candidate Vault Agent (VoIT + C³), the system combines:
 
 ### Executive Summary
-- **50+ REST API endpoints** serving Outlook add-ins, webhooks, and admin consoles
+- **50+ REST API endpoints** serving Outlook add-ins, Teams bot, webhooks, and admin consoles
+- **Microsoft Teams bot integration** with Adaptive Cards for TalentWell candidate digests
 - **LangGraph AI pipeline** (Extract → Research → Validate) with GPT-5 tiered model selection
 - **90% cost reduction** through C³ probabilistic caching and VoIT adaptive reasoning
 - **Sub-3s processing** with Redis caching, async IO, and streaming WebSocket/SSE
 - **Multi-source ingestion**: Emails, Zoom transcripts, resumes, web scraping
-- **Multi-channel publishing**: Email campaigns, CRM sync, portal cards, JD alignment
+- **Multi-channel publishing**: Email campaigns, CRM sync, Teams bot digests, portal cards, JD alignment
 - **Zero-downtime deployments** via Azure Container Apps multi-revision with instant rollback
 - **Enterprise security**: Azure AD + HMAC API keys, Key Vault secrets, TLS 1.2+
 - **Full observability**: Application Insights with custom metrics, 90-day audit logs
@@ -70,6 +71,7 @@
 - **Message Queue**: Azure Service Bus (Standard tier)
 - **Storage**: Azure Blob Storage (Hot tier), Azure AI Search
 - **Hosting**: Azure Container Apps (multi-revision), Azure Front Door CDN
+- **Teams Integration**: Bot Framework SDK 4.16+, Adaptive Cards v1.4
 - **Security**: Azure Key Vault, Azure AD, HMAC API key validation
 - **Monitoring**: Application Insights, custom metrics, structured logging
 - **CI/CD**: GitHub Actions (3 workflows), 20+ automation scripts
@@ -144,6 +146,16 @@ Make sure Redis and PostgreSQL are available (see [Development Guide](#developme
 - One-click **Send to Zoho**, **Test**, and enrichment controls inside Outlook.
 - Real-time field confidence indicators, attachment previews, and manual override hints.
 - Express-send gating based on extraction confidence and deduplication checks.
+
+### Microsoft Teams Bot Integration
+- **Interactive Adaptive Cards** for TalentWell candidate digest previews with rich formatting.
+- **Command-driven interface**: `digest [audience]`, `preferences`, `analytics`, `help`.
+- **Audience filtering by job title**: advisors (Financial/Wealth Advisors), c_suite (Executives), global (all).
+- **Test mode routing**: `digest <email>` sends digest preview to specific email for validation.
+- **User preferences**: Default audience, digest frequency, notification settings stored in PostgreSQL.
+- **Analytics tracking**: Conversation count, digest requests, recent activity per user.
+- **Score-based ranking**: Composite scoring (financial metrics + evidence quality + sentiment).
+- **Sentiment analysis**: Enthusiasm and tone detection from Zoom transcripts and CRM notes.
 
 ### CRM Automation
 - Creates or updates Zoho Accounts, Contacts, and Deals with full enrichment data.

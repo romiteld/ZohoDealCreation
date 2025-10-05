@@ -22,6 +22,7 @@ graph TB
         Recruiter["👤 Recruitment Team<br/>Processes candidate emails"]
         Admin["👨‍💼 System Admin<br/>Manages configuration & monitoring"]
         Analyst["📊 Data Analyst<br/>Reviews metrics & insights"]
+        TeamsMember["👥 Teams User<br/>Requests candidate digests"]
     end
     
     subgraph WellIntake["🚀 Well Intake System"]
@@ -31,6 +32,7 @@ graph TB
     
     subgraph ExternalSystems["🌐 External Systems"]
         Outlook["📧 Microsoft 365<br/>Email Client + Add-in"]
+        Teams["💬 Microsoft Teams<br/>Bot Framework + Adaptive Cards"]
         Zoho["📊 Zoho CRM v8<br/>CRM System"]
         OpenAI["🤖 Azure OpenAI<br/>well-intake-aoai (East US)<br/>well-intake-aoai-eus2 (East US 2)"]
         Firecrawl["🔍 Firecrawl v2 API<br/>Company Research & Fire Agent"]
@@ -53,13 +55,15 @@ graph TB
     Recruiter -->|"Sends emails"| Outlook
     Admin -->|"Configures & monitors"| API
     Analyst -->|"Views analytics"| API
-    
+    TeamsMember -->|"Requests digests"| Teams
+
     Outlook -->|"REST/WebSocket"| API
+    Teams -->|"Bot Framework Webhook"| API
     API -->|"OAuth/API v8"| OAuth
     OAuth -->|"API v8"| Zoho
     API -->|"GPT-5 API"| OpenAI
     API -->|"Research API"| Firecrawl
-    API -->|"Search API"| Serper
+    API -->|"Adaptive Cards"| Teams
     
     API --> Storage
     API --> Postgres
@@ -103,6 +107,7 @@ graph TB
             AdminAPI["/admin/*<br/>Policies & imports"]
             StreamAPI["/ws/*<br/>WebSocket streaming"]
             ManifestAPI["/manifest.xml<br/>Add-in manifest"]
+            TeamsAPI["/api/teams/messages<br/>Teams bot webhook"]
         end
     end
     
@@ -132,6 +137,7 @@ graph TB
         Firecrawl["🔍 Firecrawl v2<br/>Fire Agent + Company research<br/>5s timeout with fallback"]
         Apollo["🚀 Apollo.io<br/>People Match API<br/>Contact enrichment"]
         MSGraph["📧 MS Graph<br/>Email access<br/>OAuth 2.0"]
+        Teams["💬 Microsoft Teams<br/>Bot Framework SDK<br/>Adaptive Cards v1.4"]
     end
     
     OutlookAddin --> FrontDoor
@@ -157,6 +163,7 @@ graph TB
     LangGraph --> Firecrawl
     LangGraph --> Apollo
     FastAPI --> MSGraph
+    FastAPI --> Teams
     
     style FastAPI fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
     style LangGraph fill:#9B59B6,stroke:#7D3C98,stroke-width:2px,color:#fff
@@ -313,6 +320,13 @@ graph TB
         PostgresClient["🐘 PostgreSQLClient<br/>integrations.py<br/>Deduplication"]
         BlobClient["📁 AzureBlobStorage<br/>integrations.py<br/>Attachments"]
         MSGraphClient["📧 MicrosoftGraphClient<br/>microsoft_graph_client.py<br/>Email access"]
+        TeamsBotClient["💬 TeamsBotClient<br/>api/teams/routes.py<br/>Bot Framework webhooks"]
+    end
+
+    subgraph TeamsBot["💬 Teams Bot Components (api/teams/)"]
+        AdaptiveCards["🎴 adaptive_cards.py<br/>Card layouts (welcome, help, digest, preferences)"]
+        TeamsCurator["🎯 TalentWell Curator<br/>jobs/talentwell_curator.py<br/>Score-based ranking + sentiment"]
+        TeamsDB["🗄️ Teams Database<br/>teams_conversations, teams_users<br/>Analytics & preferences"]
     end
     
     StateManager --> ExtractNode
@@ -342,6 +356,12 @@ graph TB
     StateManager --> PostgresClient
     ExtractNode --> BlobClient
     StateManager --> MSGraphClient
+
+    TeamsBotClient --> AdaptiveCards
+    TeamsBotClient --> TeamsCurator
+    TeamsBotClient --> TeamsDB
+    TeamsCurator --> PostgresClient
+    TeamsCurator --> ZohoClient
     
     style StateManager fill:#4A90E2,stroke:#2E5C8A,stroke-width:2px,color:#fff
     style C3Reuse fill:#E74C3C,stroke:#C0392B,stroke-width:2px,color:#fff
@@ -503,6 +523,8 @@ graph TB
 - **SendGrid 6.11.0** - Email delivery service backup
 - **Beautiful Soup 4.12.3** - HTML parsing and processing
 - **Email Validator 2.1.0** - Email address validation
+- **BotBuilder-Core 4.16.2** - Microsoft Teams Bot Framework SDK
+- **BotFramework-Connector 4.16.2** - Bot Framework protocol connector
 
 ### Security & Authentication
 - **Cryptography 41.0.7** - Encryption and security primitives
