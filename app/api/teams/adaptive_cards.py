@@ -15,7 +15,7 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.4",
+            "version": "1.3",
             "body": [
                 {
                     "type": "TextBlock",
@@ -33,7 +33,6 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
                 },
                 {
                     "type": "Container",
-                    "style": "emphasis",
                     "spacing": "Medium",
                     "items": [
                         {
@@ -84,7 +83,6 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
                 {
                     "type": "Action.Submit",
                     "title": "📊 Generate Digest",
-                    "style": "positive",
                     "data": {
                         "action": "generate_digest_preview",
                         "audience": "global"
@@ -106,7 +104,7 @@ def create_help_card() -> Dict[str, Any]:
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.4",
+            "version": "1.3",
             "body": [
                 {
                     "type": "TextBlock",
@@ -212,7 +210,6 @@ def create_help_card() -> Dict[str, Any]:
                 {
                     "type": "Action.Submit",
                     "title": "📊 Generate Digest",
-                    "style": "positive",
                     "data": {
                         "action": "generate_digest_preview",
                         "audience": "global"
@@ -247,7 +244,6 @@ def create_digest_preview_card(
         # Each candidate in styled container
         candidate_container = {
             "type": "Container",
-            "style": "emphasis" if i % 2 == 0 else "default",
             "spacing": "Medium" if i > 0 else "Default",
             "separator": i > 0,
             "items": [
@@ -308,7 +304,7 @@ def create_digest_preview_card(
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.4",
+            "version": "1.3",
             "body": [
                 {
                     "type": "TextBlock",
@@ -333,21 +329,18 @@ def create_digest_preview_card(
                 },
                 {
                     "type": "Container",
-                    "style": "accent",
                     "spacing": "Medium",
                     "items": [
                         {
                             "type": "TextBlock",
                             "text": "**🎯 Next Steps:**",
-                            "weight": "Bolder",
-                            "color": "Light"
+                            "weight": "Bolder"
                         },
                         {
                             "type": "TextBlock",
                             "text": "• Click 'Generate Full Digest' to create the complete email report\n• Use 'Apply Filters' to refine your search\n• Candidates ranked by composite score (financial metrics, evidence quality, sentiment)",
                             "wrap": True,
-                            "size": "Small",
-                            "color": "Light"
+                            "size": "Small"
                         }
                     ]
                 }
@@ -356,7 +349,6 @@ def create_digest_preview_card(
                 {
                     "type": "Action.Submit",
                     "title": "✅ Generate Full Digest",
-                    "style": "positive",
                     "data": {
                         "action": "generate_digest",
                         "audience": audience,
@@ -425,7 +417,7 @@ def create_error_card(error_message: str) -> Dict[str, Any]:
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.4",
+            "version": "1.3",
             "body": [
                 {
                     "type": "TextBlock",
@@ -474,7 +466,7 @@ def create_preferences_card(
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.4",
+            "version": "1.3",
             "body": [
                 {
                     "type": "TextBlock",
@@ -485,7 +477,6 @@ def create_preferences_card(
                 },
                 {
                     "type": "Container",
-                    "style": "emphasis",
                     "spacing": "Medium",
                     "items": [
                         {
@@ -517,7 +508,6 @@ def create_preferences_card(
                 },
                 {
                     "type": "Container",
-                    "style": "emphasis",
                     "spacing": "Medium",
                     "separator": True,
                     "items": [
@@ -542,7 +532,6 @@ def create_preferences_card(
                 },
                 {
                     "type": "Container",
-                    "style": "emphasis",
                     "spacing": "Medium",
                     "separator": True,
                     "items": [
@@ -567,7 +556,6 @@ def create_preferences_card(
                 {
                     "type": "Action.Submit",
                     "title": "💾 Save Preferences",
-                    "style": "positive",
                     "data": {
                         "action": "save_preferences"
                     }
