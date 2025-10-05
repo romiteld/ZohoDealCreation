@@ -590,6 +590,24 @@ az containerapp update --name well-intake-api \
 - **Testing**: `tests/talentwell/test_data_quality.py`, `tests/talentwell/test_bullet_ranking.py`, `tests/talentwell/test_privacy_integration.py`
 - **Rollback**: Set `PRIVACY_MODE=false` in Azure Container Apps environment variables
 
+### Teams Bot Natural Language Query Engine (2025-10-05)
+- **Feature**: Dual-mode operation with natural language query processing
+- **Access Control**:
+  - **Executive users** (steve@, brandon@, daniel.romitelli@): Full access to all business data
+  - **Regular recruiters**: Filtered by `owner_email` to their own Zoho records only
+- **Implementation**:
+  - New query engine: `app/api/teams/query_engine.py`
+  - GPT-5-mini intent classification with entity extraction (temperature=1)
+  - SQL query builder with automatic owner filtering
+  - Supports: deals, deal_notes, meetings tables
+  - **CRITICAL**: `extract_user_email()` helper extracts real email from `additional_properties`, not `aad_object_id` GUID
+- **Query Examples**:
+  - "How many interviews last week?" → Executive sees all, recruiter sees only theirs
+  - "Show me my deals from Q4" → Filtered by owner_email
+  - "What's the status of John Smith?" → Search candidate name
+- **Commands Still Work**: All existing commands (help, digest, preferences, analytics) work for everyone
+- **Files**: `app/api/teams/routes.py:69-99,321-457`, `app/api/teams/query_engine.py`, `app/api/teams/adaptive_cards.py:208-247`
+
 ### Teams Bot Improvements (2025-10-04)
 - **Issue**: Analytics command showed "unsupported card" error in Teams
 - **Solution**: Changed from markdown to plain text formatting in `app/api/teams/routes.py:753-768`

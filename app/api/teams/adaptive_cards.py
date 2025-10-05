@@ -204,6 +204,46 @@ def create_help_card() -> Dict[str, Any]:
                             ]
                         }
                     ]
+                },
+                # Natural Language Queries Section
+                {
+                    "type": "Container",
+                    "separator": True,
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "💬 Natural Language Queries",
+                            "weight": "Bolder",
+                            "size": "Medium"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "Ask questions in plain English! Available to all users:",
+                            "wrap": True,
+                            "isSubtle": True,
+                            "spacing": "Small"
+                        },
+                        {
+                            "type": "FactSet",
+                            "facts": [
+                                {"title": "Executives", "value": "Full access to all business data and analytics"},
+                                {"title": "Recruiters", "value": "Access to your own Zoho deals, notes, and meetings"},
+                            ]
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "**Example queries:**",
+                            "weight": "Bolder",
+                            "spacing": "Small"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "• \"How many interviews last week?\"\n• \"Show me my deals from Q4\"\n• \"What's the status of John Smith?\"\n• \"Summarize financial advisor candidates\"",
+                            "wrap": True,
+                            "spacing": "Small"
+                        }
+                    ]
                 }
             ],
             "actions": [

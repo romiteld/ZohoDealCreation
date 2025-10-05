@@ -27,6 +27,7 @@ from app.api.teams.adaptive_cards import (
 )
 from app.jobs.talentwell_curator import TalentWellCurator
 from app.database_connection_manager import get_database_connection
+from app.api.teams.query_engine import process_natural_language_query
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +64,39 @@ def require_debug_mode():
             detail="Not found"
         )
     return True
+
+
+# Helper function to extract real user email from Teams activity
+def extract_user_email(activity: Activity) -> str:
+    """
+    Extract user's email/UPN from Teams activity.
+
+    CRITICAL: aad_object_id is an Azure AD GUID, NOT an email address.
+    We must use additional_properties to get the real email/UPN.
+
+    Args:
+        activity: Teams Activity object
+
+    Returns:
+        User's email address (or GUID as fallback with warning)
+    """
+    if not activity or not activity.from_property:
+        return ""
+
+    # Extract email from additional_properties (the correct approach)
+    props = getattr(activity.from_property, "additional_properties", {}) or {}
+    user_email = props.get("email") or props.get("userPrincipalName") or ""
+
+    # Fallback to aad_object_id only if no email found (logs warning)
+    if not user_email:
+        user_email = getattr(activity.from_property, "aad_object_id", "")
+        if user_email:
+            logger.warning(
+                f"Could not extract email from Teams activity, using aad_object_id (GUID): {user_email}. "
+                f"This may cause access control issues."
+            )
+
+    return user_email
 
 
 # Helper function to strip bot mentions from message text
@@ -322,12 +356,12 @@ async def handle_message_activity(
     activity: Activity,
     db: asyncpg.Connection
 ) -> Dict[str, Any]:
-    """Handle incoming text message from Teams user."""
+    """Handle incoming text message from Teams user with dual-mode support."""
 
     # Extract user info
     user_id = activity.from_property.id if activity.from_property else ""
     user_name = activity.from_property.name if activity.from_property else ""
-    user_email = getattr(activity.from_property, "aad_object_id", "") if activity.from_property else ""
+    user_email = extract_user_email(activity)  # Use helper to get real email, not GUID
     conversation_id = activity.conversation.id if activity.conversation else ""
 
     # Store conversation
@@ -345,9 +379,11 @@ async def handle_message_activity(
     cleaned_text = remove_mention_text(raw_text, activity.entities)
     message_text = cleaned_text.strip().lower()
 
-    logger.info(f"Message received - Raw: '{raw_text}' | Cleaned: '{cleaned_text}' | Command: '{message_text}'")
+    logger.info(f"Message received - Raw: '{raw_text}' | Cleaned: '{cleaned_text}' | Command: '{message_text}' | From: {user_email}")
 
-    # Handle commands
+    # ========================================
+    # STEP 1: Check for COMMANDS first (anyone can use)
+    # ========================================
     if any(greeting in message_text for greeting in ["hello", "hi", "hey"]):
         # Welcome card
         card = create_welcome_card(user_name.split()[0] if user_name else "there")
@@ -392,19 +428,66 @@ async def handle_message_activity(
     elif message_text.startswith("analytics"):
         return await show_analytics(user_id, user_email, db)
 
+    # ========================================
+    # STEP 2: If NOT a command → Process as natural language query
+    # ========================================
     else:
-        # Unknown command - show help
-        card = create_help_card()
-        await db.execute("""
-            UPDATE teams_conversations
-            SET bot_response = $1
-            WHERE conversation_id = $2 AND activity_id = $3
-        """, "help_card", conversation_id, activity.id)
+        # Access control: Executive users get full access, regular users get owner-filtered access
+        EXECUTIVE_USERS = [
+            "steve@emailthewell.com",
+            "brandon@emailthewell.com",
+            "daniel.romitelli@emailthewell.com"
+        ]
 
-        attachment = CardFactory.adaptive_card(card["content"])
-        response = MessageFactory.attachment(attachment)
-        response.text = "I didn't understand that command. Here's what I can do:"
-        return response
+        is_executive = user_email in EXECUTIVE_USERS
+
+        # Log query attempt
+        logger.info(f"Natural language query from {user_email} (executive: {is_executive}): {cleaned_text}")
+
+        # Process query using query engine
+        try:
+            result = await process_natural_language_query(
+                query=cleaned_text,
+                user_email=user_email,
+                db=db
+            )
+
+            # Update conversation with response
+            await db.execute("""
+                UPDATE teams_conversations
+                SET bot_response = $1
+                WHERE conversation_id = $2 AND activity_id = $3
+            """, "natural_language_query", conversation_id, activity.id)
+
+            # Return response
+            if result.get("card"):
+                # If we have a card, attach it
+                attachment = CardFactory.adaptive_card(result["card"]["content"])
+                response = MessageFactory.attachment(attachment)
+                if result.get("text"):
+                    response.text = result["text"]
+                return response
+            else:
+                # Text-only response
+                return {
+                    "type": "message",
+                    "text": result.get("text", "I couldn't process that query.")
+                }
+
+        except Exception as e:
+            logger.error(f"Error processing natural language query: {e}", exc_info=True)
+            # Fallback to help card
+            card = create_help_card()
+            await db.execute("""
+                UPDATE teams_conversations
+                SET bot_response = $1
+                WHERE conversation_id = $2 AND activity_id = $3
+            """, "error_fallback", conversation_id, activity.id)
+
+            attachment = CardFactory.adaptive_card(card["content"])
+            response = MessageFactory.attachment(attachment)
+            response.text = f"I didn't understand that. Here's what I can do:"
+            return response
 
 
 async def handle_invoke_activity(
@@ -420,7 +503,7 @@ async def handle_invoke_activity(
         action = action_data.get("action", "")
 
         user_id = activity.from_property.id if activity.from_property else ""
-        user_email = getattr(activity.from_property, "aad_object_id", "") if activity.from_property else ""
+        user_email = extract_user_email(activity)  # Use helper to get real email, not GUID
         conversation_id = activity.conversation.id if activity.conversation else ""
 
         logger.info(f"Invoke action: {action} from user {user_email}")
