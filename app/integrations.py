@@ -17,6 +17,12 @@ from azure.storage.blob import BlobServiceClient
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from datetime import datetime, timezone
 
+# Import feature flags
+try:
+    from app.config import FEATURE_ASYNC_ZOHO
+except ImportError:
+    FEATURE_ASYNC_ZOHO = False  # Default to sync if config not available
+
 # Make asyncpg optional - PostgreSQL support is optional
 try:
     import asyncpg
@@ -901,7 +907,12 @@ class ZohoClient:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     def _make_request(self, method: str, endpoint: str, data: dict = None, params: dict = None) -> dict:
-        """Make authenticated request to Zoho API v8."""
+        """
+        Make authenticated request to Zoho API v8 (synchronous).
+
+        NOTE: Async implementation disabled until call sites are updated.
+        Feature flag FEATURE_ASYNC_ZOHO currently has no effect.
+        """
         url = f"{self.base_url}/{endpoint}"
         headers = {
             "Authorization": f"Zoho-oauthtoken {self._get_access_token()}",
@@ -909,12 +920,12 @@ class ZohoClient:
         }
 
         response = requests.request(method, url, json=data, headers=headers, params=params)
-        
+
         if response.status_code == 401:
             self.access_token = None
             headers["Authorization"] = f"Zoho-oauthtoken {self._get_access_token()}"
             response = requests.request(method, url, json=data, headers=headers)
-        
+
         if response.status_code not in [200, 201, 204]:
             error_msg = f"Zoho API error - Status: {response.status_code}, URL: {url}, Response: {response.text}"
             logger.error(error_msg)
