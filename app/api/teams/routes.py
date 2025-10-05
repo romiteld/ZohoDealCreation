@@ -881,6 +881,53 @@ async def debug_logging(_: bool = Depends(require_debug_mode)):
     }
 
 
+@router.post("/admin/run-migration")
+async def run_database_migration(
+    migration_name: str,
+    _: bool = Depends(require_debug_mode),
+    db: asyncpg.Connection = Depends(get_db_connection)
+):
+    """
+    Run a database migration.
+
+    Only accessible when TEAMS_DEBUG_ENABLED=true.
+    Used for deploying schema changes without container exec access.
+
+    Args:
+        migration_name: Name of migration file (e.g., '006_teams_bot_audit_table.sql')
+    """
+    import os
+
+    try:
+        # Construct migration path
+        migration_path = f"/app/migrations/{migration_name}"
+
+        # Check if file exists
+        if not os.path.exists(migration_path):
+            raise HTTPException(status_code=404, detail=f"Migration file not found: {migration_name}")
+
+        # Read migration file
+        with open(migration_path, 'r') as f:
+            migration_sql = f.read()
+
+        logger.info(f"Running migration: {migration_name}")
+
+        # Execute migration
+        await db.execute(migration_sql)
+
+        logger.info(f"Migration completed: {migration_name}")
+
+        return {
+            "status": "success",
+            "migration": migration_name,
+            "timestamp": datetime.now().isoformat()
+        }
+
+    except Exception as e:
+        logger.error(f"Migration failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
+
+
 @router.get("/analytics")
 async def get_analytics_data(
     user_email: str,
