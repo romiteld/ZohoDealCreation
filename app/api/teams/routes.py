@@ -8,7 +8,7 @@ import json
 import os
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
-from fastapi import APIRouter, HTTPException, Depends, Request
+from fastapi import APIRouter, HTTPException, Depends, Request, Header
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import asyncpg
@@ -885,12 +885,13 @@ async def debug_logging(_: bool = Depends(require_debug_mode)):
 async def run_database_migration(
     migration_name: str,
     _: bool = Depends(require_debug_mode),
-    db: asyncpg.Connection = Depends(get_db_connection)
+    db: asyncpg.Connection = Depends(get_db_connection),
+    x_api_key: str = Header(...)
 ):
     """
     Run a database migration.
 
-    Only accessible when TEAMS_DEBUG_ENABLED=true.
+    Only accessible when TEAMS_DEBUG_ENABLED=true and with valid API key.
     Used for deploying schema changes without container exec access.
 
     Args:
@@ -902,6 +903,14 @@ async def run_database_migration(
         - Path sanitization prevents directory traversal
     """
     import os
+
+    # Verify API key
+    API_KEY = os.getenv("API_KEY")
+    if not API_KEY or x_api_key != API_KEY:
+        logger.warning(f"Invalid API key attempt for migration endpoint")
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    logger.info(f"Migration endpoint called with: {migration_name}")
 
     try:
         # Sanitize filename to prevent directory traversal
