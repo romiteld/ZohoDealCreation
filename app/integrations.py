@@ -45,8 +45,27 @@ logger = logging.getLogger(__name__)
 ZOHO_BASE_URL = "https://www.zohoapis.com/crm"
 
 
-def get_zoho_headers(access_token: Optional[str] = None) -> Dict[str, str]:
-    """Get Zoho API headers with authentication"""
+async def get_zoho_headers(access_token: Optional[str] = None) -> Dict[str, str]:
+    """Get Zoho API headers with authentication - async version"""
+    if not access_token:
+        # Get token from OAuth service
+        oauth_url = f"{os.getenv('ZOHO_OAUTH_SERVICE_URL', '')}/api/token"
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(oauth_url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        access_token = data.get('access_token')
+        except Exception as e:
+            logger.error(f"Failed to get Zoho token: {e}")
+
+    return {
+        "Authorization": f"Bearer {access_token}" if access_token else "",
+        "Content-Type": "application/json"
+    }
+
+def get_zoho_headers_sync(access_token: Optional[str] = None) -> Dict[str, str]:
+    """Get Zoho API headers with authentication - synchronous version for backwards compatibility"""
     if not access_token:
         # Get token from OAuth service
         oauth_url = f"{os.getenv('ZOHO_OAUTH_SERVICE_URL', '')}/api/token"
@@ -56,7 +75,7 @@ def get_zoho_headers(access_token: Optional[str] = None) -> Dict[str, str]:
                 access_token = response.json().get('access_token')
         except Exception as e:
             logger.error(f"Failed to get Zoho token: {e}")
-    
+
     return {
         "Authorization": f"Bearer {access_token}" if access_token else "",
         "Content-Type": "application/json"
@@ -64,18 +83,19 @@ def get_zoho_headers(access_token: Optional[str] = None) -> Dict[str, str]:
 
 
 async def fetch_deal_from_zoho(deal_id: str) -> Optional[Dict[str, Any]]:
-    """Fetch deal details from Zoho"""
-    headers = get_zoho_headers()
+    """Fetch deal details from Zoho - async version using aiohttp"""
+    headers = await get_zoho_headers()
     url = f"{ZOHO_BASE_URL}/v8/Deals/{deal_id}"
-    
+
     try:
-        response = requests.get(url, headers=headers)
-        if response.status_code == 200:
-            data = response.json()
-            return data.get('data', [{}])[0] if 'data' in data else None
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url, headers=headers) as response:
+                if response.status == 200:
+                    data = await response.json()
+                    return data.get('data', [{}])[0] if 'data' in data else None
     except Exception as e:
         logger.error(f"Failed to fetch deal {deal_id}: {e}")
-    
+
     return None
 
 class PostgreSQLClient:
@@ -1364,6 +1384,16 @@ class ZohoApiClient(ZohoClient):
                     except Exception as e:
                         logger.warning(f"Failed to attach file {filename}: {e}")
             
+            # Cache enrichment data for TalentWell integration
+            await self._cache_enrichment_data(
+                primary_email=primary_email,
+                company_name=company_name,
+                job_title=job_title,
+                location=location,
+                phone=contact_phone or company_phone,
+                company_website=company_website
+            )
+
             # Return comprehensive result
             return {
                 "deal_id": deal_id,
@@ -1380,6 +1410,56 @@ class ZohoApiClient(ZohoClient):
             logger.error(f"Error in create_or_update_records: {str(e)}")
             raise
     
+    async def _cache_enrichment_data(
+        self,
+        primary_email: str,
+        company_name: Optional[str] = None,
+        job_title: Optional[str] = None,
+        location: Optional[str] = None,
+        phone: Optional[str] = None,
+        company_website: Optional[str] = None
+    ) -> None:
+        """Cache enrichment data for TalentWell integration with 7-day TTL."""
+        try:
+            # Import Redis client
+            from app.redis_cache_manager import get_cache_manager
+
+            cache_manager = await get_cache_manager()
+            if not cache_manager:
+                logger.warning("Redis cache not available, skipping enrichment cache")
+                return
+
+            # Build cache key
+            cache_key = f"enrichment:contact:{primary_email.lower()}"
+
+            # Build enrichment data
+            enrichment_data = {
+                "email": primary_email,
+                "company": company_name,
+                "job_title": job_title,
+                "location": location,
+                "phone": phone,
+                "company_website": company_website,
+                "enriched_at": datetime.now(timezone.utc).isoformat(),
+                "source": "outlook_intake"
+            }
+
+            # Remove None values to save space
+            enrichment_data = {k: v for k, v in enrichment_data.items() if v is not None}
+
+            # Store in Redis with 7-day TTL
+            await cache_manager.client.setex(
+                cache_key,
+                86400 * 7,  # 7 days in seconds
+                json.dumps(enrichment_data)
+            )
+
+            logger.info(f"Cached enrichment data for {primary_email} with 7-day TTL")
+
+        except Exception as e:
+            logger.error(f"Failed to cache enrichment data: {e}")
+            # Don't raise - caching failure shouldn't break the main flow
+
     async def check_zoho_deal_duplicate(self, deal_name: str) -> dict:
         """Check if a deal with this exact name already exists in Zoho CRM.
         Uses Zoho search API on Deal_Name for exact match.
@@ -1458,12 +1538,16 @@ class ZohoApiClient(ZohoClient):
                               from_date: Optional[datetime] = None,
                               to_date: Optional[datetime] = None,
                               owner: Optional[str] = None,
-                              published_to_vault: bool = None) -> List[Dict[str, Any]]:
+                              published_to_vault: bool = None,
+                              candidate_type: Optional[str] = None) -> List[Dict[str, Any]]:
         """
         Query candidates from Zoho CRM for TalentWell digest.
         Fetches all Leads (displayed as Candidates in Zoho) that are not Placed or Hired.
         The "Vault Candidates" view shows all available candidates.
-        Applies optional date range and owner filters.
+        Applies optional date range and candidate type filters.
+
+        Args:
+            candidate_type: Filter by "advisors" or "c_suite". None = all candidates.
         """
         try:
             # Build search criteria - simplified since Candidate_Status is not searchable
@@ -1472,18 +1556,17 @@ class ZohoApiClient(ZohoClient):
             # Note: Publish_to_Vault is not searchable via API, will filter locally
             # Don't add it to search criteria
 
-            # Add owner filter if provided
-            if owner:
-                criteria_parts.append(f"(Owner.email:equals:{owner})")
+            # NOTE: Owner filter removed - now filtering by candidate type instead
 
             # If we have search criteria (but NOT for published_to_vault), use search endpoint
             if criteria_parts:
                 # Combine all criteria with AND
                 search_criteria = "and".join(criteria_parts)
 
-                # Make API request with search
+                # Make API request with search - include fields to avoid N+1 queries
                 params = {
                     "criteria": search_criteria,
+                    "fields": "id,Full_Name,Email,Company,Designation,Current_Location,Candidate_Locator,Title,Current_Firm,Is_Mobile,Remote_Preference,Hybrid_Preference,Professional_Designations,Book_Size_AUM,Production_12mo,Desired_Comp,When_Available,Source,Source_Detail,Meeting_Date,Meeting_ID,Transcript_URL,Phone,Referrer_Name,Publish_to_Vault,Date_Published_to_Vault",
                     "page": page,
                     "per_page": limit
                 }
@@ -1516,6 +1599,22 @@ class ZohoApiClient(ZohoClient):
                         if candidate.get("Publish_to_Vault", False) != published_to_vault:
                             continue
 
+                    # Filter by candidate type based on job title keywords
+                    if candidate_type:
+                        job_title = (candidate.get("Designation") or candidate.get("Title") or "").lower()
+
+                        if candidate_type == "advisors":
+                            # Advisor keywords
+                            advisor_keywords = ["advisor", "financial advisor", "wealth advisor", "investment advisor", "wealth management"]
+                            if not any(keyword in job_title for keyword in advisor_keywords):
+                                continue
+                        elif candidate_type == "c_suite":
+                            # C-Suite/Executive keywords
+                            exec_keywords = ["ceo", "cfo", "coo", "cto", "president", "vp", "vice president",
+                                           "chief", "director", "managing director", "executive", "head of"]
+                            if not any(keyword in job_title for keyword in exec_keywords):
+                                continue
+
                     processed = {
                         "id": candidate.get("id"),
                         "candidate_locator": candidate.get("Candidate_Locator") or candidate.get("id"),
@@ -1545,8 +1644,14 @@ class ZohoApiClient(ZohoClient):
                     processed_candidates.append(processed)
 
                 # Log filtered count if filtering was applied
+                filters_applied = []
                 if published_to_vault is not None:
-                    logger.info(f"Filtered to {len(processed_candidates)} Vault candidates from {len(candidates)} total")
+                    filters_applied.append("Vault")
+                if candidate_type:
+                    filters_applied.append(f"Type={candidate_type}")
+
+                if filters_applied:
+                    logger.info(f"Filtered to {len(processed_candidates)} candidates from {len(candidates)} total (filters: {', '.join(filters_applied)})")
 
                 return processed_candidates
             else:

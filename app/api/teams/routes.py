@@ -5,12 +5,18 @@ Handles Teams activities, user preferences, and digest generation with database 
 import logging
 import uuid
 import json
+import os
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import asyncpg
+
+# Microsoft Bot Framework imports
+from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext, MessageFactory, CardFactory
+from botbuilder.schema import Activity, ActivityTypes
+from botframework.connector.auth import MicrosoftAppCredentials
 
 from app.api.teams.adaptive_cards import (
     create_welcome_card,
@@ -25,6 +31,26 @@ from app.database_connection_manager import get_database_connection
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/teams", tags=["teams"])
+
+# Bot Framework Adapter setup
+APP_ID = os.getenv("TEAMS_BOT_APP_ID")
+APP_PASSWORD = os.getenv("TEAMS_BOT_APP_PASSWORD")
+TENANT_ID = os.getenv("TEAMS_BOT_TENANT_ID", "29ee1479-b5f7-48c5-b665-7de9a8a9033e")
+
+# Set Microsoft App credentials for SingleTenant auth
+from botframework.connector.auth import MicrosoftAppCredentials
+
+# Configure credentials with tenant ID
+MicrosoftAppCredentials.microsoft_app_id = APP_ID
+MicrosoftAppCredentials.microsoft_app_password = APP_PASSWORD
+
+# Create adapter settings
+settings = BotFrameworkAdapterSettings(
+    app_id=APP_ID,
+    app_password=APP_PASSWORD,
+    channel_auth_tenant=TENANT_ID  # Tenant ID for SingleTenant apps
+)
+adapter = BotFrameworkAdapter(settings)
 
 
 # Teams Bot Framework Activity Models
@@ -74,51 +100,187 @@ async def get_db_connection():
 
 # Main webhook endpoint
 @router.post("/webhook")
-async def teams_webhook(
-    activity: TeamsActivity,
-    request: Request,
-    db: asyncpg.Connection = Depends(get_db_connection)
-):
+async def teams_webhook(request: Request):
     """
     Microsoft Teams Bot Framework webhook endpoint.
     Handles all incoming Teams activities (messages, invokes, conversation updates).
 
     No API key required - uses Azure AD authentication from Bot Framework.
     """
+    print("=== TEAMS WEBHOOK CALLED ===", flush=True)
+    logger.info("=== TEAMS WEBHOOK CALLED ===")
     try:
+        # Get request body
+        body = await request.json()
+        print(f"Request body type: {body.get('type', 'unknown')}", flush=True)
+        logger.info(f"Request body received: {body.get('type', 'unknown')}")
+        activity = Activity().deserialize(body)
+
+        print(f"Received Teams activity type: {activity.type}", flush=True)
         logger.info(f"Received Teams activity: {activity.type}")
 
-        # Route activity based on type
-        if activity.type == "message":
-            return await handle_message_activity(activity, db)
-        elif activity.type == "invoke":
-            return await handle_invoke_activity(activity, db)
-        elif activity.type == "conversationUpdate":
-            return await handle_conversation_update(activity, db)
-        else:
-            logger.warning(f"Unhandled activity type: {activity.type}")
-            return {"status": "ignored"}
+        # Get auth header
+        auth_header = request.headers.get("Authorization", "")
+
+        # Process activity using Bot Framework adapter
+        async def bot_logic(turn_context: TurnContext):
+            """Bot logic to handle the activity."""
+            activity_id = turn_context.activity.id
+            try:
+                # Get database connection for this request
+                from app.database_connection_manager import get_connection_manager
+                manager = await get_connection_manager()
+                async with manager.get_connection() as db:
+                    # Log: bot_logic started
+                    await db.execute("""
+                        UPDATE teams_conversations
+                        SET bot_response = 'bot_logic_started'
+                        WHERE activity_id = $1
+                    """, activity_id)
+
+                    # Route activity based on type
+                    if turn_context.activity.type == ActivityTypes.message:
+                        response = await handle_message_activity(turn_context.activity, db)
+                        logger.info(f"Response from handle_message_activity: {type(response)}")
+
+                        # Log: message handler completed
+                        await db.execute("""
+                            UPDATE teams_conversations
+                            SET bot_response = 'message_handler_completed'
+                            WHERE activity_id = $1
+                        """, activity_id)
+
+                        if response:
+                            print(f"About to send activity response: {response}", flush=True)
+                            logger.info(f"Sending activity response: {response}")
+
+                            # Convert dict responses to proper Activity objects
+                            if isinstance(response, dict):
+                                # Preserve all metadata by constructing Activity with all fields
+                                response_dict = response  # Keep reference to original dict
+
+                                if "attachments" in response_dict and response_dict["attachments"]:
+                                    # Multiple attachments: use MessageFactory.carousel or list
+                                    if len(response_dict["attachments"]) > 1:
+                                        response = MessageFactory.carousel(response_dict["attachments"])
+                                    else:
+                                        response = MessageFactory.attachment(response_dict["attachments"][0])
+
+                                    # Preserve additional fields like channelData, suggestedActions
+                                    if "channelData" in response_dict:
+                                        response.channel_data = response_dict["channelData"]
+                                    if "suggestedActions" in response_dict:
+                                        response.suggested_actions = response_dict["suggestedActions"]
+                                elif "text" in response_dict:
+                                    # Simple text message
+                                    response = MessageFactory.text(response_dict["text"])
+
+                            # Trust the service URL before sending (required for Bot Framework)
+                            try:
+                                service_url = turn_context.activity.service_url
+                                MicrosoftAppCredentials.trust_service_url(service_url)
+                                print(f"Trusted service URL: {service_url}", flush=True)
+                                logger.info(f"Trusted service URL: {service_url}")
+
+                                # Log: service URL trusted
+                                await db.execute("""
+                                    UPDATE teams_conversations
+                                    SET bot_response = $1
+                                    WHERE activity_id = $2
+                                """, f'service_url_trusted:{service_url}', activity_id)
+                            except Exception as trust_error:
+                                logger.error(f"Error trusting service URL: {trust_error}", exc_info=True)
+                                print(f"SERVICE URL TRUST FAILED: {trust_error}", flush=True)
+                                await db.execute("""
+                                    UPDATE teams_conversations
+                                    SET bot_response = $1
+                                    WHERE activity_id = $2
+                                """, f'trust_error:{str(trust_error)[:100]}', activity_id)
+
+                            # Send activity with comprehensive error handling
+                            try:
+                                # Log: attempting send
+                                await db.execute("""
+                                    UPDATE teams_conversations
+                                    SET bot_response = 'send_activity_attempting'
+                                    WHERE activity_id = $1
+                                """, activity_id)
+
+                                result = await turn_context.send_activity(response)
+                                print(f"✅ Activity send result: {result}", flush=True)
+                                logger.info(f"✅ Activity send result: {result}")
+
+                                # Log: send successful
+                                await db.execute("""
+                                    UPDATE teams_conversations
+                                    SET bot_response = $1
+                                    WHERE activity_id = $2
+                                """, f'send_success:{result}', activity_id)
+                            except Exception as send_error:
+                                logger.error(f"❌ CRITICAL: Failed to send activity: {send_error}", exc_info=True)
+                                print(f"❌ SEND ACTIVITY FAILED: {send_error}", flush=True)
+                                # Try to log the error details
+                                print(f"Error type: {type(send_error).__name__}", flush=True)
+                                print(f"Error details: {str(send_error)}", flush=True)
+
+                                # Log: send failed with error
+                                error_msg = f"{type(send_error).__name__}:{str(send_error)[:150]}"
+                                await db.execute("""
+                                    UPDATE teams_conversations
+                                    SET bot_response = $1
+                                    WHERE activity_id = $2
+                                """, f'send_failed:{error_msg}', activity_id)
+                                raise  # Re-raise to ensure it's logged
+
+                    elif turn_context.activity.type == ActivityTypes.invoke:
+                        response = await handle_invoke_activity(turn_context.activity, db)
+                        if response:
+                            # Create proper Activity from response dict
+                            activity_response = Activity(
+                                type=response.get("type", "message"),
+                                text=response.get("text"),
+                                attachments=response.get("attachments")
+                            )
+                            await turn_context.send_activity(activity_response)
+                    elif turn_context.activity.type == ActivityTypes.conversation_update:
+                        response = await handle_conversation_update(turn_context.activity, db)
+                        if response:
+                            # Create proper Activity from response dict
+                            activity_response = Activity(
+                                type=response.get("type", "message"),
+                                text=response.get("text"),
+                                attachments=response.get("attachments")
+                            )
+                            await turn_context.send_activity(activity_response)
+                    else:
+                        logger.warning(f"Unhandled activity type: {turn_context.activity.type}")
+            except Exception as inner_e:
+                logger.error(f"Error in bot_logic: {inner_e}", exc_info=True)
+
+        # Process with Bot Framework (handles auth automatically)
+        await adapter.process_activity(activity, auth_header, bot_logic)
+
+        return JSONResponse(content={"status": "ok"}, status_code=200)
 
     except Exception as e:
         logger.error(f"Error in Teams webhook: {e}", exc_info=True)
-        error_card = create_error_card(f"An error occurred: {str(e)}")
-        return {
-            "type": "message",
-            "attachments": [error_card]
-        }
+        return JSONResponse(
+            content={"error": str(e)},
+            status_code=500
+        )
 
 
 async def handle_message_activity(
-    activity: TeamsActivity,
+    activity: Activity,
     db: asyncpg.Connection
 ) -> Dict[str, Any]:
     """Handle incoming text message from Teams user."""
 
     # Extract user info
-    user_id = activity.from_.get("id", "") if activity.from_ else ""
-    user_name = activity.from_.get("name", "") if activity.from_ else ""
-    user_email = activity.from_.get("userPrincipalName", "") if activity.from_ else ""
-    conversation_id = activity.conversation.get("id", "") if activity.conversation else ""
+    user_id = activity.from_property.id if activity.from_property else ""
+    user_name = activity.from_property.name if activity.from_property else ""
+    user_email = getattr(activity.from_property, "aad_object_id", "") if activity.from_property else ""
+    conversation_id = activity.conversation.id if activity.conversation else ""
 
     # Store conversation
     await db.execute("""
@@ -135,30 +297,44 @@ async def handle_message_activity(
 
     # Handle commands
     if any(greeting in message_text for greeting in ["hello", "hi", "hey", "help"]):
-        card = create_welcome_card(user_name.split()[0] if user_name else "there")
-        return {
-            "type": "message",
-            "attachments": [card]
-        }
+        # TEST: Send simple text response first to verify bot communication works
+        return MessageFactory.text(f"Hello {user_name}! I received your help command. Bot is working!")
+
+        # TODO: Re-enable card after confirming text works
+        # card = create_welcome_card(user_name.split()[0] if user_name else "there")
+        # attachment = CardFactory.adaptive_card(card["content"])
+        # return MessageFactory.attachment(attachment)
 
     elif message_text.startswith("help"):
         card = create_help_card()
-        return {
-            "type": "message",
-            "attachments": [card]
-        }
+        # Use CardFactory to create proper Attachment, passing card content only
+        attachment = CardFactory.adaptive_card(card["content"])
+        return MessageFactory.attachment(attachment)
 
     elif message_text.startswith("digest"):
-        # Parse audience from message (e.g., "digest steve_perry")
+        # Parse audience from message (e.g., "digest advisors", "digest c_suite", or "digest daniel.romitelli@emailthewell.com")
         parts = message_text.split()
-        audience = parts[1] if len(parts) > 1 else "global"
+        audience_input = parts[1] if len(parts) > 1 else "global"
+
+        # Check if input is an email address (test mode)
+        test_email = None
+        if "@" in audience_input:
+            test_email = audience_input
+            audience = "global"  # Default to global for test emails
+            logger.info(f"Test mode detected: will route digest to {test_email}")
+        else:
+            audience = audience_input
+            # Normalize legacy values
+            if audience == "steve_perry":
+                audience = "advisors"  # Map legacy steve_perry to advisors
 
         return await generate_digest_preview(
             user_id=user_id,
             user_email=user_email,
             conversation_id=conversation_id,
             audience=audience,
-            db=db
+            db=db,
+            test_recipient_email=test_email
         )
 
     elif message_text.startswith("preferences"):
@@ -184,7 +360,7 @@ async def handle_message_activity(
 
 
 async def handle_invoke_activity(
-    activity: TeamsActivity,
+    activity: Activity,
     db: asyncpg.Connection
 ) -> Dict[str, Any]:
     """Handle Adaptive Card button clicks (invoke actions)."""
@@ -194,9 +370,9 @@ async def handle_invoke_activity(
         action_data = activity.value or {}
         action = action_data.get("action", "")
 
-        user_id = activity.from_.get("id", "") if activity.from_ else ""
-        user_email = activity.from_.get("userPrincipalName", "") if activity.from_ else ""
-        conversation_id = activity.conversation.get("id", "") if activity.conversation else ""
+        user_id = activity.from_property.id if activity.from_property else ""
+        user_email = getattr(activity.from_property, "aad_object_id", "") if activity.from_property else ""
+        conversation_id = activity.conversation.id if activity.conversation else ""
 
         logger.info(f"Invoke action: {action} from user {user_email}")
 
@@ -270,17 +446,17 @@ async def handle_invoke_activity(
 
 
 async def handle_conversation_update(
-    activity: TeamsActivity,
+    activity: Activity,
     db: asyncpg.Connection
 ) -> Dict[str, Any]:
     """Handle conversation updates (bot added/removed)."""
 
     # Bot was added to conversation
-    if activity.membersAdded:
-        for member in activity.membersAdded:
-            if member.get("id") != activity.recipient.get("id"):
+    if activity.members_added:
+        for member in activity.members_added:
+            if member.id != activity.recipient.id:
                 # User added bot
-                user_name = member.get("name", "there")
+                user_name = member.name or "there"
                 card = create_welcome_card(user_name)
 
                 return {
@@ -297,9 +473,14 @@ async def generate_digest_preview(
     conversation_id: str,
     audience: str,
     db: asyncpg.Connection,
-    filters: Optional[Dict[str, Any]] = None
+    filters: Optional[Dict[str, Any]] = None,
+    test_recipient_email: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Generate digest preview with top candidates."""
+    """Generate digest preview with top candidates.
+
+    Args:
+        test_recipient_email: If provided, indicates test mode - email will be routed to this address.
+    """
 
     try:
         # Create request ID
@@ -386,6 +567,17 @@ async def generate_digest_preview(
             request_id=request_id
         )
 
+        # Add test mode warning if applicable
+        if test_recipient_email:
+            # Prepend test mode message
+            test_warning = f"⚠️ TEST MODE: Digest will be sent to {test_recipient_email}\n\n"
+            # Add warning to card title if possible, or return text + card
+            return {
+                "type": "message",
+                "text": test_warning,
+                "attachments": [card]
+            }
+
         return {
             "type": "message",
             "attachments": [card]
@@ -416,9 +608,15 @@ async def generate_full_digest(
     request_id: str,
     audience: str,
     dry_run: bool,
-    db: asyncpg.Connection
+    db: asyncpg.Connection,
+    test_recipient_email: Optional[str] = None
 ) -> Dict[str, Any]:
-    """Generate full HTML digest email."""
+    """Generate full HTML digest email.
+
+    Args:
+        test_recipient_email: If provided, send digest to this email instead of actual advisor.
+                              Use for testing before sending to real advisors.
+    """
 
     try:
         # Get request details
@@ -430,7 +628,7 @@ async def generate_full_digest(
         if not request:
             raise HTTPException(status_code=404, detail="Request not found")
 
-        # Run curator with dry_run=False
+        # Run curator
         curator = TalentWellCurator()
         await curator.initialize()
 
@@ -450,11 +648,18 @@ async def generate_full_digest(
             SET digest_html = $1,
                 subject_variant = $2
             WHERE request_id = $3
-        """, result.get("html_content"), result.get("subject_line"), request_id)
+        """, result.get("email_html"), result.get("subject"), request_id)
+
+        success_msg = f"✅ Digest generated successfully!\n\nSubject: {result.get('subject')}\n\n{len(result.get('cards_metadata', []))} candidates included."
+
+        if test_recipient_email:
+            success_msg += f"\n\n⚠️ TEST MODE: Email would be sent to {test_recipient_email} instead of {audience}"
+        elif dry_run:
+            success_msg += "\n\n⚠️ DRY RUN: No email sent"
 
         return {
             "type": "message",
-            "text": f"✅ Digest generated successfully!\n\nSubject: {result.get('subject_line')}\n\n{len(result.get('cards', []))} candidates included."
+            "text": success_msg
         }
 
     except Exception as e:
@@ -587,20 +792,17 @@ async def show_analytics(
             LIMIT 10
         """, user_id)
 
-        # Format analytics message
-        analytics_text = f"""
-📊 **Your TalentWell Analytics**
+        # Format analytics message (plain text for Teams compatibility)
+        analytics_text = f"📊 Your TalentWell Analytics\n\n"
+        analytics_text += f"Activity Summary:\n"
+        analytics_text += f"- Total conversations: {activity['conversation_count']}\n"
+        analytics_text += f"- Digest requests: {activity['digest_request_count']}\n"
+        analytics_text += f"- Last activity: {activity['last_conversation_at'].strftime('%Y-%m-%d %H:%M') if activity['last_conversation_at'] else 'N/A'}\n\n"
 
-**Activity Summary:**
-• Total conversations: {activity['conversation_count']}
-• Digest requests: {activity['digest_request_count']}
-• Last activity: {activity['last_conversation_at'].strftime('%Y-%m-%d %H:%M') if activity['last_conversation_at'] else 'N/A'}
-
-**Recent Digests:**
-"""
-
-        for req in recent_requests:
-            analytics_text += f"\n• {req['audience']}: {req['cards_generated']} cards ({req['execution_time_ms']}ms) - {req['created_at'].strftime('%Y-%m-%d')}"
+        if recent_requests:
+            analytics_text += "Recent Digests:\n"
+            for req in recent_requests:
+                analytics_text += f"- {req['audience']}: {req['cards_generated']} cards ({req['execution_time_ms']}ms) - {req['created_at'].strftime('%Y-%m-%d')}\n"
 
         return {
             "type": "message",
@@ -624,6 +826,35 @@ async def teams_health():
     return {
         "status": "healthy",
         "service": "teams-integration",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/debug/env")
+async def debug_env():
+    """Debug endpoint to check environment variables."""
+    import os
+    app_id = os.getenv("TEAMS_BOT_APP_ID")
+    app_password = os.getenv("TEAMS_BOT_APP_PASSWORD")
+
+    return {
+        "TEAMS_BOT_APP_ID": app_id if app_id else "NOT SET",
+        "TEAMS_BOT_APP_PASSWORD": "SET (length: {})".format(len(app_password)) if app_password else "NOT SET",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.get("/debug/logging")
+async def debug_logging():
+    """Test endpoint to verify logging works."""
+    print("=== DEBUG LOGGING TEST - PRINT STATEMENT ===", flush=True)
+    logger.info("=== DEBUG LOGGING TEST - LOGGER INFO ===")
+    logger.warning("=== DEBUG LOGGING TEST - LOGGER WARNING ===")
+    logger.error("=== DEBUG LOGGING TEST - LOGGER ERROR ===")
+
+    return {
+        "status": "logged",
+        "message": "Check logs for: DEBUG LOGGING TEST",
         "timestamp": datetime.now().isoformat()
     }
 

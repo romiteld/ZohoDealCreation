@@ -1,0 +1,74 @@
+{
+  "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.16/MicrosoftTeams.schema.json",
+  "manifestVersion": "1.16",
+  "version": "1.0.0",
+  "id": "34d9338f-ba4e-4a68-9a22-b01892afba83",
+  "packageName": "com.thewell.talentwell",
+  "developer": {
+    "name": "The Well",
+    "websiteUrl": "https://emailthewell.com",
+    "privacyUrl": "https://emailthewell.com/privacy",
+    "termsOfUseUrl": "https://emailthewell.com/terms"
+  },
+  "name": {
+    "short": "TalentWell Assistant",
+    "full": "TalentWell Candidate Digest Assistant"
+  },
+  "description": {
+    "short": "AI-powered candidate digest generator",
+    "full": "TalentWell Assistant helps financial advisors discover and track top talent through intelligent candidate digests powered by GPT-5 and comprehensive scoring algorithms."
+  },
+  "icons": {
+    "color": "color-icon.png",
+    "outline": "outline-icon.png"
+  },
+  "accentColor": "#0078D4",
+  "bots": [
+    {
+      "botId": "34d9338f-ba4e-4a68-9a22-b01892afba83",
+      "scopes": [
+        "personal",
+        "team"
+      ],
+      "supportsFiles": false,
+      "isNotificationOnly": false,
+      "commandLists": [
+        {
+          "scopes": [
+            "personal",
+            "team"
+          ],
+          "commands": [
+            {
+              "title": "help",
+              "description": "Show available commands and help"
+            },
+            {
+              "title": "digest",
+              "description": "Generate candidate digest (e.g., 'digest steve_perry')"
+            },
+            {
+              "title": "digest global",
+              "description": "Generate digest for all advisors"
+            },
+            {
+              "title": "preferences",
+              "description": "View and update your settings"
+            },
+            {
+              "title": "analytics",
+              "description": "View usage statistics"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "messageTeamMembers"
+  ],
+  "validDomains": [
+    "well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io"
+  ]
+}

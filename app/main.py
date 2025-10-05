@@ -47,6 +47,9 @@ from app.admin.import_exports_v2 import router as import_v2_router
 # Import Apollo enrichment
 from app.apollo_enricher import enrich_contact_with_apollo
 
+# Import Teams bot routes
+from app.api.teams.routes import router as teams_router
+
 # API Key Authentication with secure comparison and rate limiting
 import hmac
 from collections import defaultdict
@@ -3235,6 +3238,9 @@ app.include_router(import_v2_router)
 # Include Apollo.io API router for comprehensive phone discovery
 from app.api.apollo.routes import router as apollo_router
 app.include_router(apollo_router)
+
+# Include Teams bot router
+app.include_router(teams_router)
 
 @app.get("/cache/status", dependencies=[Depends(verify_api_key)])
 async def get_cache_status():

@@ -1,0 +1,191 @@
+{
+  "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+  "type": "AdaptiveCard",
+  "version": "1.4",
+  "body": [
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "‼️ **${candidate_name}**",
+          "size": "Large",
+          "weight": "Bolder",
+          "wrap": true
+        },
+        {
+          "type": "TextBlock",
+          "text": "${job_title}",
+          "size": "Medium",
+          "isSubtle": true,
+          "wrap": true
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "FactSet",
+          "facts": [
+            {
+              "title": "🔔 Company",
+              "value": "${company}"
+            },
+            {
+              "title": "📍 Location",
+              "value": "${location}"
+            },
+            {
+              "title": "💼 AUM",
+              "value": "${aum}"
+            },
+            {
+              "title": "📅 Available",
+              "value": "${availability}"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "TextBlock",
+          "text": "**Key Highlights:**",
+          "size": "Medium",
+          "weight": "Bolder",
+          "spacing": "Medium"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${bullet_1}",
+          "wrap": true,
+          "spacing": "Small"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${bullet_2}",
+          "wrap": true,
+          "spacing": "Small"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${bullet_3}",
+          "wrap": true,
+          "spacing": "Small"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${bullet_4}",
+          "wrap": true,
+          "spacing": "Small",
+          "isVisible": "${has_bullet_4}"
+        },
+        {
+          "type": "TextBlock",
+          "text": "${bullet_5}",
+          "wrap": true,
+          "spacing": "Small",
+          "isVisible": "${has_bullet_5}"
+        }
+      ],
+      "spacing": "Medium"
+    },
+    {
+      "type": "Container",
+      "items": [
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "auto",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "**Source:**",
+                  "size": "Small",
+                  "weight": "Bolder"
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "stretch",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "${source}",
+                  "size": "Small"
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "type": "ColumnSet",
+          "columns": [
+            {
+              "type": "Column",
+              "width": "auto",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "**Score:**",
+                  "size": "Small",
+                  "weight": "Bolder"
+                }
+              ]
+            },
+            {
+              "type": "Column",
+              "width": "stretch",
+              "items": [
+                {
+                  "type": "TextBlock",
+                  "text": "${evidence_score}%",
+                  "size": "Small",
+                  "color": "${score_color}"
+                }
+              ]
+            }
+          ]
+        }
+      ],
+      "spacing": "Medium",
+      "separator": true
+    }
+  ],
+  "actions": [
+    {
+      "type": "Action.OpenUrl",
+      "title": "View in Zoho CRM",
+      "url": "${zoho_url}",
+      "style": "positive"
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Request Interview",
+      "data": {
+        "action": "request_interview",
+        "deal_id": "${deal_id}",
+        "candidate_name": "${candidate_name}"
+      }
+    },
+    {
+      "type": "Action.Submit",
+      "title": "Not Interested",
+      "data": {
+        "action": "not_interested",
+        "deal_id": "${deal_id}",
+        "candidate_name": "${candidate_name}"
+      },
+      "style": "destructive"
+    }
+  ],
+  "msteams": {
+    "width": "Full"
+  }
+}

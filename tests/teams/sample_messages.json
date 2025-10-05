@@ -1,0 +1,212 @@
+{
+  "sample_messages": {
+    "digest_command": {
+      "type": "message",
+      "id": "msg-001",
+      "timestamp": "2025-01-04T10:00:00Z",
+      "from": {
+        "id": "user-001",
+        "name": "Steve Perry",
+        "userPrincipalName": "steve.perry@thewell.com"
+      },
+      "conversation": {
+        "id": "conv-001",
+        "conversationType": "personal"
+      },
+      "text": "digest 7",
+      "channelData": {
+        "tenant": {
+          "id": "tenant-001"
+        }
+      }
+    },
+    "filter_aum_command": {
+      "type": "message",
+      "id": "msg-002",
+      "timestamp": "2025-01-04T10:05:00Z",
+      "from": {
+        "id": "user-001",
+        "name": "Steve Perry",
+        "userPrincipalName": "steve.perry@thewell.com"
+      },
+      "conversation": {
+        "id": "conv-001",
+        "conversationType": "personal"
+      },
+      "text": "filter aum >500M",
+      "channelData": {
+        "tenant": {
+          "id": "tenant-001"
+        }
+      }
+    },
+    "filter_location_command": {
+      "type": "message",
+      "id": "msg-003",
+      "timestamp": "2025-01-04T10:10:00Z",
+      "from": {
+        "id": "user-001",
+        "name": "Steve Perry",
+        "userPrincipalName": "steve.perry@thewell.com"
+      },
+      "conversation": {
+        "id": "conv-001",
+        "conversationType": "personal"
+      },
+      "text": "filter location New York",
+      "channelData": {
+        "tenant": {
+          "id": "tenant-001"
+        }
+      }
+    },
+    "analytics_command": {
+      "type": "message",
+      "id": "msg-004",
+      "timestamp": "2025-01-04T10:15:00Z",
+      "from": {
+        "id": "user-001",
+        "name": "Steve Perry",
+        "userPrincipalName": "steve.perry@thewell.com"
+      },
+      "conversation": {
+        "id": "conv-001",
+        "conversationType": "personal"
+      },
+      "text": "analytics 30d",
+      "channelData": {
+        "tenant": {
+          "id": "tenant-001"
+        }
+      }
+    },
+    "card_action_view_zoho": {
+      "type": "invoke",
+      "name": "adaptiveCard/action",
+      "value": {
+        "action": {
+          "type": "Action.Submit",
+          "data": {
+            "action": "view_zoho",
+            "deal_id": "12345678",
+            "candidate_name": "John Smith"
+          }
+        }
+      },
+      "from": {
+        "id": "user-001",
+        "name": "Steve Perry",
+        "userPrincipalName": "steve.perry@thewell.com"
+      }
+    },
+    "card_action_request_interview": {
+      "type": "invoke",
+      "name": "adaptiveCard/action",
+      "value": {
+        "action": {
+          "type": "Action.Submit",
+          "data": {
+            "action": "request_interview",
+            "deal_id": "12345678",
+            "candidate_name": "John Smith"
+          }
+        }
+      },
+      "from": {
+        "id": "user-001",
+        "name": "Steve Perry",
+        "userPrincipalName": "steve.perry@thewell.com"
+      }
+    }
+  },
+  "expected_responses": {
+    "digest_response": {
+      "type": "message",
+      "attachments": [
+        {
+          "contentType": "application/vnd.microsoft.card.adaptive",
+          "content": {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+              {
+                "type": "TextBlock",
+                "text": "TalentWell Candidate Digest",
+                "size": "Large",
+                "weight": "Bolder"
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "analytics_response": {
+      "type": "message",
+      "attachments": [
+        {
+          "contentType": "application/vnd.microsoft.card.adaptive",
+          "content": {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.4",
+            "body": [
+              {
+                "type": "TextBlock",
+                "text": "TalentWell Analytics Dashboard",
+                "size": "Large",
+                "weight": "Bolder"
+              },
+              {
+                "type": "FactSet",
+                "facts": [
+                  {
+                    "title": "Total Candidates",
+                    "value": "25"
+                  },
+                  {
+                    "title": "Average AUM",
+                    "value": "$750M"
+                  },
+                  {
+                    "title": "Average Production",
+                    "value": "$1.2M"
+                  }
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "test_scenarios": [
+    {
+      "name": "New User First Time",
+      "steps": [
+        "Send empty message to get help",
+        "Request digest for 7 days",
+        "Filter by AUM > $1B",
+        "View analytics"
+      ]
+    },
+    {
+      "name": "Weekly Review Workflow",
+      "steps": [
+        "Request digest for 7 days",
+        "Filter by location (specific city)",
+        "Click 'View in Zoho' for candidate",
+        "Request interview for selected candidate"
+      ]
+    },
+    {
+      "name": "Executive Dashboard",
+      "steps": [
+        "Request analytics for 30 days",
+        "View AUM distribution",
+        "Export report (future feature)",
+        "Compare to previous period"
+      ]
+    }
+  ]
+}

@@ -234,12 +234,212 @@
       "Bash(npm run validate:all:*)",
       "Bash(wsl docker build:*)",
       "Bash(wsl curl -s \"https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/addin/taskpane.js\")",
-      "Bash(wsl az acr credential show:*)"
+      "Bash(wsl az acr credential show:*)",
+      "Read(//d/.claude/**)",
+      "Bash(npx:*)",
+      "mcp__postgres__query",
+      "Bash(python3:*)",
+      "mcp__Azure-MCP-Server__postgres",
+      "mcp__Context7__resolve-library-id",
+      "mcp__Context7__get-library-docs",
+      "Bash(wsl az bot show:*)",
+      "Bash(/tmp/test_teams_with_auth.sh:*)"
     ],
     "deny": [],
     "ask": [],
     "additionalDirectories": [
       "/home/romiteld/zoho"
     ]
+  },
+  "mcpServers": {
+    "Azure MCP Server": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure/mcp@latest",
+        "server",
+        "start"
+      ]
+    },
+    "desktop-commander": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@wonderwhy-er/desktop-commander@latest"
+      ],
+      "env": {
+        "DC_ALLOWED_DIRECTORIES": "/mnt/c;/mnt/d;D:\\"
+      }
+    },
+    "filesystem": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem",
+        "/mnt/c",
+        "/mnt/d",
+        "D:\\"
+      ]
+    },
+    "excel": {
+      "command": "npx",
+      "args": [
+        "--yes",
+        "@negokaz/excel-mcp-server"
+      ],
+      "env": {
+        "EXCEL_MCP_PAGING_CELLS_LIMIT": "4000"
+      }
+    },
+    "firecrawl": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "firecrawl-mcp"
+      ],
+      "env": {
+        "FIRECRAWL_API_KEY": "fc-e59c9dc8113e484c9c1d6a75c49900a7"
+      }
+    },
+    "context7": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@upthrust/context7-mcp"
+      ]
+    },
+    "supabase": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@supabase/mcp-server-supabase@latest",
+        "--access-token",
+        "sbp_300291c7fbe063233ce472b6c932f2272da9c406"
+      ]
+    },
+    "puppeteer": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-puppeteer"
+      ]
+    },
+    "postgres": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://adminuser:W3llDB2025Pass@well-intake-db-0903.postgres.database.azure.com:5432/wellintake?sslmode=require"
+      ]
+    },
+    "sequential-thinking": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-sequential-thinking"
+      ]
+    },
+    "memory": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-memory"
+      ]
+    },
+    "mermaid-diagrams": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@chrishayuk/mcp-server-mermaid"
+      ]
+    },
+    "cloudviz": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@fufuShih/mcp-server-cloudviz"
+      ]
+    },
+    "github": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-github"
+      ],
+      "env": {
+        "GITHUB_PERSONAL_ACCESS_TOKEN": "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"
+      }
+    },
+    "brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-brave-search"
+      ],
+      "env": {
+        "BRAVE_API_KEY": "BSAk4ivHUg97KJlBtqN5fTrgFDT3Gam"
+      }
+    },
+    "google-drive": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-gdrive"
+      ]
+    },
+    "playwright": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@executeautomation/playwright-mcp-server"
+      ]
+    },
+    "youtube": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@kimtaeyoon83/mcp-server-youtube-transcript"
+      ]
+    },
+    "docker": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-docker"
+      ]
+    },
+    "kubernetes": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@strowk/mcp-k8s-go"
+      ]
+    },
+    "everything": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-everything"
+      ]
+    },
+    "stripe": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@stripe/mcp",
+        "--tools=all",
+        "--api-key=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"
+      ]
+    },
+    "asana": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-asana"
+      ],
+      "env": {
+        "ASANA_PERSONAL_ACCESS_TOKEN": ""
+      }
+    }
   }
 }

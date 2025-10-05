@@ -280,15 +280,24 @@ class TalentWellCurator:
             from app.integrations import ZohoApiClient
             zoho_client = ZohoApiClient()
             
-            # Fetch candidates with Brandon's criteria - NOW PASSING THE FILTERS!
+            # Fetch candidates filtered by candidate type (advisors vs c_suite)
+            # Map audience to candidate_type
+            candidate_type = None
+            if audience == "advisors":
+                candidate_type = "advisors"
+            elif audience == "c_suite":
+                candidate_type = "c_suite"
+            # audience == "global" → candidate_type = None (all candidates)
+
             candidates = await zoho_client.query_candidates(
                 limit=100,
                 from_date=from_date,
                 to_date=to_date,
-                owner=owner
+                owner=owner,  # Keep for backward compatibility but not used
+                candidate_type=candidate_type
             )
-            
-            logger.info(f"Retrieved {len(candidates)} candidates from Zoho with filters: from={from_date}, to={to_date}, owner={owner}")
+
+            logger.info(f"Retrieved {len(candidates)} candidates from Zoho with filters: from={from_date}, to={to_date}, type={candidate_type or 'all'}")
             return candidates
             
         except Exception as e:
@@ -660,49 +669,56 @@ class TalentWellCurator:
 
     def _standardize_compensation(self, raw_text: str) -> str:
         """
-        Standardize compensation format to "Target comp: $XXXk–$XXXk OTE".
-        Handles variations like "95k Base + Commission 140+ OTE".
+        MINIMAL standardization of compensation - preserves candidate's exact wording.
+
+        Only applies these formatting rules:
+        1. Add $ prefix if missing (95k → $95k)
+        2. Capitalize K/M/B units (95k → $95K)
+        3. Add "base" before "+ commission/bonus" if not present (95k + commission → $95K base + commission)
+        4. Standardize "all in" → "OTE" (abbreviation only)
+
+        CRITICAL: Does NOT interpret or change structure. Preserves candidate's exact phrasing.
+        Examples:
+        - "95k + commission" → "$95K base + commission"
+        - "$750k all in" → "$750K OTE"
+        - "200-250k base + bonus" → "$200-250K base + bonus"
         """
         if not raw_text:
             return ""
 
-        # Clean the input
-        text = raw_text.lower().replace(',', '')
+        # Work with original text to preserve structure
+        result = raw_text.strip()
 
-        # Extract all numbers that could be compensation amounts
-        # Pattern for amounts like 95k, 140k, $200k, 300000
-        amount_pattern = r'\$?(\d+)(?:k|,000)?'
-        amounts = re.findall(amount_pattern, text)
+        # 1. Capitalize K, M, B units while preserving everything else
+        # Handle decimals like 1.5m and ranges like 200-250k
+        result = re.sub(r'([\d.]+)k\b', lambda m: f"{m.group(1)}K", result, flags=re.IGNORECASE)
+        result = re.sub(r'([\d.]+)m\b', lambda m: f"{m.group(1)}M", result, flags=re.IGNORECASE)
+        result = re.sub(r'([\d.]+)b\b', lambda m: f"{m.group(1)}B", result, flags=re.IGNORECASE)
 
-        if not amounts:
-            return raw_text  # Return original if can't parse
+        # 2. Add $ prefix to the FIRST amount that doesn't have it
+        # Match number (with optional decimal) and optional range (200-250K)
+        # Only replace first occurrence to avoid adding $ to bonus/commission amounts
+        # Negative lookbehind: not after $ or digit
+        result = re.sub(r'(?<![$\d])([\d.]+(?:-[\d.]+)?)(K|M|B)', r'$\1\2', result, count=1)
 
-        # Convert all amounts to thousands
-        amounts_in_k = []
-        for amt in amounts:
-            amt_num = float(amt)
-            # If number is > 1000, assume it's in dollars not thousands
-            if amt_num > 1000:
-                amt_num = amt_num / 1000
-            amounts_in_k.append(int(amt_num))
+        # 3. Standardize "all in" to "OTE" (abbreviation standardization only)
+        result = re.sub(r'\ball in\b', 'OTE', result, flags=re.IGNORECASE)
+        result = re.sub(r'\ball-in\b', 'OTE', result, flags=re.IGNORECASE)
 
-        # Determine if OTE is mentioned
-        is_ote = 'ote' in text or 'on target' in text or 'total' in text
+        # 4. Add "base" before "+ commission" or "+ bonus" if not already present
+        # Only if pattern is: "$XXK + commission/bonus" without "base"
+        if re.search(r'\+\s*(commission|bonus)', result, re.IGNORECASE) and \
+           not re.search(r'\bbase\b', result, re.IGNORECASE):
+            # Insert "base" after the first amount and before the "+"
+            result = re.sub(
+                r'(\$\d+[\d\-]*[KMB])\s*(\+)',
+                r'\1 base \2',
+                result,
+                count=1,
+                flags=re.IGNORECASE
+            )
 
-        # Format based on number of amounts found
-        if len(amounts_in_k) == 1:
-            # Single amount
-            return f"Target comp: ${amounts_in_k[0]}k{' OTE' if is_ote else ''}"
-        elif len(amounts_in_k) >= 2:
-            # Range (use min and max)
-            min_amt = min(amounts_in_k)
-            max_amt = max(amounts_in_k)
-            if min_amt == max_amt:
-                return f"Target comp: ${max_amt}k{' OTE' if is_ote else ''}"
-            else:
-                return f"Target comp: ${min_amt}k–${max_amt}k{' OTE' if is_ote else ''}"
-
-        return raw_text  # Fallback to original
+        return result
 
     def _is_internal_note(self, text: str) -> bool:
         """

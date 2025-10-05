@@ -85,6 +85,7 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
 def create_help_card() -> Dict[str, Any]:
     """
     Create help card with detailed command documentation.
+    Uses Microsoft Teams best practices: visual hierarchy, containers, spacing.
     """
     return {
         "contentType": "application/vnd.microsoft.card.adaptive",
@@ -95,42 +96,121 @@ def create_help_card() -> Dict[str, Any]:
             "body": [
                 {
                     "type": "TextBlock",
-                    "text": "📚 TalentWell Bot Commands",
+                    "text": "📚 TalentWell Bot Guide",
                     "size": "Large",
                     "weight": "Bolder"
                 },
                 {
                     "type": "TextBlock",
-                    "text": "**Digest Generation**",
-                    "weight": "Bolder",
-                    "spacing": "Medium"
+                    "text": "Use these commands to generate candidate digests, manage settings, and view analytics.",
+                    "wrap": True,
+                    "isSubtle": True,
+                    "spacing": "Small"
+                },
+                # Digest Generation Section
+                {
+                    "type": "Container",
+                    "separator": True,
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "📊 Digest Generation",
+                            "weight": "Bolder",
+                            "size": "Medium"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "Generate candidate summaries filtered by audience type:",
+                            "wrap": True,
+                            "isSubtle": True,
+                            "spacing": "Small"
+                        },
+                        {
+                            "type": "FactSet",
+                            "facts": [
+                                {"title": "`digest`", "value": "Use your default audience"},
+                                {"title": "`digest advisors`", "value": "Financial advisors only"},
+                                {"title": "`digest c_suite`", "value": "Executives only (CEO, CFO, VP, etc.)"},
+                                {"title": "`digest global`", "value": "All candidates"},
+                                {"title": "`digest <email>`", "value": "Test mode - sends to your email"}
+                            ],
+                            "spacing": "Small"
+                        }
+                    ]
+                },
+                # Preferences Section
+                {
+                    "type": "Container",
+                    "separator": True,
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "⚙️ Preferences",
+                            "weight": "Bolder",
+                            "size": "Medium"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "Manage your default settings and notification preferences:",
+                            "wrap": True,
+                            "isSubtle": True,
+                            "spacing": "Small"
+                        },
+                        {
+                            "type": "FactSet",
+                            "facts": [
+                                {"title": "`preferences`", "value": "View and edit your settings"}
+                            ],
+                            "spacing": "Small"
+                        }
+                    ]
+                },
+                # Analytics Section
+                {
+                    "type": "Container",
+                    "separator": True,
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "📈 Analytics",
+                            "weight": "Bolder",
+                            "size": "Medium"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "View your usage statistics and activity history:",
+                            "wrap": True,
+                            "isSubtle": True,
+                            "spacing": "Small"
+                        },
+                        {
+                            "type": "FactSet",
+                            "facts": [
+                                {"title": "`analytics`", "value": "Show conversation count, digest requests, and recent activity"}
+                            ],
+                            "spacing": "Small"
+                        }
+                    ]
+                }
+            ],
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": "📊 Generate Digest",
+                    "data": {
+                        "action": "generate_digest_preview",
+                        "audience": "global"
+                    }
                 },
                 {
-                    "type": "TextBlock",
-                    "text": "• `digest` - Generate preview with default settings\n• `digest steve_perry` - Generate for specific audience\n• `digest brandon_hill` - Another audience example",
-                    "wrap": True
-                },
-                {
-                    "type": "TextBlock",
-                    "text": "**Preferences**",
-                    "weight": "Bolder",
-                    "spacing": "Medium"
-                },
-                {
-                    "type": "TextBlock",
-                    "text": "• `preferences` - View your current settings\n• Use the preference card buttons to update settings",
-                    "wrap": True
-                },
-                {
-                    "type": "TextBlock",
-                    "text": "**Analytics**",
-                    "weight": "Bolder",
-                    "spacing": "Medium"
-                },
-                {
-                    "type": "TextBlock",
-                    "text": "• `analytics` - View your usage statistics\n• Shows conversation count, digest requests, and activity",
-                    "wrap": True
+                    "type": "Action.Submit",
+                    "title": "⚙️ My Preferences",
+                    "data": {
+                        "action": "show_preferences"
+                    }
                 }
             ]
         }
@@ -358,14 +438,22 @@ def create_preferences_card(
                     "weight": "Bolder"
                 },
                 {
+                    "type": "TextBlock",
+                    "text": "**Default Audience** - Choose which type of candidates to include when you type `digest` without specifying. Filters by job title:\n• **Advisors** - Financial/Wealth/Investment Advisors\n• **C-Suite** - CEOs, CFOs, VPs, Directors, Executives\n• **Global** - All candidates (both types)",
+                    "wrap": True,
+                    "size": "Small",
+                    "isSubtle": True,
+                    "spacing": "Medium"
+                },
+                {
                     "type": "Input.ChoiceSet",
                     "id": "default_audience",
                     "label": "Default Audience",
-                    "value": current_audience,
+                    "value": current_audience if current_audience != "steve_perry" else "advisors",
                     "choices": [
-                        {"title": "Global", "value": "global"},
-                        {"title": "Steve Perry", "value": "steve_perry"},
-                        {"title": "Brandon Hill", "value": "brandon_hill"}
+                        {"title": "Advisors (Financial Advisors)", "value": "advisors"},
+                        {"title": "C-Suite (Executives)", "value": "c_suite"},
+                        {"title": "Global (All Candidates)", "value": "global"}
                     ]
                 },
                 {
