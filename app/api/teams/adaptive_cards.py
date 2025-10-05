@@ -8,6 +8,7 @@ from typing import List, Dict, Any, Optional
 def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
     """
     Create welcome card shown when bot is first added or user says hello.
+    Enhanced with brand colors and visual hierarchy.
     """
     return {
         "contentType": "application/vnd.microsoft.card.adaptive",
@@ -19,27 +20,38 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
                 {
                     "type": "TextBlock",
                     "text": f"👋 Hi {user_name}!",
-                    "size": "Large",
-                    "weight": "Bolder"
+                    "size": "ExtraLarge",
+                    "weight": "Bolder",
+                    "color": "Accent"
                 },
                 {
                     "type": "TextBlock",
                     "text": "I'm your TalentWell Assistant. I can help you:",
-                    "wrap": True
+                    "wrap": True,
+                    "size": "Medium",
+                    "spacing": "Small"
                 },
                 {
-                    "type": "FactSet",
-                    "facts": [
-                        {"title": "📊 Generate Digests", "value": "Create candidate summaries for your team"},
-                        {"title": "🔍 Apply Filters", "value": "Filter by audience, owner, date range"},
-                        {"title": "⚙️ Manage Preferences", "value": "Set your default audience and notification settings"},
-                        {"title": "📈 View Analytics", "value": "See your usage stats and trends"}
+                    "type": "Container",
+                    "style": "emphasis",
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "FactSet",
+                            "facts": [
+                                {"title": "📊 Generate Digests", "value": "Create candidate summaries for your team"},
+                                {"title": "🔍 Apply Filters", "value": "Filter by audience, owner, date range"},
+                                {"title": "⚙️ Manage Preferences", "value": "Set your default audience and notification settings"},
+                                {"title": "📈 View Analytics", "value": "See your usage stats and trends"}
+                            ]
+                        }
                     ]
                 },
                 {
                     "type": "TextBlock",
-                    "text": "**Try these commands:**",
+                    "text": "**Quick Start Commands:**",
                     "weight": "Bolder",
+                    "color": "Accent",
                     "spacing": "Medium"
                 },
                 {
@@ -62,7 +74,7 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
                         },
                         {
                             "type": "TextBlock",
-                            "text": "• `help` - Show this help message",
+                            "text": "• `help` - Show detailed help",
                             "wrap": True
                         }
                     ]
@@ -71,7 +83,8 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
             "actions": [
                 {
                     "type": "Action.Submit",
-                    "title": "Generate Digest",
+                    "title": "📊 Generate Digest",
+                    "style": "positive",
                     "data": {
                         "action": "generate_digest_preview",
                         "audience": "global"
@@ -86,6 +99,7 @@ def create_help_card() -> Dict[str, Any]:
     """
     Create help card with detailed command documentation.
     Uses Microsoft Teams best practices: visual hierarchy, containers, spacing.
+    Enhanced with brand colors and visual hierarchy.
     """
     return {
         "contentType": "application/vnd.microsoft.card.adaptive",
@@ -97,8 +111,9 @@ def create_help_card() -> Dict[str, Any]:
                 {
                     "type": "TextBlock",
                     "text": "📚 TalentWell Bot Guide",
-                    "size": "Large",
-                    "weight": "Bolder"
+                    "size": "ExtraLarge",
+                    "weight": "Bolder",
+                    "color": "Accent"
                 },
                 {
                     "type": "TextBlock",
@@ -197,6 +212,7 @@ def create_help_card() -> Dict[str, Any]:
                 {
                     "type": "Action.Submit",
                     "title": "📊 Generate Digest",
+                    "style": "positive",
                     "data": {
                         "action": "generate_digest_preview",
                         "audience": "global"
@@ -222,29 +238,46 @@ def create_digest_preview_card(
     """
     Create digest preview card with candidate summaries.
     Shows top 3 candidates with bullet points.
+    Enhanced with brand colors and visual containers.
     """
     # Build candidate items (show first 3)
     candidate_items = []
 
     for i, card in enumerate(cards_metadata[:3]):
-        # Candidate header
-        candidate_items.append({
-            "type": "TextBlock",
-            "text": f"**‼️ {card['candidate_name']} | {card['job_title']}**",
-            "weight": "Bolder",
-            "size": "Medium",
-            "spacing": "Medium" if i > 0 else "Default"
-        })
+        # Each candidate in styled container
+        candidate_container = {
+            "type": "Container",
+            "style": "emphasis" if i % 2 == 0 else "default",
+            "spacing": "Medium" if i > 0 else "Default",
+            "separator": i > 0,
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": f"**‼️ {card['candidate_name']}**",
+                    "weight": "Bolder",
+                    "size": "Medium",
+                    "color": "Accent"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"{card['job_title']} at {card['company']}",
+                    "weight": "Bolder",
+                    "size": "Small",
+                    "spacing": "None"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"📍 {card['location']}",
+                    "size": "Small",
+                    "isSubtle": True,
+                    "spacing": "Small"
+                }
+            ]
+        }
 
-        candidate_items.append({
-            "type": "TextBlock",
-            "text": f"**🔔 {card['company']} | {card['location']}**",
-            "spacing": "Small"
-        })
-
-        # Bullets
+        # Add bullets
         bullets_text = "\n".join([f"• {bullet['text']}" for bullet in card['bullets'][:5]])
-        candidate_items.append({
+        candidate_container["items"].append({
             "type": "TextBlock",
             "text": bullets_text,
             "wrap": True,
@@ -253,14 +286,18 @@ def create_digest_preview_card(
 
         # Sentiment if available
         if card.get('sentiment_label'):
+            sentiment_color = "Good" if card['sentiment_label'] == 'positive' else "Warning" if card['sentiment_label'] == 'neutral' else "Attention"
             sentiment_emoji = "😊" if card['sentiment_label'] == 'positive' else "😐" if card['sentiment_label'] == 'neutral' else "😟"
-            candidate_items.append({
+            candidate_container["items"].append({
                 "type": "TextBlock",
-                "text": f"{sentiment_emoji} Sentiment: {card['sentiment_label'].title()} | Enthusiasm: {card.get('enthusiasm_score', 0):.0%}",
+                "text": f"{sentiment_emoji} {card['sentiment_label'].title()} | Enthusiasm: {card.get('enthusiasm_score', 0):.0%}",
                 "size": "Small",
-                "color": "Accent",
+                "color": sentiment_color,
+                "weight": "Bolder",
                 "spacing": "Small"
             })
+
+        candidate_items.append(candidate_container)
 
     # Summary stats
     total_candidates = len(cards_metadata)
@@ -276,14 +313,16 @@ def create_digest_preview_card(
                 {
                     "type": "TextBlock",
                     "text": f"📊 Digest Preview: {audience.replace('_', ' ').title()}",
-                    "size": "Large",
-                    "weight": "Bolder"
+                    "size": "ExtraLarge",
+                    "weight": "Bolder",
+                    "color": "Accent"
                 },
                 {
                     "type": "TextBlock",
-                    "text": f"Showing {showing} of {total_candidates} candidates",
-                    "size": "Small",
-                    "color": "Accent",
+                    "text": f"Showing {showing} of {total_candidates} top-ranked candidates",
+                    "size": "Medium",
+                    "color": "Good",
+                    "weight": "Bolder",
                     "spacing": "None"
                 },
                 {
@@ -293,16 +332,24 @@ def create_digest_preview_card(
                     "items": candidate_items
                 },
                 {
-                    "type": "TextBlock",
-                    "text": "**🎯 Next Steps:**",
-                    "weight": "Bolder",
-                    "spacing": "Medium"
-                },
-                {
-                    "type": "TextBlock",
-                    "text": "• Click 'Generate Full Digest' to create the complete email report\n• Use 'Apply Filters' to refine your search\n• Candidates are ranked by composite score (financial metrics, evidence quality, sentiment)",
-                    "wrap": True,
-                    "size": "Small"
+                    "type": "Container",
+                    "style": "accent",
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "**🎯 Next Steps:**",
+                            "weight": "Bolder",
+                            "color": "Light"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "• Click 'Generate Full Digest' to create the complete email report\n• Use 'Apply Filters' to refine your search\n• Candidates ranked by composite score (financial metrics, evidence quality, sentiment)",
+                            "wrap": True,
+                            "size": "Small",
+                            "color": "Light"
+                        }
+                    ]
                 }
             ],
             "actions": [
@@ -420,6 +467,7 @@ def create_preferences_card(
 ) -> Dict[str, Any]:
     """
     Create preferences card for user settings.
+    Enhanced with brand colors and visual hierarchy.
     """
     return {
         "contentType": "application/vnd.microsoft.card.adaptive",
@@ -431,16 +479,30 @@ def create_preferences_card(
                 {
                     "type": "TextBlock",
                     "text": "⚙️ Your Preferences",
-                    "size": "Large",
-                    "weight": "Bolder"
+                    "size": "ExtraLarge",
+                    "weight": "Bolder",
+                    "color": "Accent"
                 },
                 {
-                    "type": "TextBlock",
-                    "text": "**Default Audience** - Choose which type of candidates to include when you type `digest` without specifying. Filters by job title:\n• **Advisors** - Financial/Wealth/Investment Advisors\n• **C-Suite** - CEOs, CFOs, VPs, Directors, Executives\n• **Global** - All candidates (both types)",
-                    "wrap": True,
-                    "size": "Small",
-                    "isSubtle": True,
-                    "spacing": "Medium"
+                    "type": "Container",
+                    "style": "emphasis",
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "**Default Audience**",
+                            "weight": "Bolder",
+                            "color": "Accent"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "Choose which type of candidates to include when you type `digest` without specifying:\n• **Advisors** - Financial/Wealth/Investment Advisors\n• **C-Suite** - CEOs, CFOs, VPs, Directors, Executives\n• **Global** - All candidates (both types)",
+                            "wrap": True,
+                            "size": "Small",
+                            "isSubtle": True,
+                            "spacing": "Small"
+                        }
+                    ]
                 },
                 {
                     "type": "Input.ChoiceSet",
@@ -454,29 +516,58 @@ def create_preferences_card(
                     ]
                 },
                 {
-                    "type": "Input.ChoiceSet",
-                    "id": "digest_frequency",
-                    "label": "Digest Frequency",
-                    "value": digest_frequency,
-                    "choices": [
-                        {"title": "Daily", "value": "daily"},
-                        {"title": "Weekly", "value": "weekly"},
-                        {"title": "Monthly", "value": "monthly"}
+                    "type": "Container",
+                    "style": "emphasis",
+                    "spacing": "Medium",
+                    "separator": True,
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "**Digest Frequency**",
+                            "weight": "Bolder",
+                            "color": "Accent"
+                        },
+                        {
+                            "type": "Input.ChoiceSet",
+                            "id": "digest_frequency",
+                            "label": "How often to receive digests",
+                            "value": digest_frequency,
+                            "choices": [
+                                {"title": "Daily", "value": "daily"},
+                                {"title": "Weekly", "value": "weekly"},
+                                {"title": "Monthly", "value": "monthly"}
+                            ]
+                        }
                     ]
                 },
                 {
-                    "type": "Input.Toggle",
-                    "id": "notification_enabled",
-                    "label": "Enable Notifications",
-                    "value": "true" if notifications_enabled else "false",
-                    "valueOn": "true",
-                    "valueOff": "false"
+                    "type": "Container",
+                    "style": "emphasis",
+                    "spacing": "Medium",
+                    "separator": True,
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "**Notifications**",
+                            "weight": "Bolder",
+                            "color": "Accent"
+                        },
+                        {
+                            "type": "Input.Toggle",
+                            "id": "notification_enabled",
+                            "label": "Enable bot notifications",
+                            "value": "true" if notifications_enabled else "false",
+                            "valueOn": "true",
+                            "valueOff": "false"
+                        }
+                    ]
                 }
             ],
             "actions": [
                 {
                     "type": "Action.Submit",
                     "title": "💾 Save Preferences",
+                    "style": "positive",
                     "data": {
                         "action": "save_preferences"
                     }
