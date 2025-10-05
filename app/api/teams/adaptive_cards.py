@@ -134,8 +134,7 @@ def create_help_card() -> Dict[str, Any]:
                                 {"title": "`digest c_suite`", "value": "Executives only (CEO, CFO, VP, etc.)"},
                                 {"title": "`digest global`", "value": "All candidates"},
                                 {"title": "`digest <email>`", "value": "Test mode - sends to your email"}
-                            ],
-                            "spacing": "Small"
+                            ]
                         }
                     ]
                 },
@@ -162,8 +161,7 @@ def create_help_card() -> Dict[str, Any]:
                             "type": "FactSet",
                             "facts": [
                                 {"title": "`preferences`", "value": "View and edit your settings"}
-                            ],
-                            "spacing": "Small"
+                            ]
                         }
                     ]
                 },
@@ -190,8 +188,7 @@ def create_help_card() -> Dict[str, Any]:
                             "type": "FactSet",
                             "facts": [
                                 {"title": "`analytics`", "value": "Show conversation count, digest requests, and recent activity"}
-                            ],
-                            "spacing": "Small"
+                            ]
                         }
                     ]
                 }
