@@ -947,7 +947,9 @@ class TalentWellCurator:
 
     async def _analyze_candidate_sentiment(self, transcript: Optional[str]) -> Dict[str, Any]:
         """
-        Analyze candidate sentiment from transcript using keyword-based analysis.
+        Analyze candidate sentiment from transcript.
+
+        Uses GPT-5 when FEATURE_LLM_SENTIMENT is enabled, falls back to keyword-based analysis.
 
         Returns:
             {
@@ -966,6 +968,85 @@ class TalentWellCurator:
                 'concerns_detected': False,
                 'professionalism_score': 0.5
             }
+
+        # Try GPT-5 sentiment analysis if feature enabled
+        if FEATURE_LLM_SENTIMENT:
+            try:
+                return await self._analyze_sentiment_with_gpt5(transcript)
+            except Exception as e:
+                logger.warning(f"GPT-5 sentiment analysis failed, falling back to keyword-based: {e}")
+
+        # Fallback to keyword-based analysis
+        return await self._analyze_sentiment_keyword_based(transcript)
+
+    async def _analyze_sentiment_with_gpt5(self, transcript: str) -> Dict[str, Any]:
+        """
+        Analyze candidate sentiment using GPT-5.
+
+        Args:
+            transcript: Candidate transcript or notes
+
+        Returns:
+            Sentiment analysis with scores and labels
+        """
+        from openai import AsyncOpenAI
+        import json
+
+        client = AsyncOpenAI()
+
+        prompt = f"""Analyze the sentiment and professionalism of this financial advisor candidate from their interview transcript or notes.
+
+Transcript:
+{transcript[:2000]}
+
+Provide a JSON response with:
+- score: Overall sentiment score 0.0-1.0 (1.0 = very positive)
+- label: "positive", "neutral", or "negative"
+- enthusiasm_score: Enthusiasm/motivation level 0.0-1.0
+- concerns_detected: true if red flags found (litigation, termination, compliance issues, etc.)
+- professionalism_score: Professionalism level 0.0-1.0
+
+Consider:
+- Positive: excitement, commitment, career goals, client focus
+- Negative: hesitation, concerns, uncertainty, job-hopping
+- Red flags: legal issues, terminations, compliance problems
+- Professional: fiduciary duty, ethics, continuous learning, mentorship
+
+Response format (JSON only):
+{{"score": 0.8, "label": "positive", "enthusiasm_score": 0.9, "concerns_detected": false, "professionalism_score": 0.85}}"""
+
+        response = await client.chat.completions.create(
+            model="gpt-5-mini",
+            messages=[
+                {"role": "system", "content": "You are an expert HR analyst specializing in financial advisor recruitment. Analyze candidate sentiment accurately and objectively."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=1,
+            max_tokens=200,
+            response_format={"type": "json_object"}
+        )
+
+        result = json.loads(response.choices[0].message.content)
+
+        # Validate and normalize response
+        return {
+            'score': max(0.0, min(1.0, float(result.get('score', 0.5)))),
+            'label': result.get('label', 'neutral'),
+            'enthusiasm_score': max(0.0, min(1.0, float(result.get('enthusiasm_score', 0.5)))),
+            'concerns_detected': bool(result.get('concerns_detected', False)),
+            'professionalism_score': max(0.0, min(1.0, float(result.get('professionalism_score', 0.5))))
+        }
+
+    async def _analyze_sentiment_keyword_based(self, transcript: str) -> Dict[str, Any]:
+        """
+        Analyze candidate sentiment using keyword-based heuristics (fallback method).
+
+        Args:
+            transcript: Candidate transcript or notes
+
+        Returns:
+            Sentiment analysis with scores and labels
+        """
 
         transcript_lower = transcript.lower()
 

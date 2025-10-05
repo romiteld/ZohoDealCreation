@@ -494,10 +494,12 @@ Feature flags allow gradual rollout of new functionality. Defaults live in `app/
 - Extracts growth metrics such as "grew book 40% YoY" or "top 5% performer"
 - High-priority category (0.95 weight) in bullet ranking
 
-#### `FEATURE_LLM_SENTIMENT` (default: `false`)
-- Enables sentiment-weighted bullet scoring (0.85–1.15 multiplier)
-- Current implementation uses keyword heuristics; GPT-5 integration pending
+#### `FEATURE_LLM_SENTIMENT` (default: `true`)
+- Enables GPT-5 sentiment analysis for bullet scoring (0.85–1.15 multiplier)
+- Uses GPT-5-mini for accurate sentiment, enthusiasm, and professionalism detection
+- Falls back to keyword-based heuristics if GPT-5 fails
 - Positive sentiment = 5–15% boost, negative sentiment = 5–15% penalty
+- Enabled 2025-10-05
 
 ### Performance Features
 
@@ -582,8 +584,8 @@ az containerapp update --name well-intake-api \
   - Location only in header, filtered from bullets
 - **AI Enhancements**:
   - Growth extraction: Parses "grew 40% YoY" and "$1B → $1.5B" patterns
-  - Sentiment scoring: 5–15% boost/penalty based on candidate enthusiasm
-- **Feature Flags**: `PRIVACY_MODE=true`, `FEATURE_GROWTH_EXTRACTION=true`, `FEATURE_LLM_SENTIMENT=false`
+  - GPT-5 sentiment analysis: 5–15% boost/penalty based on enthusiasm, professionalism, red flags
+- **Feature Flags**: `PRIVACY_MODE=true`, `FEATURE_GROWTH_EXTRACTION=true`, `FEATURE_LLM_SENTIMENT=true`
 - **Files**: `app/config/feature_flags.py`, `app/jobs/talentwell_curator.py`, `docs/decisions/talentwell-privacy-rollout.md`
 - **Testing**: `tests/talentwell/test_data_quality.py`, `tests/talentwell/test_bullet_ranking.py`, `tests/talentwell/test_privacy_integration.py`
 - **Rollback**: Set `PRIVACY_MODE=false` in Azure Container Apps environment variables

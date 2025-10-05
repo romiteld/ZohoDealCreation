@@ -246,7 +246,7 @@ This system introduces **two groundbreaking algorithms** that optimize AI conten
 
 - **AI Enhancement Features**
   - **Growth Extraction** (`FEATURE_GROWTH_EXTRACTION=true`) - Parses "grew 40% YoY" and "$1B → $1.5B" patterns from transcripts
-  - **Sentiment Scoring** (`FEATURE_LLM_SENTIMENT=false`) - 5-15% boost/penalty based on candidate enthusiasm (keyword-based)
+  - **GPT-5 Sentiment Analysis** (`FEATURE_LLM_SENTIMENT=true`) - Analyzes enthusiasm, professionalism, red flags; 5-15% boost/penalty on bullet scores
   - **Score-Based Ranking** - Composite scoring prioritizes growth metrics, sentiment, and evidence quality
 
 - **Rollback Capability**
