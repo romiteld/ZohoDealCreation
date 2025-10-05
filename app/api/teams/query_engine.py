@@ -114,7 +114,7 @@ Classify the user's intent and extract key entities.
 
 Available tables:
 - deals: Candidate deals (columns: deal_id, deal_name, owner_email, stage, contact_name, account_name, created_at, modified_at)
-- deal_notes: Notes on deals (columns: deal_id, note_text, created_by, created_at)
+- deal_notes: Notes on deals (columns: deal_id, note_content, created_by, created_at)
 - meetings: Meetings related to deals (columns: deal_id, subject, meeting_date, attendees)
 
 Return JSON with:
@@ -179,6 +179,7 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
         owner_filter = intent.get("owner_filter")
 
         # Build base query
+        sql = None  # Initialize to avoid UnboundLocalError
         if intent_type == "count":
             sql = f"SELECT COUNT(*) as count FROM {table}"
         elif intent_type == "aggregate":
@@ -200,7 +201,7 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
                 sql = """
                     SELECT
                         deal_id,
-                        note_text,
+                        note_content,
                         created_by,
                         created_at
                     FROM deal_notes
@@ -214,6 +215,9 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
                         attendees
                     FROM meetings
                 """
+            else:
+                # Fallback for unsupported tables
+                raise ValueError(f"Unsupported table: {table}")
 
         # Build WHERE clause
         where_clauses = []
@@ -252,7 +256,7 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
                     f"(deal_name ILIKE ${param_count} OR account_name ILIKE ${param_count})"
                 )
             elif table == "deal_notes":
-                where_clauses.append(f"note_text ILIKE ${param_count}")
+                where_clauses.append(f"note_content ILIKE ${param_count}")
             elif table == "meetings":
                 where_clauses.append(
                     f"(subject ILIKE ${param_count} OR notes ILIKE ${param_count})"
@@ -334,7 +338,7 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
             elif table == "deal_notes":
                 text = f"Found {len(results)} notes:\n\n"
                 for i, row in enumerate(results[:5], 1):
-                    text += f"{i}. {row['note_text'][:100]}...\n"
+                    text += f"{i}. {row['note_content'][:100]}...\n"
                     text += f"   By: {row['created_by'] or 'N/A'}\n"
                     text += f"   Date: {row['created_at'].strftime('%Y-%m-%d')}\n\n"
 

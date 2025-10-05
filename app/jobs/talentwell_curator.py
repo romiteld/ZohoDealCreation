@@ -160,6 +160,7 @@ class TalentWellCurator:
         from_date: Optional[datetime] = None,
         to_date: Optional[datetime] = None,
         owner: Optional[str] = None,
+        max_cards: int = 6,
         dry_run: bool = False,
         ignore_cooldown: bool = False
     ) -> Dict[str, Any]:
@@ -198,7 +199,12 @@ class TalentWellCurator:
         # Step 3: Process deals in batches with async parallelization
         cards = await self._process_deals_batch(new_deals, audience)
         logger.info(f"Generated {len(cards)} cards from {len(new_deals)} deals")
-        
+
+        # Limit to max_cards (top-ranked candidates)
+        if max_cards and len(cards) > max_cards:
+            cards = cards[:max_cards]
+            logger.info(f"Limited to top {max_cards} cards")
+
         # Step 4: Select subject line via bandit
         subject = await self.subject_bandit.select_variant(audience)
         logger.info(f"Selected subject variant: {subject['variant_id']}")
