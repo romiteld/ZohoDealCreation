@@ -895,34 +895,61 @@ async def run_database_migration(
 
     Args:
         migration_name: Name of migration file (e.g., '006_teams_bot_audit_table.sql')
+
+    Notes:
+        - Uses pooled connection; long migrations hold connection from pool
+        - Supports multi-statement SQL files via transaction
+        - Path sanitization prevents directory traversal
     """
     import os
 
     try:
+        # Sanitize filename to prevent directory traversal
+        safe_filename = os.path.basename(migration_name)
+        if safe_filename != migration_name:
+            raise HTTPException(status_code=400, detail="Invalid migration filename")
+
+        # Whitelist validation: must be .sql file starting with digits
+        if not safe_filename.endswith('.sql') or not safe_filename[0].isdigit():
+            raise HTTPException(status_code=400, detail="Migration must be a numbered .sql file")
+
         # Construct migration path
-        migration_path = f"/app/migrations/{migration_name}"
+        migration_path = f"/app/migrations/{safe_filename}"
 
         # Check if file exists
         if not os.path.exists(migration_path):
-            raise HTTPException(status_code=404, detail=f"Migration file not found: {migration_name}")
+            raise HTTPException(status_code=404, detail=f"Migration file not found: {safe_filename}")
 
         # Read migration file
         with open(migration_path, 'r') as f:
             migration_sql = f.read()
 
-        logger.info(f"Running migration: {migration_name}")
+        logger.info(f"Running migration: {safe_filename}")
 
-        # Execute migration
-        await db.execute(migration_sql)
+        # Execute migration in transaction (handles multiple statements)
+        # Note: This uses a pooled connection; long migrations will hold it
+        async with db.transaction():
+            # Split by semicolon and execute each statement
+            statements = [stmt.strip() for stmt in migration_sql.split(';') if stmt.strip()]
+            for i, statement in enumerate(statements):
+                try:
+                    await db.execute(statement)
+                    logger.debug(f"Executed statement {i+1}/{len(statements)}")
+                except Exception as stmt_error:
+                    logger.error(f"Failed at statement {i+1}: {statement[:100]}...")
+                    raise
 
-        logger.info(f"Migration completed: {migration_name}")
+        logger.info(f"Migration completed: {safe_filename}")
 
         return {
             "status": "success",
-            "migration": migration_name,
+            "migration": safe_filename,
+            "statements_executed": len(statements),
             "timestamp": datetime.now().isoformat()
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Migration failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Migration failed: {str(e)}")
