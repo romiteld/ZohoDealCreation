@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 import json
 import hashlib
 
+# FastAPI imports for dependency error handling
+from fastapi import HTTPException
+
 # Database imports
 try:
     import asyncpg
@@ -645,9 +648,27 @@ async def get_database_connection():
     FastAPI dependency for getting a database connection.
     Yields an asyncpg connection from the connection manager pool.
     """
-    manager = await get_connection_manager()
-    async with manager.main_pool.acquire() as connection:
-        yield connection
+    try:
+        manager = await get_connection_manager()
+
+        # Ensure pool is initialized
+        if not manager.main_pool:
+            logger.error("Database pool not initialized, attempting initialization")
+            success = await manager.initialize()
+            if not success or not manager.main_pool:
+                logger.error("Failed to initialize database pool")
+                raise HTTPException(status_code=503, detail="Database unavailable")
+
+        logger.debug("Acquiring database connection from pool")
+        async with manager.main_pool.acquire() as connection:
+            yield connection
+
+    except HTTPException:
+        # Re-raise HTTPExceptions as-is
+        raise
+    except Exception as e:
+        logger.error(f"Database connection dependency failed: {e}", exc_info=True)
+        raise HTTPException(status_code=503, detail=f"Database connection failed: {str(e)}")
 
 
 # Export main classes and functions

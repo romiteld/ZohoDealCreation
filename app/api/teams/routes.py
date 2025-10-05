@@ -133,17 +133,6 @@ class DigestRequestParams(BaseModel):
     ignore_cooldown: bool = False
 
 
-# Database dependency
-async def get_db_connection():
-    """Get database connection for Teams integration."""
-    try:
-        conn = await get_database_connection()
-        yield conn
-    finally:
-        if conn:
-            await conn.close()
-
-
 # Main webhook endpoint
 @router.post("/webhook")
 async def teams_webhook(request: Request):
@@ -885,7 +874,7 @@ async def debug_logging(_: bool = Depends(require_debug_mode)):
 async def run_database_migration(
     migration_name: str,
     _: bool = Depends(require_debug_mode),
-    db: asyncpg.Connection = Depends(get_db_connection),
+    db: asyncpg.Connection = Depends(get_database_connection),
     x_api_key: str = Header(..., alias="X-API-Key")
 ):
     """
@@ -911,6 +900,8 @@ async def run_database_migration(
         raise HTTPException(status_code=403, detail="Invalid API key")
 
     logger.info(f"Migration endpoint called with: {migration_name}")
+    logger.debug(f"API key validated, debug mode enabled: {DEBUG_ENABLED}")
+    logger.info(f"Database connection acquired successfully for migration")
 
     try:
         # Sanitize filename to prevent directory traversal
@@ -968,7 +959,7 @@ async def run_database_migration(
 async def get_analytics_data(
     user_email: str,
     timeframe: str = "7d",
-    db: asyncpg.Connection = Depends(get_db_connection)
+    db: asyncpg.Connection = Depends(get_database_connection)
 ):
     """
     Get analytics data for a user.
