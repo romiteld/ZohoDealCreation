@@ -36,6 +36,7 @@ router = APIRouter(prefix="/api/teams", tags=["teams"])
 APP_ID = os.getenv("TEAMS_BOT_APP_ID")
 APP_PASSWORD = os.getenv("TEAMS_BOT_APP_PASSWORD")
 TENANT_ID = os.getenv("TEAMS_BOT_TENANT_ID", "29ee1479-b5f7-48c5-b665-7de9a8a9033e")
+DEBUG_ENABLED = os.getenv("TEAMS_DEBUG_ENABLED", "false").lower() == "true"
 
 # Set Microsoft App credentials for SingleTenant auth
 from botframework.connector.auth import MicrosoftAppCredentials
@@ -51,6 +52,51 @@ settings = BotFrameworkAdapterSettings(
     channel_auth_tenant=TENANT_ID  # Tenant ID for SingleTenant apps
 )
 adapter = BotFrameworkAdapter(settings)
+
+
+# Debug endpoint guard
+def require_debug_mode():
+    """Dependency to ensure debug endpoints are only accessible when enabled."""
+    if not DEBUG_ENABLED:
+        raise HTTPException(
+            status_code=404,
+            detail="Not found"
+        )
+    return True
+
+
+# Helper function for audit logging
+async def log_bot_audit(
+    db: asyncpg.Connection,
+    activity_id: str,
+    event_type: str,
+    user_id: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+    event_data: Optional[Dict[str, Any]] = None,
+    error_message: Optional[str] = None
+):
+    """
+    Log bot processing events to teams_bot_audit table.
+
+    Args:
+        db: Database connection
+        activity_id: Teams activity ID
+        event_type: Event type (processing_started, send_success, etc.)
+        user_id: Optional user ID
+        conversation_id: Optional conversation ID
+        event_data: Optional JSON data with additional context
+        error_message: Optional error message for failures
+    """
+    try:
+        await db.execute("""
+            INSERT INTO teams_bot_audit
+                (activity_id, user_id, conversation_id, event_type, event_data, error_message)
+            VALUES ($1, $2, $3, $4, $5, $6)
+        """, activity_id, user_id, conversation_id, event_type,
+            json.dumps(event_data) if event_data else None, error_message)
+    except Exception as e:
+        # Don't let audit failures break the bot
+        logger.error(f"Failed to log audit event {event_type}: {e}")
 
 
 # Teams Bot Framework Activity Models
@@ -126,17 +172,16 @@ async def teams_webhook(request: Request):
         async def bot_logic(turn_context: TurnContext):
             """Bot logic to handle the activity."""
             activity_id = turn_context.activity.id
+            user_id = turn_context.activity.from_property.id if turn_context.activity.from_property else None
+            conversation_id = turn_context.activity.conversation.id if turn_context.activity.conversation else None
+
             try:
                 # Get database connection for this request
                 from app.database_connection_manager import get_connection_manager
                 manager = await get_connection_manager()
                 async with manager.get_connection() as db:
                     # Log: bot_logic started
-                    await db.execute("""
-                        UPDATE teams_conversations
-                        SET bot_response = 'bot_logic_started'
-                        WHERE activity_id = $1
-                    """, activity_id)
+                    await log_bot_audit(db, activity_id, "bot_logic_started", user_id, conversation_id)
 
                     # Route activity based on type
                     if turn_context.activity.type == ActivityTypes.message:
@@ -144,11 +189,10 @@ async def teams_webhook(request: Request):
                         logger.info(f"Response from handle_message_activity: {type(response)}")
 
                         # Log: message handler completed
-                        await db.execute("""
-                            UPDATE teams_conversations
-                            SET bot_response = 'message_handler_completed'
-                            WHERE activity_id = $1
-                        """, activity_id)
+                        await log_bot_audit(
+                            db, activity_id, "message_handler_completed", user_id, conversation_id,
+                            event_data={"response_type": str(type(response).__name__)}
+                        )
 
                         if response:
                             print(f"About to send activity response: {response}", flush=True)
@@ -183,39 +227,34 @@ async def teams_webhook(request: Request):
                                 logger.info(f"Trusted service URL: {service_url}")
 
                                 # Log: service URL trusted
-                                await db.execute("""
-                                    UPDATE teams_conversations
-                                    SET bot_response = $1
-                                    WHERE activity_id = $2
-                                """, f'service_url_trusted:{service_url}', activity_id)
+                                await log_bot_audit(
+                                    db, activity_id, "service_url_trusted", user_id, conversation_id,
+                                    event_data={"service_url": service_url}
+                                )
                             except Exception as trust_error:
                                 logger.error(f"Error trusting service URL: {trust_error}", exc_info=True)
                                 print(f"SERVICE URL TRUST FAILED: {trust_error}", flush=True)
-                                await db.execute("""
-                                    UPDATE teams_conversations
-                                    SET bot_response = $1
-                                    WHERE activity_id = $2
-                                """, f'trust_error:{str(trust_error)[:100]}', activity_id)
+                                await log_bot_audit(
+                                    db, activity_id, "trust_error", user_id, conversation_id,
+                                    error_message=str(trust_error)
+                                )
 
                             # Send activity with comprehensive error handling
                             try:
                                 # Log: attempting send
-                                await db.execute("""
-                                    UPDATE teams_conversations
-                                    SET bot_response = 'send_activity_attempting'
-                                    WHERE activity_id = $1
-                                """, activity_id)
+                                await log_bot_audit(
+                                    db, activity_id, "send_activity_attempting", user_id, conversation_id
+                                )
 
                                 result = await turn_context.send_activity(response)
                                 print(f"✅ Activity send result: {result}", flush=True)
                                 logger.info(f"✅ Activity send result: {result}")
 
                                 # Log: send successful
-                                await db.execute("""
-                                    UPDATE teams_conversations
-                                    SET bot_response = $1
-                                    WHERE activity_id = $2
-                                """, f'send_success:{result}', activity_id)
+                                await log_bot_audit(
+                                    db, activity_id, "send_activity_success", user_id, conversation_id,
+                                    event_data={"result": str(result)}
+                                )
                             except Exception as send_error:
                                 logger.error(f"❌ CRITICAL: Failed to send activity: {send_error}", exc_info=True)
                                 print(f"❌ SEND ACTIVITY FAILED: {send_error}", flush=True)
@@ -224,12 +263,10 @@ async def teams_webhook(request: Request):
                                 print(f"Error details: {str(send_error)}", flush=True)
 
                                 # Log: send failed with error
-                                error_msg = f"{type(send_error).__name__}:{str(send_error)[:150]}"
-                                await db.execute("""
-                                    UPDATE teams_conversations
-                                    SET bot_response = $1
-                                    WHERE activity_id = $2
-                                """, f'send_failed:{error_msg}', activity_id)
+                                await log_bot_audit(
+                                    db, activity_id, "send_activity_failed", user_id, conversation_id,
+                                    error_message=f"{type(send_error).__name__}: {str(send_error)}"
+                                )
                                 raise  # Re-raise to ensure it's logged
 
                     elif turn_context.activity.type == ActivityTypes.invoke:
@@ -806,8 +843,13 @@ async def teams_health():
 
 
 @router.get("/debug/env")
-async def debug_env():
-    """Debug endpoint to check environment variables."""
+async def debug_env(_: bool = Depends(require_debug_mode)):
+    """
+    Debug endpoint to check environment variables.
+
+    Only accessible when TEAMS_DEBUG_ENABLED=true.
+    Returns 404 in production for security.
+    """
     import os
     app_id = os.getenv("TEAMS_BOT_APP_ID")
     app_password = os.getenv("TEAMS_BOT_APP_PASSWORD")
@@ -820,8 +862,13 @@ async def debug_env():
 
 
 @router.get("/debug/logging")
-async def debug_logging():
-    """Test endpoint to verify logging works."""
+async def debug_logging(_: bool = Depends(require_debug_mode)):
+    """
+    Test endpoint to verify logging works.
+
+    Only accessible when TEAMS_DEBUG_ENABLED=true.
+    Returns 404 in production for security.
+    """
     print("=== DEBUG LOGGING TEST - PRINT STATEMENT ===", flush=True)
     logger.info("=== DEBUG LOGGING TEST - LOGGER INFO ===")
     logger.warning("=== DEBUG LOGGING TEST - LOGGER WARNING ===")
