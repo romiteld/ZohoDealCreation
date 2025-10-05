@@ -65,6 +65,34 @@ def require_debug_mode():
     return True
 
 
+# Helper function to strip bot mentions from message text
+def remove_mention_text(text: str, entities: Optional[list] = None) -> str:
+    """
+    Remove bot mention entities from message text.
+
+    Teams includes mentions as <at>BotName</at> in the text.
+    This function strips these out to get the actual command.
+
+    Args:
+        text: Raw message text from Teams
+        entities: Optional list of entity objects from activity
+
+    Returns:
+        Cleaned message text without mention tags
+    """
+    if not text:
+        return ""
+
+    # Remove <at>...</at> tags (Teams mention format)
+    import re
+    cleaned = re.sub(r'<at>.*?</at>', '', text, flags=re.IGNORECASE)
+
+    # Clean up extra whitespace
+    cleaned = ' '.join(cleaned.split())
+
+    return cleaned.strip()
+
+
 # Helper function for audit logging
 async def log_bot_audit(
     db: asyncpg.Connection,
@@ -312,8 +340,12 @@ async def handle_message_activity(
     """, conversation_id, user_id, user_name, user_email, "personal",
         activity.id, activity.text)
 
-    # Parse command
-    message_text = (activity.text or "").strip().lower()
+    # Parse command - strip bot mentions first (handles @TalentWell mentions)
+    raw_text = activity.text or ""
+    cleaned_text = remove_mention_text(raw_text, activity.entities)
+    message_text = cleaned_text.strip().lower()
+
+    logger.info(f"Message received - Raw: '{raw_text}' | Cleaned: '{cleaned_text}' | Command: '{message_text}'")
 
     # Handle commands
     if any(greeting in message_text for greeting in ["hello", "hi", "hey"]):
