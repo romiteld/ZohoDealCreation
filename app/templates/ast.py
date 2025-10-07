@@ -14,6 +14,11 @@ from html.parser import HTMLParser
 
 logger = logging.getLogger(__name__)
 
+VOID_ELEMENTS = {
+    "area", "base", "br", "col", "embed", "hr", "img", "input",
+    "link", "meta", "param", "source", "track", "wbr"
+}
+
 
 class NodeType(Enum):
     """Types of AST nodes"""
@@ -36,6 +41,7 @@ class ASTNode:
     attributes: Dict[str, str]
     children: List['ASTNode']
     modifiable: bool
+    tag: str = "div"
     checksum: Optional[str] = None
     
     def calculate_checksum(self) -> str:
@@ -62,36 +68,41 @@ class TemplateParser(HTMLParser):
         self.current_node = None
         self.root = ASTNode(NodeType.ROOT, "", {}, [], False)
         self.in_modifiable_block = False
-        
+        self.doctype = ""
+
     def handle_starttag(self, tag, attrs):
         """Handle opening HTML tags"""
         attrs_dict = dict(attrs)
-        
+
         # Check for modifiable blocks
         if 'data-ast' in attrs_dict:
             ast_type = attrs_dict['data-ast']
             if ast_type in ['intro_block', 'cards', 'subject']:
                 node_type = NodeType[ast_type.upper()]
-                node = ASTNode(node_type, "", attrs_dict, [], True)
+                node = ASTNode(node_type, "", attrs_dict, [], True, tag=tag)
                 self.in_modifiable_block = True
             else:
-                node = ASTNode(NodeType.STATIC, "", attrs_dict, [], False)
+                node = ASTNode(NodeType.STATIC, "", attrs_dict, [], False, tag=tag)
         else:
             # Special handling for known static elements
             if tag == 'style':
-                node = ASTNode(NodeType.STYLE, "", attrs_dict, [], False)
+                node = ASTNode(NodeType.STYLE, "", attrs_dict, [], False, tag=tag)
             elif 'calendly' in str(attrs_dict).lower():
-                node = ASTNode(NodeType.CALENDLY, "", attrs_dict, [], False)
+                node = ASTNode(NodeType.CALENDLY, "", attrs_dict, [], False, tag=tag)
             else:
-                node = ASTNode(NodeType.STATIC, "", attrs_dict, [], False)
-        
-        # Add to tree
+                node = ASTNode(NodeType.STATIC, "", attrs_dict, [], False, tag=tag)
+
+        # Attach to parent (current node or root)
+        parent = self.current_node if self.current_node else self.root
+        parent.children.append(node)
+
+        # Void elements are self-contained; don't change current node
+        if tag.lower() in VOID_ELEMENTS:
+            return
+
         if self.current_node:
-            self.current_node.children.append(node)
             self.ast_stack.append(self.current_node)
-        else:
-            self.root.children.append(node)
-        
+
         self.current_node = node
     
     def handle_endtag(self, tag):
@@ -101,11 +112,22 @@ class TemplateParser(HTMLParser):
             self.in_modifiable_block = False
         else:
             self.current_node = None
-    
+
     def handle_data(self, data):
         """Handle text content"""
         if self.current_node:
             self.current_node.content += data
+
+    def handle_startendtag(self, tag, attrs):
+        """Handle self-closing tags like <meta/>"""
+        self.handle_starttag(tag, attrs)
+        # Only invoke handle_endtag for non-void elements so the stack remains balanced.
+        if tag.lower() not in VOID_ELEMENTS:
+            self.handle_endtag(tag)
+
+    def handle_decl(self, decl):
+        """Capture document declarations (e.g., DOCTYPE)."""
+        self.doctype = f"<!{decl}>"
 
 
 class ASTCompiler:
@@ -115,16 +137,18 @@ class ASTCompiler:
         self.template_path = template_path
         self.ast = None
         self.snapshot = None
-        
+        self.doctype = ""
+
     def parse_template(self, html: str) -> ASTNode:
         """Parse HTML template into AST"""
         parser = TemplateParser()
         parser.feed(html)
         self.ast = parser.root
-        
+        self.doctype = getattr(parser, 'doctype', "")
+
         # Calculate checksums for all nodes
         self._calculate_checksums(self.ast)
-        
+
         return self.ast
     
     def _calculate_checksums(self, node: ASTNode):
@@ -218,43 +242,42 @@ class ASTCompiler:
         """Render AST back to HTML"""
         if not self.ast:
             return ""
-        
-        return self._render_node(self.ast)
-    
+
+        rendered_body = ''.join(self._render_node(child) for child in self.ast.children)
+        if self.doctype:
+            return f"{self.doctype}\n{rendered_body}"
+        return rendered_body
+
     def _render_node(self, node: ASTNode) -> str:
         """Recursively render AST node to HTML"""
         if node.node_type == NodeType.ROOT:
             # Just render children for root
             return ''.join(self._render_node(child) for child in node.children)
-        
+
         # Build opening tag
-        if node.attributes:
-            # Find the original tag name from attributes or use div
-            tag = 'div'
-            for attr, value in node.attributes.items():
-                if attr == 'data-tag':
-                    tag = value
-                    break
-            
-            attrs_str = ' '.join(f'{k}="{v}"' for k, v in node.attributes.items() 
-                               if k != 'data-tag')
+        tag = node.tag or 'div'
+        attrs_str = ' '.join(
+            f'{k}="{v}"' for k, v in node.attributes.items()
+        ) if node.attributes else ''
+        if attrs_str:
             html = f'<{tag} {attrs_str}>'
         else:
-            html = '<div>'
-        
+            html = f'<{tag}>'
+
+        # Void elements don't contain content or closing tags
+        if tag.lower() in VOID_ELEMENTS:
+            return html
+
         # Add content
         html += node.content
-        
+
         # Add children
         for child in node.children:
             html += self._render_node(child)
-        
+
         # Closing tag
-        if node.attributes and 'data-tag' in node.attributes:
-            html += f'</{node.attributes["data-tag"]}>'
-        else:
-            html += '</div>'
-        
+        html += f'</{tag}>'
+
         return html
     
     def validate_template_structure(self) -> List[str]:
