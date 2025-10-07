@@ -22,7 +22,7 @@ import uuid
 import asyncpg
 
 from app.jobs.talentwell_curator import TalentWellCurator
-from app.database_enhancements import get_db_pool
+from app.database_connection_manager import DatabaseConnectionManager
 
 logger = logging.getLogger(__name__)
 
@@ -39,19 +39,18 @@ class WeeklyDigestScheduler:
     """
 
     def __init__(self):
-        self.db_pool = None
+        self.db_manager = DatabaseConnectionManager()
         self.curator = TalentWellCurator()
 
     async def initialize(self):
-        """Initialize database pool and curator."""
-        self.db_pool = await get_db_pool()
+        """Initialize database connection and curator."""
         await self.curator.initialize()
         logger.info("WeeklyDigestScheduler initialized")
 
     async def close(self):
-        """Close database pool."""
-        if self.db_pool:
-            await self.db_pool.close()
+        """Close database connections."""
+        await self.db_manager.close()
+        logger.info("WeeklyDigestScheduler closed")
 
     async def get_subscriptions_due(self) -> List[Dict[str, Any]]:
         """
@@ -60,7 +59,7 @@ class WeeklyDigestScheduler:
         Returns:
             List of subscription dicts with user preferences
         """
-        async with self.db_pool.acquire() as conn:
+        async with self.db_manager.get_connection() as conn:
             rows = await conn.fetch("""
                 SELECT
                     user_id,
@@ -278,7 +277,7 @@ class WeeklyDigestScheduler:
             message_id = self.send_email(delivery_email, subject, body)
 
             # Record confirmation in database
-            async with self.db_pool.acquire() as conn:
+            async with self.db_manager.get_connection() as conn:
                 await conn.execute("""
                     INSERT INTO subscription_confirmations (
                         confirmation_id, user_id, user_email, delivery_email,
@@ -315,7 +314,7 @@ class WeeklyDigestScheduler:
         logger.info(f"Processing subscription for {user_id} ({delivery_email})")
 
         # Create delivery record
-        async with self.db_pool.acquire() as conn:
+        async with self.db_manager.get_connection() as conn:
             await conn.execute("""
                 INSERT INTO weekly_digest_deliveries (
                     delivery_id, user_id, user_email, delivery_email,
@@ -350,7 +349,7 @@ class WeeklyDigestScheduler:
             )
 
             # Update delivery record as sent
-            async with self.db_pool.acquire() as conn:
+            async with self.db_manager.get_connection() as conn:
                 await conn.execute("""
                     UPDATE weekly_digest_deliveries
                     SET status = 'sent',
@@ -380,7 +379,7 @@ class WeeklyDigestScheduler:
             logger.error(f"❌ Failed to deliver digest to {delivery_email}: {e}", exc_info=True)
 
             # Update delivery record as failed
-            async with self.db_pool.acquire() as conn:
+            async with self.db_manager.get_connection() as conn:
                 await conn.execute("""
                     UPDATE weekly_digest_deliveries
                     SET status = 'failed',
