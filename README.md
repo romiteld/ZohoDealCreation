@@ -285,11 +285,11 @@ flowchart TB
     classDef infra fill:#E0E7FF,stroke:#4338CA,color:#1E1B4B,stroke-width:2px;
 
     subgraph Users["User Layer"]
-        Recruiter["Recruiters\n(Outlook Desktop/Web)"]
-        Advisor["Financial Advisors\n(Email Recipients)"]
+        Recruiter["Recruiters\n(Outlook Desktop/Web/Teams)"]
+        Executives["Executive Staff\n(Weekly digest subscribers)"]
         Admin["Admin Users\n(Management Console)"]
     end
-    class Recruiter,Advisor,Admin actor;
+    class Recruiter,Executives,Admin actor;
 
     subgraph ClientApps["Client Applications"]
         OutlookAddin["Outlook Add-in\n(Office.js, Manifest v1.1)"]
@@ -358,7 +358,8 @@ flowchart TB
     %% User flows
     Recruiter -->|"Open add-in"| OutlookAddin
     Recruiter -->|"Chat + commands"| TeamsBot
-    Advisor -->|"Receive digests"| ACS
+    Recruiter -->|"Subscribe to digests"| TeamsBot
+    Executives -->|"Receive digests"| ACS
 
     %% Client to infrastructure
     OutlookAddin -->|"HTTPS/WSS"| FrontDoor
