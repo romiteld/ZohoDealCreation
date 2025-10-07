@@ -574,7 +574,41 @@ az containerapp update --name well-intake-api \
   --revision-suffix "v$(date +%Y%m%d-%H%M%S)"
 ```
 
+## Future Enhancements
+
+### Teams Bot Channel/Group Chat Support (Planned)
+**Current Limitation**: Bot only works in 1:1 personal chats. Cannot @mention in channels or group chats.
+
+**To Add Channel Support:**
+1. Update bot manifest (`migrations/005_teams_integration_tables.sql`) to include team/channel scope
+2. Modify `handle_message_activity()` in `app/api/teams/routes.py` to handle channel messages
+3. Leverage existing `remove_mention_text()` helper for @mention parsing
+4. Add channel-specific permission checks (public vs private channels)
+5. Test @mention triggering in:
+   - Team channels
+   - Group chats
+   - Private channels
+
+**Implementation Files:**
+- Bot manifest configuration
+- `app/api/teams/routes.py:355-430` (message handler)
+- `app/api/teams/adaptive_cards.py` (response cards)
+
+**Use Cases:**
+- @TalentWell digest advisors in #recruiting channel
+- @TalentWell analytics in team standup
+- Quick candidate queries without leaving channel context
+
 ## Recent Critical Fixes
+
+### Teams Bot Query Engine Fixes (2025-10-05)
+- **Issue**: Three errors preventing digest generation and natural language queries
+- **Fixes**:
+  1. Changed `note_text` → `note_content` column references in query engine
+  2. Added `max_cards` parameter to `TalentWellCurator.run_weekly_digest()`
+  3. Fixed SQL variable scope with initialization and error handling
+- **Files**: `app/api/teams/query_engine.py`, `app/jobs/talentwell_curator.py`
+- **Commit**: `249fb36`
 
 ### TalentWell Privacy & AI Enhancement Rollout (2025-10-05)
 - **Privacy Mode Enabled**: Company anonymization, strict compensation formatting, location bullet suppression

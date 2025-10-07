@@ -128,7 +128,10 @@ class TalentWellCurator:
         'wirehouse': ['Merrill Lynch', 'Morgan Stanley', 'Wells Fargo', 'UBS', 'Raymond James'],
         'ria': ['Nuance Investments', 'Gottfried & Somberg', 'Fisher Investments', 'Edelman Financial'],
         'bank': ['JPMorgan', 'Bank of America', 'Wells Fargo Advisors', 'Citigroup'],
-        'insurance': ['Northwestern Mutual', 'MassMutual', 'New York Life', 'Prudential']
+        'insurance': ['Northwestern Mutual', 'MassMutual', 'New York Life', 'Prudential'],
+        'law_firm': ['Holland & Knight', 'Baker McKenzie', 'DLA Piper', 'K&L Gates', 'LLP', 'PC', 'Attorneys', 'Law'],
+        'accounting': ['Deloitte', 'PwC', 'EY', 'KPMG', 'Grant Thornton'],
+        'consulting': ['McKinsey', 'BCG', 'Bain', 'Accenture', 'Deloitte Consulting']
     }
 
     def __init__(self):
@@ -300,10 +303,11 @@ class TalentWellCurator:
                 from_date=from_date,
                 to_date=to_date,
                 owner=owner,  # Keep for backward compatibility but not used
-                candidate_type=candidate_type
+                candidate_type=candidate_type,
+                published_to_vault=True  # ✅ Filter to Vault Candidates only
             )
 
-            logger.info(f"Retrieved {len(candidates)} candidates from Zoho with filters: from={from_date}, to={to_date}, type={candidate_type or 'all'}")
+            logger.info(f"Retrieved {len(candidates)} Vault candidates from Zoho (vault=true, from={from_date}, to={to_date}, type={candidate_type or 'all'})")
             return candidates
             
         except Exception as e:
@@ -513,7 +517,10 @@ class TalentWellCurator:
                 voit_result.get('enhanced_data', {}),
                 transcript_text
             )
-            
+
+            # Remove duplicates (e.g., "7 years" and "8 years")
+            bullets = self._deduplicate_bullets(bullets)
+
             # Analyze candidate sentiment from transcript EARLY for bullet ranking
             sentiment = await self._analyze_candidate_sentiment(transcript_text)
 
@@ -555,6 +562,30 @@ class TalentWellCurator:
                         ))
             elif len(bullets) > 5:
                 bullets = bullets[:5]  # Take top 5
+
+            # Ensure EXACTLY 5 bullets (Brandon's requirement)
+            while len(bullets) < 5:
+                if len(bullets) == 3 and deal.get('professional_designations'):
+                    bullets.append(BulletPoint(
+                        text=f"Holds {deal['professional_designations']}",
+                        confidence=0.6,
+                        source="CRM"
+                    ))
+                elif len(bullets) == 4 and deal.get('core_expertise'):
+                    bullets.append(BulletPoint(
+                        text=f"Core expertise: {deal['core_expertise']}",
+                        confidence=0.5,
+                        source="CRM"
+                    ))
+                else:
+                    bullets.append(BulletPoint(
+                        text="Seeking new opportunities in wealth management",
+                        confidence=0.4,
+                        source="Default"
+                    ))
+
+            # Always trim to exactly 5
+            bullets = bullets[:5]
 
             # Apply privacy mode if enabled - anonymize company name
             display_company = self._anonymize_company(company, parsed_aum) if PRIVACY_MODE else company
@@ -633,6 +664,12 @@ class TalentWellCurator:
                     return "National bank"
                 elif firm_type == 'insurance':
                     return "Insurance brokerage"
+                elif firm_type == 'law_firm':
+                    return "National law firm"
+                elif firm_type == 'accounting':
+                    return "Major accounting firm"
+                elif firm_type == 'consulting':
+                    return "Management consulting firm"
 
         # Generic fallback based on AUM
         if aum:
@@ -677,21 +714,21 @@ class TalentWellCurator:
 
     def _round_aum_for_privacy(self, aum_value: float) -> str:
         """
-        Round AUM to privacy-preserving ranges.
-        Ranges: $5B+ | $1B–$5B | $500M–$1B | $100M–$500M | Under $100M
+        Round AUM to broad ranges with + suffix for privacy.
+
+        Examples: $1.5B → "$1B+ AUM", $750M → "$500M+ AUM"
         """
-        if aum_value >= 5_000_000_000:
-            return "$5B+"
-        elif aum_value >= 1_000_000_000:
-            return "$1B–$5B"
-        elif aum_value >= 500_000_000:
-            return "$500M–$1B"
-        elif aum_value >= 100_000_000:
-            return "$100M–$500M"
-        elif aum_value > 0:
-            return "$100M+"
+        if aum_value >= 1_000_000_000:  # $1B+
+            billions = int(aum_value / 1_000_000_000)
+            return f"${billions}B+ AUM"
+        elif aum_value >= 100_000_000:  # $100M - $999M
+            hundreds = int(aum_value / 100_000_000) * 100
+            return f"${hundreds}M+ AUM"
+        elif aum_value >= 10_000_000:  # $10M - $99M
+            tens = int(aum_value / 10_000_000) * 10
+            return f"${tens}M+ AUM"
         else:
-            return ""
+            return ""  # Too small to display (identifying)
 
     def _standardize_compensation(self, raw_text: str) -> str:
         """
@@ -836,6 +873,27 @@ class TalentWellCurator:
             return text
         else:
             return f"Available {text}"
+
+    def _deduplicate_bullets(self, bullets: List[BulletPoint]) -> List[BulletPoint]:
+        """
+        Remove duplicate years of experience and other redundant info.
+        Prevents: "7 years" and "8 years" for same candidate.
+        """
+        seen_patterns = set()
+        deduplicated = []
+
+        for bullet in bullets:
+            # Extract year patterns
+            years = re.findall(r'(\d+)\s+years?', bullet.text.lower())
+
+            # Create signature
+            sig = tuple(sorted(years)) if years else bullet.text[:30]
+
+            if sig not in seen_patterns:
+                seen_patterns.add(sig)
+                deduplicated.append(bullet)
+
+        return deduplicated
 
     def _calculate_evidence_score(self, bullets: List[BulletPoint]) -> float:
         """Calculate overall evidence score for bullets."""
@@ -1418,40 +1476,29 @@ Response format (JSON only):
         return intros.get(audience, intros['default'])
     
     def _format_card_html(self, card: DigestCard) -> str:
-        """Format card as HTML following Brandon's template."""
+        """Format card matching Brandon's exact template with emojis."""
         bullets_html = '\n'.join([
             f'<li>{bullet.text}</li>'
             for bullet in card.bullets
         ])
-        
-        # Extract availability and comp info
-        availability = ""
-        comp = ""
-        for bullet in card.bullets:
-            if "available" in bullet.text.lower():
-                availability = bullet.text
-            elif "comp" in bullet.text.lower() or "$" in bullet.text:
-                comp = bullet.text
-        
-        # Generate ref code
-        ref_code = f"TWAV-{card.deal_id[-8:]}" if card.deal_id else "TWAV-00000000"
-        
+
+        # Generate ref code: TWAV366105 (no hyphen)
+        ref_code = f"TWAV{card.deal_id[-8:]}" if card.deal_id else "TWAV00000000"
+
+        # Extract role from job title
+        role = card.job_title or "Advisor"
+
         return f"""
         <div class="candidate-card">
-            <h3><strong>{card.candidate_name}</strong></h3>
+            <h3>‼️ {role} Candidate Alert 🔔</h3>
+            <h4><strong>{card.candidate_name}</strong></h4>
             <div class="candidate-location">
-                <strong>Location:</strong> {card.location}
+                📍 {card.location}
             </div>
             <div class="candidate-details">
-                <div class="skill-list">
-                    <ul>
-                        {bullets_html}
-                    </ul>
-                </div>
-                <div class="availability-comp">
-                    {f'<div>{availability}</div>' if availability else ''}
-                    {f'<div>{comp}</div>' if comp else ''}
-                </div>
+                <ul>
+                    {bullets_html}
+                </ul>
             </div>
             <div class="ref-code">Ref code: {ref_code}</div>
         </div>

@@ -495,11 +495,14 @@ def create_error_card(error_message: str) -> Dict[str, Any]:
 def create_preferences_card(
     current_audience: str = "global",
     digest_frequency: str = "weekly",
-    notifications_enabled: bool = True
+    notifications_enabled: bool = True,
+    subscription_active: bool = False,
+    delivery_email: str = "",
+    max_candidates: int = 6
 ) -> Dict[str, Any]:
     """
     Create preferences card for user settings.
-    Enhanced with brand colors and visual hierarchy.
+    Enhanced with brand colors, visual hierarchy, and email subscription fields.
     """
     return {
         "contentType": "application/vnd.microsoft.card.adaptive",
@@ -590,6 +593,63 @@ def create_preferences_card(
                             "valueOff": "false"
                         }
                     ]
+                },
+                {
+                    "type": "Container",
+                    "spacing": "Medium",
+                    "separator": True,
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "📧 Weekly Email Subscription",
+                            "size": "Large",
+                            "weight": "Bolder",
+                            "color": "Accent",
+                            "spacing": "Medium"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "Receive automatic weekly digests via email. You'll get a confirmation email when you save these settings.",
+                            "wrap": True,
+                            "size": "Small",
+                            "isSubtle": True,
+                            "spacing": "Small"
+                        }
+                    ]
+                },
+                {
+                    "type": "Input.Toggle",
+                    "id": "subscription_active",
+                    "label": "Subscribe to weekly email digests",
+                    "value": "true" if subscription_active else "false",
+                    "valueOn": "true",
+                    "valueOff": "false"
+                },
+                {
+                    "type": "Input.Text",
+                    "id": "delivery_email",
+                    "label": "Email Address",
+                    "placeholder": "your.email@company.com",
+                    "value": delivery_email,
+                    "isRequired": False,
+                    "spacing": "Small"
+                },
+                {
+                    "type": "Input.Number",
+                    "id": "max_candidates",
+                    "label": "Max Candidates Per Digest",
+                    "value": max_candidates,
+                    "min": 1,
+                    "max": 20,
+                    "spacing": "Small"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": "💡 **Tip:** Leave email blank to use your Teams email address. You can choose 1-20 candidates per digest.",
+                    "wrap": True,
+                    "size": "Small",
+                    "isSubtle": True,
+                    "spacing": "Small"
                 }
             ],
             "actions": [

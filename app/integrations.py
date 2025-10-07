@@ -1654,6 +1654,13 @@ class ZohoApiClient(ZohoClient):
                     }
                     processed_candidates.append(processed)
 
+                # Sort by Date_Published_to_Vault ascending (oldest first = deterministic ranking)
+                processed_candidates.sort(
+                    key=lambda x: x.get("date_published") or "9999-12-31",
+                    reverse=False
+                )
+                logger.debug(f"Sorted {len(processed_candidates)} vault candidates by Date_Published_to_Vault (oldest first)")
+
                 # Log filtered count if filtering was applied
                 filters_applied = []
                 if published_to_vault is not None:

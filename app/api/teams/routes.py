@@ -571,12 +571,35 @@ async def handle_invoke_activity(
             logger.warning(f"Unknown invoke action: {action}")
             response = MessageFactory.text(f"Unknown action: {action}")
 
-        # Send response if we have one
+        # For invoke activities, we need to send an invoke response AND a follow-up message
         if response:
+            # Send invoke response to acknowledge the button click
+            invoke_response = Activity(
+                type=ActivityTypes.invoke_response,
+                value={
+                    "status": 200,
+                    "body": {"message": "Processing..."}
+                }
+            )
+            await turn_context.send_activity(invoke_response)
+
+            # Then send the actual response as a follow-up message
             await turn_context.send_activity(response)
 
     except Exception as e:
         logger.error(f"Error handling invoke: {e}", exc_info=True)
+
+        # Send error invoke response
+        invoke_response = Activity(
+            type=ActivityTypes.invoke_response,
+            value={
+                "status": 500,
+                "body": {"message": str(e)}
+            }
+        )
+        await turn_context.send_activity(invoke_response)
+
+        # Also send error card
         error_card = create_error_card(str(e))
         attachment = CardFactory.adaptive_card(error_card["content"])
         await turn_context.send_activity(MessageFactory.attachment(attachment))
@@ -824,11 +847,14 @@ async def show_user_preferences(
                 WHERE user_id = $1
             """, user_id)
 
-        # Create preferences card using CardFactory
+        # Create preferences card using CardFactory with subscription fields
         card = create_preferences_card(
             current_audience=prefs["default_audience"],
             digest_frequency=prefs["digest_frequency"],
-            notifications_enabled=prefs["notification_enabled"]
+            notifications_enabled=prefs["notification_enabled"],
+            subscription_active=prefs.get("subscription_active", False),
+            delivery_email=prefs.get("delivery_email", "") or "",
+            max_candidates=prefs.get("max_candidates_per_digest", 6)
         )
         attachment = CardFactory.adaptive_card(card["content"])
         return MessageFactory.attachment(attachment)
@@ -846,28 +872,115 @@ async def save_user_preferences(
     preferences: Dict[str, Any],
     db: asyncpg.Connection
 ) -> Dict[str, Any]:
-    """Save user preferences from form submission."""
+    """Save user preferences from form submission and send confirmation email."""
 
     try:
+        # Get previous settings for comparison
+        previous = await db.fetchrow("""
+            SELECT subscription_active, delivery_email, max_candidates_per_digest,
+                   default_audience, digest_frequency
+            FROM teams_user_preferences
+            WHERE user_id = $1
+        """, user_id)
+
+        # Extract new settings
+        subscription_active = preferences.get("subscription_active") == "true"
+        delivery_email = preferences.get("delivery_email", "").strip() or user_email  # Default to Teams email
+        max_candidates = int(preferences.get("max_candidates", 6))
+
         # Update preferences
         await db.execute("""
             UPDATE teams_user_preferences
             SET default_audience = $1,
                 digest_frequency = $2,
                 notification_enabled = $3,
+                subscription_active = $4,
+                delivery_email = $5,
+                max_candidates_per_digest = $6,
                 updated_at = CURRENT_TIMESTAMP
-            WHERE user_id = $4
+            WHERE user_id = $7
         """,
             preferences.get("default_audience", "global"),
             preferences.get("digest_frequency", "weekly"),
             preferences.get("notification_enabled") == "true",
+            subscription_active,
+            delivery_email,
+            max_candidates,
             user_id
         )
 
-        return {
-            "type": "message",
-            "text": "✅ Preferences saved successfully!"
-        }
+        # Get updated settings with calculated next_digest_scheduled_at
+        updated = await db.fetchrow("""
+            SELECT subscription_active, delivery_email, max_candidates_per_digest,
+                   default_audience, digest_frequency, next_digest_scheduled_at
+            FROM teams_user_preferences
+            WHERE user_id = $1
+        """, user_id)
+
+        # Determine action for confirmation email
+        action = None
+        if not previous or not previous["subscription_active"]:
+            if subscription_active:
+                action = "subscribe"
+        elif previous["subscription_active"] and not subscription_active:
+            action = "unsubscribe"
+        elif previous["subscription_active"] and subscription_active:
+            # Check if settings changed
+            if (previous["delivery_email"] != delivery_email or
+                previous["max_candidates_per_digest"] != max_candidates or
+                previous["default_audience"] != updated["default_audience"] or
+                previous["digest_frequency"] != updated["digest_frequency"]):
+                action = "update"
+
+        # Send confirmation email if subscription changed
+        if action:
+            from app.jobs.weekly_digest_scheduler import WeeklyDigestScheduler
+            scheduler = WeeklyDigestScheduler()
+            await scheduler.initialize()
+
+            new_settings = {
+                "user_email": user_email,
+                "default_audience": updated["default_audience"],
+                "digest_frequency": updated["digest_frequency"],
+                "max_candidates_per_digest": updated["max_candidates_per_digest"],
+                "next_digest_scheduled_at": str(updated["next_digest_scheduled_at"]) if updated["next_digest_scheduled_at"] else None
+            }
+
+            previous_settings = None
+            if previous:
+                previous_settings = {
+                    "default_audience": previous["default_audience"],
+                    "digest_frequency": previous["digest_frequency"],
+                    "max_candidates_per_digest": previous["max_candidates_per_digest"]
+                }
+
+            try:
+                confirmation_id = await scheduler.send_confirmation_email(
+                    user_id=user_id,
+                    delivery_email=delivery_email,
+                    action=action,
+                    new_settings=new_settings,
+                    previous_settings=previous_settings
+                )
+                logger.info(f"Confirmation email sent: {confirmation_id}")
+                await scheduler.close()
+
+                return {
+                    "type": "message",
+                    "text": f"✅ Preferences saved! Check {delivery_email} for confirmation."
+                }
+            except Exception as email_error:
+                logger.error(f"Failed to send confirmation email: {email_error}", exc_info=True)
+                await scheduler.close()
+                return {
+                    "type": "message",
+                    "text": f"✅ Preferences saved, but confirmation email failed: {str(email_error)}"
+                }
+        else:
+            return {
+                "type": "message",
+                "text": "✅ Preferences saved successfully!"
+            }
 
     except Exception as e:
         logger.error(f"Error saving preferences: {e}", exc_info=True)
@@ -1044,22 +1157,19 @@ async def run_database_migration(
         # Execute migration in transaction (handles multiple statements)
         # Note: This uses a pooled connection; long migrations will hold it
         async with db.transaction():
-            # Split by semicolon and execute each statement
-            statements = [stmt.strip() for stmt in migration_sql.split(';') if stmt.strip()]
-            for i, statement in enumerate(statements):
-                try:
-                    await db.execute(statement)
-                    logger.debug(f"Executed statement {i+1}/{len(statements)}")
-                except Exception as stmt_error:
-                    logger.error(f"Failed at statement {i+1}: {statement[:100]}...")
-                    raise
+            # Execute entire migration as single script to preserve function definitions
+            try:
+                await db.execute(migration_sql)
+                logger.info(f"Migration executed successfully")
+            except Exception as exec_error:
+                logger.error(f"Migration execution failed: {str(exec_error)}")
+                raise
 
         logger.info(f"Migration completed: {safe_filename}")
 
         return {
             "status": "success",
             "migration": safe_filename,
-            "statements_executed": len(statements),
             "timestamp": datetime.now().isoformat()
         }
 

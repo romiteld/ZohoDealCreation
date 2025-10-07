@@ -35,15 +35,15 @@ class QueryEngine:
         self,
         query: str,
         user_email: str,
-        db: asyncpg.Connection
+        db: asyncpg.Connection = None  # Optional for backward compatibility
     ) -> Dict[str, Any]:
         """
-        Process natural language query with access control.
+        Process natural language query with access control using ZohoClient.
 
         Args:
             query: User's natural language query
             user_email: Email of requesting user (for access control)
-            db: Database connection
+            db: Database connection (no longer used, kept for compatibility)
 
         Returns:
             Dict with:
@@ -58,32 +58,23 @@ class QueryEngine:
 
             logger.info(f"Processing query from {user_email} (scope: {scope}): {query}")
 
-            # Step 1: Classify intent using GPT-4o
+            # Step 1: Classify intent using GPT-5-mini
             intent = await self._classify_intent(query, is_executive)
 
             # Step 2: Apply owner filter for non-executives
             if not is_executive:
                 intent["owner_filter"] = user_email
-                intent["allowed_tables"] = [
-                    "deals",  # Their Zoho deals
-                    "deal_notes",  # Their notes
-                    "meetings"  # Their meetings
-                ]
             else:
                 intent["owner_filter"] = None
-                intent["allowed_tables"] = "all"
 
-            # Step 3: Build and execute SQL query
-            sql, params = await self._build_query(intent)
-            logger.info(f"Executing SQL: {sql}")
-            logger.debug(f"Parameters: {params}")
-
-            results = await db.fetch(sql, *params)
+            # Step 3: Build and execute Zoho query
+            results, _ = await self._build_query(intent)
+            logger.info(f"Querying Zoho CRM with intent: {intent}")
 
             # Step 4: Format response
             response = await self._format_response(query, results, intent)
 
-            logger.info(f"Query completed: {len(results)} results")
+            logger.info(f"Query completed: {len(results)} vault candidates returned")
             return response
 
         except Exception as e:
@@ -166,117 +157,54 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
     async def _build_query(
         self,
         intent: Dict[str, Any]
-    ) -> Tuple[str, List[Any]]:
+    ) -> Tuple[List[Dict], List]:
         """
-        Build SQL query from classified intent.
+        Build query using ZohoClient instead of PostgreSQL.
 
         Returns:
-            Tuple of (sql_string, parameters)
+            Tuple of (candidates_list, empty_params_list)
         """
-        table = intent.get("table", "deals")
+        from app.integrations import ZohoClient
+
         intent_type = intent.get("intent_type", "list")
         filters = intent.get("filters", {})
         owner_filter = intent.get("owner_filter")
 
-        # Build base query
-        sql = None  # Initialize to avoid UnboundLocalError
-        if intent_type == "count":
-            sql = f"SELECT COUNT(*) as count FROM {table}"
-        elif intent_type == "aggregate":
-            sql = f"SELECT stage, COUNT(*) as count FROM {table}"
-        else:  # list or search
-            if table == "deals":
-                sql = """
-                    SELECT
-                        deal_id,
-                        deal_name,
-                        contact_name,
-                        account_name,
-                        stage,
-                        owner_email,
-                        created_at
-                    FROM deals
-                """
-            elif table == "deal_notes":
-                sql = """
-                    SELECT
-                        deal_id,
-                        note_content,
-                        created_by,
-                        created_at
-                    FROM deal_notes
-                """
-            elif table == "meetings":
-                sql = """
-                    SELECT
-                        deal_id,
-                        subject,
-                        meeting_date,
-                        attendees
-                    FROM meetings
-                """
-            else:
-                # Fallback for unsupported tables
-                raise ValueError(f"Unsupported table: {table}")
+        zoho_client = ZohoClient()
 
-        # Build WHERE clause
-        where_clauses = []
-        params = []
-        param_count = 1
+        # Build Zoho query filters
+        zoho_filters = {
+            "published_to_vault": True,  # Always query vault
+            "limit": 100
+        }
 
-        # Owner filter (for non-executives)
+        # Apply owner filtering for regular users (not executives)
         if owner_filter:
-            where_clauses.append(f"owner_email = ${param_count}")
-            params.append(owner_filter)
-            param_count += 1
+            zoho_filters["owner"] = owner_filter
 
         # Date filters
         if "created_after" in filters:
-            where_clauses.append(f"created_at >= ${param_count}")
-            params.append(filters["created_after"])
-            param_count += 1
+            zoho_filters["from_date"] = filters["created_after"]
 
         if "created_before" in filters:
-            where_clauses.append(f"created_at <= ${param_count}")
-            params.append(filters["created_before"])
-            param_count += 1
+            zoho_filters["to_date"] = filters["created_before"]
 
-        # Stage filter
-        if "stage" in filters:
-            where_clauses.append(f"stage = ${param_count}")
-            params.append(filters["stage"])
-            param_count += 1
-
-        # Search terms (basic full-text search)
+        # Candidate type filter (advisors, c_suite, global)
         entities = intent.get("entities", {})
-        search_terms = entities.get("search_terms", [])
-        if search_terms and table in ["deals", "deal_notes", "meetings"]:
-            if table == "deals":
-                where_clauses.append(
-                    f"(deal_name ILIKE ${param_count} OR account_name ILIKE ${param_count})"
-                )
-            elif table == "deal_notes":
-                where_clauses.append(f"note_content ILIKE ${param_count}")
-            elif table == "meetings":
-                where_clauses.append(
-                    f"(subject ILIKE ${param_count} OR notes ILIKE ${param_count})"
-                )
-            params.append(f"%{search_terms[0]}%")
-            param_count += 1
+        if "candidate_type" in entities:
+            zoho_filters["candidate_type"] = entities["candidate_type"]
 
-        # Add WHERE clause
-        if where_clauses:
-            sql += " WHERE " + " AND ".join(where_clauses)
+        # Remove None values
+        zoho_filters = {k: v for k, v in zoho_filters.items() if v is not None}
 
-        # Add GROUP BY for aggregates
-        if intent_type == "aggregate":
-            sql += " GROUP BY stage"
+        logger.info(f"Querying Zoho vault candidates with filters: {zoho_filters}")
 
-        # Add ORDER BY
-        if intent_type in ["list", "search"]:
-            sql += " ORDER BY created_at DESC LIMIT 10"
-
-        return (sql, params)
+        try:
+            results = await zoho_client.query_candidates(**zoho_filters)
+            return results, []
+        except Exception as e:
+            logger.error(f"Error querying Zoho CRM: {e}", exc_info=True)
+            return [], []
 
     async def _format_response(
         self,
