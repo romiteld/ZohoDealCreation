@@ -55,6 +55,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Webhook Endpoint** (`app/api/teams/routes.py`): Bot Framework activity handlers (message, invoke, conversationUpdate)
 - **Adaptive Cards** (`app/api/teams/adaptive_cards.py`): Interactive UI cards (welcome, help, digest preview, preferences, error)
 - **Database Schema** (`migrations/005_teams_integration_tables.sql`): 4 tables + 2 analytics views
+- **Subscription Schema** (`migrations/006_weekly_digest_subscriptions.sql`): Weekly email digest subscriptions with tracking
+- **Weekly Digest Scheduler** (`app/jobs/weekly_digest_scheduler.py`): Hourly background job for automated digest delivery
 - **VoIT Configuration** (`app/config/voit_config.py`): Shared model tier selection and cost tracking
 - **TalentWell Curator** (`app/jobs/talentwell_curator.py`): Score-based ranking, retry logic, sentiment analysis
 
@@ -62,8 +64,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `help` - Display formatted help card with command documentation
 - `digest [audience]` - Generate candidate digest preview (audiences: advisors, c_suite, global)
 - `digest <email>` - Test mode - route digest to specific email for validation
-- `preferences` - View/edit default audience, frequency, and notification settings
+- `preferences` - View/edit default audience, frequency, notification settings, and weekly digest subscriptions
 - `analytics` - View usage statistics and recent activity
+- Natural language queries - Ask questions about deals, candidates, meetings (executive access: full data, recruiters: filtered by owner)
 
 **Candidate Filtering Logic:**
 - Filters by **job title keywords** (not owner email)
@@ -208,6 +211,10 @@ safety check                  # Dependency vulnerability scan
 # Run migrations
 alembic upgrade head          # Apply all migrations
 alembic revision --autogenerate -m "Description"  # Create new migration
+
+# Run migration via API endpoint (for production)
+curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/teams/admin/run-migration?migration_name=006_weekly_digest_subscriptions.sql" \
+  -H "X-API-Key: your-api-key"
 
 # Database maintenance
 python scripts/cleanup_old_records.py   # Clean old records
@@ -468,6 +475,12 @@ ZOOM_ACCOUNT_ID=xyz
 ZOOM_CLIENT_ID=xyz
 ZOOM_CLIENT_SECRET=xyz
 
+# Weekly Digest Subscriptions (Added 2025-10-07)
+EMAIL_PROVIDER=azure_communication_services
+ACS_CONNECTION_STRING=endpoint=https://...  # Azure Communication Services for email delivery
+SMTP_FROM_EMAIL=noreply@emailthewell.com
+SMTP_FROM_NAME=TalentWell Vault
+
 # Vault Agent Features
 FEATURE_C3=true              # Enable C³ cache
 FEATURE_VOIT=true            # Enable VoIT orchestration
@@ -600,6 +613,25 @@ az containerapp update --name well-intake-api \
 - Quick candidate queries without leaving channel context
 
 ## Recent Critical Fixes
+
+### Weekly Digest Email Subscription System (2025-10-07)
+- **Feature**: Complete email subscription system for Teams Bot users
+- **Implementation**:
+  - Database schema: `teams_user_preferences` extended with subscription fields
+  - Created `weekly_digest_deliveries` tracking table
+  - Created `subscription_confirmations` audit table
+  - Background scheduler: `app/jobs/weekly_digest_scheduler.py` (hourly job)
+  - Azure Communication Services for email delivery
+  - UI integration in Teams Bot preferences card
+- **Subscription Fields**:
+  - `subscription_active` - Toggle on/off
+  - `delivery_email` - Where to send digests
+  - `max_candidates_per_digest` - Customizable limit (1-20)
+  - `last_digest_sent_at` - Delivery tracking
+  - `next_digest_scheduled_at` - Automatic scheduling via database triggers
+- **Files**: `migrations/006_weekly_digest_subscriptions.sql`, `app/jobs/weekly_digest_scheduler.py`, `app/api/teams/adaptive_cards.py`, `app/api/teams/routes.py`
+- **Migration**: Applied successfully via `/api/teams/admin/run-migration` endpoint
+- **Next Steps**: Set up scheduled job (Azure Container Apps Job or Azure Function) to run hourly digest processing
 
 ### Teams Bot Query Engine Fixes (2025-10-05)
 - **Issue**: Three errors preventing digest generation and natural language queries
