@@ -168,10 +168,16 @@ class TalentWellCurator:
         ignore_cooldown: bool = False
     ) -> Dict[str, Any]:
         """Generate weekly digest for specified audience and date range."""
-        
+
         if not self.initialized:
             await self.initialize()
-        
+
+        # Parse date strings if provided as ISO format
+        if isinstance(from_date, str):
+            from_date = datetime.fromisoformat(from_date)
+        if isinstance(to_date, str):
+            to_date = datetime.fromisoformat(to_date)
+
         # Default date range: last 7 days
         if not to_date:
             to_date = datetime.now()
@@ -1444,7 +1450,42 @@ Response format (JSON only):
         
         # Render to HTML
         html_content = self.ast_compiler.render_to_html()
-        
+
+        # Inline CSS for email client compatibility
+        try:
+            import css_inline
+            html_content = css_inline.inline(html_content)
+            logger.info(f"CSS inlined in digest (css-inline library)")
+
+            # Track success in Application Insights
+            if hasattr(logger, 'application_insights'):
+                logger.application_insights.track_event(
+                    'CSSInliningSuccess',
+                    properties={'library': 'css-inline', 'location': 'curator_render'},
+                    measurements={'html_size_chars': len(html_content)}
+                )
+
+        except Exception as e:
+            logger.error(f"CSS inlining failed: {e}", exc_info=True)
+
+            # CRITICAL: Track failure in Application Insights for immediate ops visibility
+            if hasattr(logger, 'application_insights'):
+                logger.application_insights.track_exception(
+                    exception=e,
+                    properties={
+                        'error_type': 'css_inlining_failure',
+                        'location': 'curator_render',
+                        'library': 'css-inline'
+                    }
+                )
+                logger.application_insights.track_metric(
+                    'css_inlining_failures',
+                    value=1,
+                    properties={'location': 'curator_render'}
+                )
+
+            # Fallback: continue with un-inlined HTML (may render poorly in email clients)
+
         return html_content
     
     def _render_basic_html(self, cards: List[DigestCard], subject: str, audience: str) -> str:

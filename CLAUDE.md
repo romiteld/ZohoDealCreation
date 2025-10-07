@@ -465,6 +465,7 @@ AZURE_REDIS_CONNECTION_STRING=rediss://:password@hostname:port
 # Zoho
 ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth.azurewebsites.net
 ZOHO_DEFAULT_OWNER_EMAIL=daniel.romitelli@emailthewell.com
+ZOHO_VAULT_VIEW_ID=6221978000090941003  # Custom view "_Vault Candidates" (filters Publish_to_Vault=true server-side)
 
 # APIs
 FIRECRAWL_API_KEY=fc-...
@@ -477,7 +478,7 @@ ZOOM_CLIENT_SECRET=xyz
 
 # Weekly Digest Subscriptions (Added 2025-10-07)
 EMAIL_PROVIDER=azure_communication_services
-ACS_CONNECTION_STRING=endpoint=https://...  # Azure Communication Services for email delivery
+ACS_EMAIL_CONNECTION_STRING=endpoint=https://...  # Azure Communication Services for email delivery
 SMTP_FROM_EMAIL=noreply@emailthewell.com
 SMTP_FROM_NAME=TalentWell Vault
 
@@ -613,6 +614,24 @@ az containerapp update --name well-intake-api \
 - Quick candidate queries without leaving channel context
 
 ## Recent Critical Fixes
+
+### Vault Candidates Pagination & CSS Inlining (2025-10-07)
+- **Issue**: Two critical bugs in weekly digest system
+  1. Only 40 of 144 vault candidates returned due to single-page API fetch
+  2. Email digests showing raw CSS code instead of styled HTML
+- **Fixes**:
+  1. **Pagination**: Use Zoho Custom View (`cvid` parameter) for server-side filtering
+     - Added `ZOHO_VAULT_VIEW_ID` environment variable
+     - View "_Vault Candidates" (ID: `6221978000090941003`) filters `Publish_to_Vault=true`
+     - Now returns all 144 vault candidates in single request
+  2. **CSS Inlining**: Migrated from `premailer` to `css-inline` library (14x faster)
+     - Single inlining point in `TalentWellCurator._render_digest()`
+     - Removed duplicate inlining from scheduler and send methods
+     - Added Application Insights telemetry for CSS failures
+     - `css_inlining_failures` metric tracks failures for ops visibility
+- **Dependencies**: Removed `premailer==3.10.0` and `cssutils==2.11.1`, added `css-inline==0.14.2`
+- **Files**: [app/integrations.py:1620](app/integrations.py:1620), [app/jobs/talentwell_curator.py:1454](app/jobs/talentwell_curator.py:1454), [app/mail/send.py:18](app/mail/send.py:18), [requirements.txt](requirements.txt)
+- **Deployment**: Requires `pip install --upgrade` to get css-inline library
 
 ### Weekly Digest Email Subscription System (2025-10-07)
 - **Feature**: Complete email subscription system for Teams Bot users

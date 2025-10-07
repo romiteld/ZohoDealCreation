@@ -15,6 +15,65 @@ import json
 
 logger = logging.getLogger(__name__)
 
+
+def inline_css_for_email(html_content: str) -> str:
+    """
+    Convert CSS <style> tags to inline styles for email client compatibility.
+
+    Azure Communication Services and most email clients require inline styles.
+    Uses css-inline (14x faster than premailer) to transform <style> blocks into style="" attributes.
+
+    Args:
+        html_content: HTML string with <style> tags
+
+    Returns:
+        HTML string with inlined CSS
+
+    Example:
+        Input:  <div class="card">Hello</div><style>.card{color:red}</style>
+        Output: <div class="card" style="color: red;">Hello</div>
+    """
+    try:
+        import css_inline
+
+        # Inline CSS using high-performance css-inline library
+        inlined_html = css_inline.inline(html_content)
+
+        logger.info(f"CSS inlined: {len(html_content)} → {len(inlined_html)} chars")
+
+        # Track success in Application Insights
+        if hasattr(logger, 'application_insights'):
+            logger.application_insights.track_event(
+                'CSSInliningSuccess',
+                properties={'library': 'css-inline', 'location': 'send_helper'},
+                measurements={'html_size_chars': len(inlined_html)}
+            )
+
+        return inlined_html
+
+    except Exception as e:
+        logger.error(f"CSS inlining failed: {e}", exc_info=True)
+
+        # CRITICAL: Track failure in Application Insights for immediate ops visibility
+        if hasattr(logger, 'application_insights'):
+            logger.application_insights.track_exception(
+                exception=e,
+                properties={
+                    'error_type': 'css_inlining_failure',
+                    'location': 'send_helper',
+                    'library': 'css-inline'
+                }
+            )
+            logger.application_insights.track_metric(
+                'css_inlining_failures',
+                value=1,
+                properties={'location': 'send_helper'}
+            )
+
+        # Fallback to original HTML if css-inline fails
+        return html_content
+
+
 try:
     from azure.communication.email import EmailClient
     from azure.identity import DefaultAzureCredential
@@ -356,32 +415,35 @@ class TalentWellMailer:
         self.default_recipients = ["brandon@emailthewell.com"]
         self.internal_recipients = ["brandon@emailthewell.com", "leadership@emailthewell.com"]
     
-    async def send_weekly_digest(self, 
-                                subject: str, 
+    async def send_weekly_digest(self,
+                                subject: str,
                                 html_content: str,
                                 recipient_email: Optional[str] = None,
                                 include_internal: bool = True,
                                 test_mode: bool = False) -> Dict[str, Any]:
         """Send TalentWell weekly digest with appropriate recipients."""
-        
+
         # Determine recipients
         primary_recipients = [recipient_email] if recipient_email else self.default_recipients.copy()
-        
+
         if include_internal and not test_mode:
             # Add internal recipients via BCC to avoid exposing emails
             bcc_recipients = [addr for addr in self.internal_recipients if addr not in primary_recipients]
         else:
             bcc_recipients = None
-        
+
         # Add test mode prefix
         if test_mode:
             subject = f"[TEST] {subject}"
-        
-        # Create message
+
+        # Inline CSS for email client compatibility (Azure Communication Services requires this)
+        html_inlined = inline_css_for_email(html_content)
+
+        # Create message with inlined CSS
         message = EmailMessage(
             to_addresses=primary_recipients,
             subject=subject,
-            html_body=html_content,
+            html_body=html_inlined,
             from_address=os.getenv('TALENTWELL_FROM_ADDRESS', 'DoNotReply@389fbf3b-307d-4882-af6a-d86d98329028.azurecomm.net'),
             from_name=os.getenv('TALENTWELL_FROM_NAME', 'TalentWell'),
             reply_to=os.getenv('TALENTWELL_REPLY_TO', 'steve@emailthewell.com'),

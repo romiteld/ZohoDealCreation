@@ -824,12 +824,17 @@ class ZohoClient:
         self.dc = os.getenv("ZOHO_DC", "com")
         self.base_url = f"https://www.zohoapis.{self.dc}/crm/v8"
         self.token_url = f"https://accounts.zoho.{self.dc}/oauth/v2/token"
-        
-        self.client_id = os.environ["ZOHO_CLIENT_ID"]
-        self.client_secret = os.environ["ZOHO_CLIENT_SECRET"]
-        self.refresh_token = os.environ["ZOHO_REFRESH_TOKEN"]
+
+        # OAuth credentials - optional if using OAuth proxy
+        self.client_id = os.getenv("ZOHO_CLIENT_ID")
+        self.client_secret = os.getenv("ZOHO_CLIENT_SECRET")
+        self.refresh_token = os.getenv("ZOHO_REFRESH_TOKEN")
         self.access_token = None
         self.expires_at = 0
+
+        # OAuth proxy URL for token retrieval (alternative to direct credentials)
+        self.use_oauth_proxy = bool(os.getenv("ZOHO_OAUTH_SERVICE_URL") and not self.client_id)
+        self.oauth_proxy_url = os.getenv("ZOHO_OAUTH_SERVICE_URL")
         
         # Owner configuration - should be set via environment variables
         # For production, this will be dynamically determined based on authorized users
@@ -839,24 +844,44 @@ class ZohoClient:
 
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     def _get_access_token(self) -> str:
-        """Get fresh access token using refresh token."""
+        """Get fresh access token using refresh token or OAuth proxy."""
         if self.access_token and time.time() < self.expires_at:
             return self.access_token
-            
+
+        # Use OAuth proxy if configured and no direct credentials
+        if self.use_oauth_proxy and self.oauth_proxy_url:
+            try:
+                proxy_url = f"{self.oauth_proxy_url}/api/token"
+                response = requests.get(proxy_url, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                self.access_token = data.get("access_token")
+                # Proxy tokens typically have 55min cache, set expires slightly earlier
+                self.expires_at = time.time() + 3000  # 50 minutes
+                logger.info("Retrieved access token from OAuth proxy")
+                return self.access_token
+            except Exception as e:
+                logger.error(f"Failed to get token from OAuth proxy: {e}")
+                raise
+
+        # Fall back to direct OAuth refresh token flow
+        if not self.refresh_token:
+            raise ValueError("No OAuth credentials or proxy URL configured")
+
         payload = {
             "refresh_token": self.refresh_token,
             "client_id": self.client_id,
             "client_secret": self.client_secret,
             "grant_type": "refresh_token"
         }
-        
+
         response = requests.post(self.token_url, data=payload)
         response.raise_for_status()
-        
+
         data = response.json()
         self.access_token = data["access_token"]
         self.expires_at = time.time() + data.get("expires_in", 3600) - 60
-        
+
         return self.access_token
 
     def strip_salutation(self, name: str) -> str:
@@ -1586,28 +1611,114 @@ class ZohoApiClient(ZohoClient):
                 module_name = os.getenv("ZCAND_MODULE", "Leads")
                 response = self._make_request("GET", f"{module_name}/search", data=None, params=params)
             else:
-                # No search criteria, just get all Leads
-                params = {
-                    "fields": "id,Full_Name,Email,Company,Designation,Current_Location,Candidate_Locator,Title,Current_Firm,Is_Mobile,Remote_Preference,Hybrid_Preference,Professional_Designations,Book_Size_AUM,Production_12mo,Desired_Comp,When_Available,Source,Source_Detail,Meeting_Date,Meeting_ID,Transcript_URL,Phone,Referrer_Name,Publish_to_Vault,Date_Published_to_Vault",
-                    "page": page,
-                    "per_page": limit
-                }
+                # No search criteria - use custom view for Vault Candidates
+                # Custom view ID for "_Vault Candidates" (filters to Publish_to_Vault=True server-side)
+                # This avoids the 2000 record pagination limit by using a filtered view
 
                 # Use Leads module (displayed as Candidates in Zoho)
                 module_name = os.getenv("ZCAND_MODULE", "Leads")
+                vault_view_id = os.getenv("ZOHO_VAULT_VIEW_ID", "6221978000090941003")
+
+                # Fetch using custom view (supports up to 2000 records with simple pagination)
+                params = {
+                    "fields": "id,Full_Name,Email,Company,Designation,Current_Location,Candidate_Locator,Title,Current_Firm,Is_Mobile,Remote_Preference,Hybrid_Preference,Professional_Designations,Book_Size_AUM,Production_12mo,Desired_Comp,When_Available,Source,Source_Detail,Meeting_Date,Meeting_ID,Transcript_URL,Phone,Referrer_Name,Publish_to_Vault,Date_Published_to_Vault",
+                    "cvid": vault_view_id,  # Use custom view to filter server-side
+                    "page": page,
+                    "per_page": limit if limit <= 200 else 200
+                }
+
                 response = self._make_request("GET", module_name, data=None, params=params)
-            
-            if response.get("data"):
-                candidates = response["data"]
-                logger.info(f"Found {len(candidates)} candidates matching criteria")
-                
+                candidates = response.get("data", [])
+                logger.info(f"Fetched {len(candidates)} candidates from Vault Candidates view (cvid={vault_view_id})")
+
+            if candidates:
+                # Normalize date bounds ONCE before loop for inclusive comparison
+                # CRITICAL: Use UTC-aware datetimes to match Zoho's offset-aware timestamps
+                normalized_from_date = None
+                normalized_to_date = None
+
+                if from_date or to_date:
+                    from datetime import time, timezone
+
+                    # Normalize from_date to start of day (00:00:00 UTC)
+                    if from_date:
+                        if isinstance(from_date, str):
+                            parsed_from = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+                            # Strip offset and make UTC-aware
+                            normalized_from_date = datetime.combine(
+                                parsed_from.date(), time.min, tzinfo=timezone.utc
+                            )
+                        elif isinstance(from_date, datetime):
+                            # Strip offset and make UTC-aware
+                            normalized_from_date = datetime.combine(
+                                from_date.date(), time.min, tzinfo=timezone.utc
+                            )
+                        else:  # date object
+                            normalized_from_date = datetime.combine(
+                                from_date, time.min, tzinfo=timezone.utc
+                            )
+
+                    # Normalize to_date to END of day (23:59:59 UTC) for inclusive comparison
+                    if to_date:
+                        if isinstance(to_date, str):
+                            parsed_to = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
+                            # If parsed time is midnight (00:00:00), push to end of day
+                            if parsed_to.time() == time.min:
+                                normalized_to_date = datetime.combine(
+                                    parsed_to.date(), time.max, tzinfo=timezone.utc
+                                )
+                            else:
+                                # Keep original time but ensure UTC-aware
+                                normalized_to_date = parsed_to.astimezone(timezone.utc)
+                        elif isinstance(to_date, datetime):
+                            # If time is midnight (00:00:00), push to end of day
+                            if to_date.time() == time.min:
+                                normalized_to_date = datetime.combine(
+                                    to_date.date(), time.max, tzinfo=timezone.utc
+                                )
+                            else:
+                                # Ensure UTC-aware
+                                normalized_to_date = to_date.astimezone(timezone.utc) if to_date.tzinfo else to_date.replace(tzinfo=timezone.utc)
+                        else:  # date object
+                            normalized_to_date = datetime.combine(
+                                to_date, time.max, tzinfo=timezone.utc
+                            )
+
+                    logger.debug(f"Date filter normalized: from={normalized_from_date}, to={normalized_to_date}")
+
                 # Extract relevant fields for each candidate
                 processed_candidates = []
                 for candidate in candidates:
-                    # Check if we should filter by Publish_to_Vault (note: field name is without "ed")
+                    # Filter by Publish_to_Vault field if specified
                     if published_to_vault is not None:
-                        # Skip candidates that don't match the Publish_to_Vault filter
                         if candidate.get("Publish_to_Vault", False) != published_to_vault:
+                            continue
+
+                    # Filter by Date_Published_to_Vault if date range specified
+                    if normalized_from_date or normalized_to_date:
+                        date_published_str = candidate.get("Date_Published_to_Vault")
+                        if not date_published_str:
+                            # Skip candidates without publish date when date filtering is active
+                            continue
+
+                        try:
+                            # Parse Zoho ISO date string: "2025-10-06T14:00:00" or "2025-10-06T14:00:00+00:00"
+                            date_published = datetime.fromisoformat(date_published_str.replace('Z', '+00:00'))
+
+                            # Ensure UTC-aware for safe comparison with normalized bounds
+                            if date_published.tzinfo is None:
+                                date_published = date_published.replace(tzinfo=timezone.utc)
+                            else:
+                                date_published = date_published.astimezone(timezone.utc)
+
+                            # Apply inclusive date range
+                            if normalized_from_date and date_published < normalized_from_date:
+                                continue
+                            if normalized_to_date and date_published > normalized_to_date:
+                                continue
+
+                        except (ValueError, AttributeError) as e:
+                            logger.warning(f"Invalid Date_Published_to_Vault '{date_published_str}' for candidate {candidate.get('Full_Name')}: {e}")
                             continue
 
                     # Filter by candidate type based on job title keywords

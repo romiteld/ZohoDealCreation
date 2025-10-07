@@ -8,9 +8,12 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from app.mail.send import EmailMessage, EmailDeliveryManager
+from app.mail.send import EmailMessage, EmailDeliveryManager, inline_css_for_email
 
 logger = logging.getLogger(__name__)
+
+# Note: inline_css_for_email is now imported from app.mail.send
+# This ensures consistency - all CSS inlining uses the same css-inline library
 
 
 async def send_html_email(
@@ -57,12 +60,15 @@ async def send_html_email(
         # Use environment variable for reply_to if not provided
         if not reply_to:
             reply_to = os.getenv('TALENTWELL_REPLY_TO', 'steve@emailthewell.com')
-        
-        # Create email message
+
+        # Inline CSS for email client compatibility (Azure Communication Services requires this)
+        html_inlined = inline_css_for_email(html)
+
+        # Create email message with inlined CSS
         message = EmailMessage(
             to_addresses=to,
             subject=subject,
-            html_body=html,
+            html_body=html_inlined,
             text_body=None,  # HTML-only for now
             from_address=from_address,
             from_name=from_name,

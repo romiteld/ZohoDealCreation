@@ -28,8 +28,9 @@ logger = logging.getLogger(__name__)
 
 # Email Configuration from environment
 EMAIL_PROVIDER = os.getenv("EMAIL_PROVIDER", "azure_communication_services")
-ACS_CONNECTION_STRING = os.getenv("ACS_CONNECTION_STRING")
-SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "noreply@emailthewell.com")
+ACS_CONNECTION_STRING = os.getenv("ACS_EMAIL_CONNECTION_STRING")  # Azure Communication Services connection string
+# Use Azure-managed domain until emailthewell.com is verified
+SMTP_FROM_EMAIL = os.getenv("SMTP_FROM_EMAIL", "DoNotReply@389fbf3b-307d-4882-af6a-d86d98329028.azurecomm.net")
 SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "TalentWell Vault")
 
 
@@ -39,7 +40,10 @@ class WeeklyDigestScheduler:
     """
 
     def __init__(self):
-        self.db_manager = DatabaseConnectionManager()
+        database_url = os.environ.get("DATABASE_URL")
+        if not database_url:
+            raise ValueError("DATABASE_URL environment variable is required")
+        self.db_manager = DatabaseConnectionManager(database_url)
         self.curator = TalentWellCurator()
 
     async def initialize(self):
@@ -49,7 +53,7 @@ class WeeklyDigestScheduler:
 
     async def close(self):
         """Close database connections."""
-        await self.db_manager.close()
+        # DatabaseConnectionManager handles its own cleanup via context managers
         logger.info("WeeklyDigestScheduler closed")
 
     async def get_subscriptions_due(self) -> List[Dict[str, Any]]:
@@ -113,11 +117,12 @@ class WeeklyDigestScheduler:
                 ignore_cooldown=True  # Allow scheduled deliveries
             )
 
+            # Curator returns: email_html, cards_metadata, subject
             return {
-                "digest_html": result.get("html", ""),
-                "cards": result.get("cards", []),
-                "total_candidates": len(result.get("cards", [])),
-                "subject_variant": result.get("subject_variant", "Weekly Vault Candidate Digest")
+                "digest_html": result.get("email_html", ""),
+                "cards": result.get("cards_metadata", []),
+                "total_candidates": len(result.get("cards_metadata", [])),
+                "subject_variant": result.get("subject", "Weekly Vault Candidate Digest")
             }
 
         except Exception as e:
@@ -147,32 +152,41 @@ class WeeklyDigestScheduler:
             Exception if email send fails
         """
         from azure.communication.email import EmailClient
-        from azure.communication.email import EmailAddress, EmailMessage
 
         if not ACS_CONNECTION_STRING:
             raise ValueError("ACS_CONNECTION_STRING not configured")
 
         try:
+            # Note: CSS should already be inlined by TalentWellCurator._render_digest()
+            # If called from other sources, ensure HTML has inline styles before calling this
+
             # Create email client
             email_client = EmailClient.from_connection_string(ACS_CONNECTION_STRING)
 
-            # Build message
-            message = EmailMessage(
-                sender=EmailAddress(
-                    email=SMTP_FROM_EMAIL,
-                    display_name=SMTP_FROM_NAME
-                ),
-                recipients=EmailAddress(email=to_email),
-                subject=subject,
-                html_content=html_body
-            )
+            # Build message using dictionary format (Azure Communication Services 1.0.0 API)
+            message = {
+                "content": {
+                    "subject": subject,
+                    "html": html_body  # CSS already inlined by curator
+                },
+                "recipients": {
+                    "to": [
+                        {
+                            "address": to_email,
+                            "displayName": to_email.split('@')[0]
+                        }
+                    ]
+                },
+                "senderAddress": SMTP_FROM_EMAIL
+            }
 
             # Send email (synchronous - will block)
             poller = email_client.begin_send(message)
             result = poller.result()
 
-            logger.info(f"Email sent to {to_email}: {subject} (message_id: {result.message_id})")
-            return result.message_id
+            message_id = result.get('messageId', 'unknown')
+            logger.info(f"Email sent to {to_email}: {subject} (message_id: {message_id})")
+            return message_id
 
         except Exception as e:
             logger.error(f"Azure Communication Services send failed to {to_email}: {e}", exc_info=True)
@@ -340,15 +354,18 @@ class WeeklyDigestScheduler:
 
             execution_time_ms = int((datetime.now() - start_time).total_seconds() * 1000)
 
-            # Send email
+            # Note: CSS already inlined by TalentWellCurator._render_digest()
+            # No need to inline again here - just send the digest HTML as-is
+
+            # Send email (CSS already inlined by curator)
             message_id = self.send_email(
                 to_email=delivery_email,
                 subject=subject,
-                html_body=digest_html,
+                html_body=digest_html,  # Already has inlined CSS from curator
                 user_name=subscription.get("user_name")
             )
 
-            # Update delivery record as sent
+            # Update delivery record as sent - store INLINED HTML in audit table
             async with self.db_manager.get_connection() as conn:
                 await conn.execute("""
                     UPDATE weekly_digest_deliveries

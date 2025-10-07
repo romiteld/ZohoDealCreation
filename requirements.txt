@@ -89,6 +89,7 @@ azure-mgmt-cdn==13.1.1
 # TalentWell email delivery
 azure-communication-email==1.0.0
 sendgrid==6.11.0
+css-inline==0.14.2  # 14x faster than premailer, better email client compatibility
 
 # TalentWell CSV processing
 pandas==2.0.3
