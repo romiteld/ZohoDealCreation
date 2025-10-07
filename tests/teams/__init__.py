@@ -1,0 +1,1 @@
+"""Teams bot tests."""

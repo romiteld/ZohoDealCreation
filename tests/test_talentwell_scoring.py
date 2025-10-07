@@ -7,13 +7,8 @@ import asyncio
 from typing import Dict, List, Any
 from unittest.mock import Mock, AsyncMock, patch
 
-# Import from the refactored file for testing
-import sys
-import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 from app.extract.evidence import BulletPoint
-from app.jobs.talentwell_curator_refactored import TalentWellCuratorRefactored
+from app.jobs.talentwell_curator import TalentWellCurator
 
 
 class TestBulletScoring:
@@ -21,7 +16,7 @@ class TestBulletScoring:
 
     def setup_method(self):
         """Set up test curator instance."""
-        self.curator = TalentWellCuratorRefactored()
+        self.curator = TalentWellCurator()
 
     def test_aum_scores_highest(self):
         """Test that AUM bullets score highest (10)."""
@@ -35,7 +30,7 @@ class TestBulletScoring:
             BulletPoint(text="Manages $750 million", confidence=0.95, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # All AUM bullets should score between 9.5 and 10
         assert all(score >= 9.5 for score in scores)
@@ -58,7 +53,7 @@ class TestBulletScoring:
             BulletPoint(text="Expanded assets significantly", confidence=0.95, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # Growth with percentage should score 9.0
         assert scores[0] == 9.0  # 150%
@@ -77,7 +72,7 @@ class TestBulletScoring:
             BulletPoint(text="Revenue: $750K", confidence=0.95, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # All production bullets should score 8.5
         assert all(score == 8.5 for score in scores)
@@ -93,7 +88,7 @@ class TestBulletScoring:
             BulletPoint(text="Award winner 3 years running", confidence=0.95, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # All rankings/achievements should score 8.0
         assert all(score == 8.0 for score in scores)
@@ -108,7 +103,7 @@ class TestBulletScoring:
             BulletPoint(text="Series 65 licensed", confidence=0.95, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # Multiple licenses should score 7.0
         assert scores[0] == 7.0  # Multiple with comma
@@ -126,7 +121,7 @@ class TestBulletScoring:
             BulletPoint(text="Experience: 5 years", confidence=0.95, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # 20+ years should score 5.5
         assert scores[0] == 5.5
@@ -146,7 +141,7 @@ class TestBulletScoring:
             BulletPoint(text="Compensation: $250k", confidence=0.9, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # Availability should score 3.0
         assert scores[0] == 3.0
@@ -170,7 +165,7 @@ class TestBulletScoring:
             BulletPoint(text="John Doe is the candidate", confidence=0.7, source="CRM"),
         ]
 
-        scores = [self.curator._score_bullet(b, deal) for b in test_bullets]
+        scores = [self.curator._score_bullet(b, deal=deal) for b in test_bullets]
 
         # All should score 0 (redundant with header)
         assert all(score == 0.0 for score in scores)
@@ -182,7 +177,7 @@ class TestBulletRanking:
     @pytest.mark.asyncio
     async def test_growth_metric_appears_first(self):
         """Test that growth metrics appear in top 3 when present."""
-        curator = TalentWellCuratorRefactored()
+        curator = TalentWellCurator()
 
         # Mock data with growth metric
         deal = {
@@ -203,7 +198,12 @@ class TestBulletRanking:
 
         transcript = "Grew the book from $150 million to $500 million in just 3 years."
 
-        bullets = await curator._generate_hard_skill_bullets(deal, enhanced_data, transcript)
+        bullets = await curator._generate_hard_skill_bullets(
+            deal,
+            enhanced_data,
+            transcript,
+            sentiment=None
+        )
 
         # Check that growth metric is in top 3
         growth_found = any('grew' in b.text.lower() or 'growth' in b.text.lower()
@@ -213,7 +213,7 @@ class TestBulletRanking:
     @pytest.mark.asyncio
     async def test_aum_prioritized_without_growth(self):
         """Test that AUM is #1 when no growth metrics present."""
-        curator = TalentWellCuratorRefactored()
+        curator = TalentWellCurator()
 
         # Mock the helper methods
         curator._parse_aum = lambda x: 2000000000 if '$2B' in x else 0
@@ -231,7 +231,12 @@ class TestBulletRanking:
 
         enhanced_data = {}
 
-        bullets = await curator._generate_hard_skill_bullets(deal, enhanced_data, None)
+        bullets = await curator._generate_hard_skill_bullets(
+            deal,
+            enhanced_data,
+            None,
+            sentiment=None
+        )
 
         # AUM should be first bullet
         assert len(bullets) > 0
@@ -240,7 +245,7 @@ class TestBulletRanking:
     @pytest.mark.asyncio
     async def test_location_filtered_out(self):
         """Test that location data never appears in bullets."""
-        curator = TalentWellCuratorRefactored()
+        curator = TalentWellCurator()
 
         deal = {
             'candidate_name': 'Alice Brown',
@@ -256,7 +261,12 @@ class TestBulletRanking:
             'production_annual': '$500K'
         }
 
-        bullets = await curator._generate_hard_skill_bullets(deal, enhanced_data, None)
+        bullets = await curator._generate_hard_skill_bullets(
+            deal,
+            enhanced_data,
+            None,
+            sentiment=None
+        )
 
         # Location should not be in bullets (score 0)
         location_found = any('location:' in b.text.lower() or 'chicago' in b.text.lower()
@@ -266,7 +276,7 @@ class TestBulletRanking:
     @pytest.mark.asyncio
     async def test_all_sources_collected_and_scored(self):
         """Test that bullets are collected from ALL sources then scored."""
-        curator = TalentWellCuratorRefactored()
+        curator = TalentWellCurator()
 
         # Mock helper methods
         curator._parse_aum = Mock(return_value=0)
@@ -310,7 +320,7 @@ class TestScoringExamples:
 
     def setup_method(self):
         """Set up test curator instance."""
-        self.curator = TalentWellCuratorRefactored()
+        self.curator = TalentWellCurator()
 
     def test_scoring_example_high_value_candidate(self):
         """Example: High-value candidate with growth and AUM."""
@@ -329,7 +339,7 @@ class TestScoringExamples:
 
         # Verify scoring
         for bullet, expected_score in bullets_with_scores:
-            actual_score = self.curator._score_bullet(bullet, deal)
+            actual_score = self.curator._score_bullet(bullet, deal=deal)
             assert actual_score == expected_score, f"Bullet '{bullet.text}' scored {actual_score}, expected {expected_score}"
 
         # Document the expected output order (top 5)

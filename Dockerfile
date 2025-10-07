@@ -5,11 +5,15 @@ FROM python:3.11-slim AS builder
 # Set working directory
 WORKDIR /app
 
-# Install build dependencies
+# Install build dependencies (headers + shared libs for premailer/lxml)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc \
     g++ \
     libpq-dev \
+    libxml2-dev \
+    libxslt1-dev \
+    libxml2 \
+    libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy and install requirements
@@ -33,6 +37,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     postgresql-client \
     libpq-dev \
     curl \
+    libxml2 \
+    libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
 # Set working directory

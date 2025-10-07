@@ -517,18 +517,19 @@ class TalentWellCurator:
                 target_quality=voit_config['target_quality']
             )
             
+            # Analyze candidate sentiment from transcript EARLY for bullet ranking
+            sentiment = await self._analyze_candidate_sentiment(transcript_text)
+
             # Generate hard-skill bullets (2-5 required)
             bullets = await self._generate_hard_skill_bullets(
                 deal,
                 voit_result.get('enhanced_data', {}),
-                transcript_text
+                transcript_text,
+                sentiment=sentiment
             )
 
             # Remove duplicates (e.g., "7 years" and "8 years")
             bullets = self._deduplicate_bullets(bullets)
-
-            # Analyze candidate sentiment from transcript EARLY for bullet ranking
-            sentiment = await self._analyze_candidate_sentiment(transcript_text)
 
             # CRITICAL: Ensure we have 3-5 bullets from ALL data sources
             if len(bullets) < 3:
@@ -909,111 +910,132 @@ class TalentWellCurator:
         scores = [b.confidence for b in bullets]
         return sum(scores) / len(scores)
 
-    def _score_bullet(self, bullet: BulletPoint, sentiment: Optional[Dict[str, Any]] = None) -> float:
-        """
-        Calculate composite score for bullet ranking with optional sentiment weighting.
+    def _score_bullet(
+        self,
+        bullet: BulletPoint,
+        *,
+        deal: Optional[Dict[str, Any]] = None,
+        sentiment: Optional[Dict[str, Any]] = None
+    ) -> float:
+        """Score a bullet using Brandon's priority hierarchy (0.0-10.0 scale)."""
 
-        Score factors:
-        1. Category priority (0.0-1.0): Financial metrics > Licenses > Experience > Availability > Compensation
-        2. Confidence score (0.0-1.0): From evidence extraction
-        3. Source reliability (0.0-1.0): CRM > Extraction > Inferred
-        4. Evidence quality bonus (+0.1 per evidence source, max +0.3)
-        5. Sentiment multiplier (0.85-1.15): Boosts/penalizes based on candidate sentiment
+        if not bullet or not getattr(bullet, "text", None):
+            return 0.0
 
-        Final score: base_score * sentiment_multiplier
-        Range: 0.0 to 1.0
-        """
-        # Category priority weights (aligned with Brandon's requirements)
-        category_priorities = {
-            'FINANCIAL_METRIC': 1.0,      # AUM, production (highest priority)
-            'GROWTH_ACHIEVEMENT': 0.95,   # Growth metrics
-            'PERFORMANCE_RANKING': 0.90,  # Rankings, performance
-            'CLIENT_METRIC': 0.85,        # Client count, retention
-            'LICENSES': 0.75,             # Professional credentials
-            'EDUCATION': 0.65,            # Degrees, certifications
-            'EXPERIENCE': 0.60,           # Years of experience
-            'AVAILABILITY': 0.40,         # Start date, notice period
-            'MOBILITY': 0.35,             # Location preferences
-            'COMPENSATION': 0.30          # Salary expectations (lowest priority)
-        }
-
-        # Filter header field duplicates - these should NEVER appear as bullets
         text_lower = bullet.text.lower()
-        header_duplicate_keywords = ['location:', 'current firm:', 'current role:', 'current company:']
-        if any(keyword in text_lower for keyword in header_duplicate_keywords):
-            return 0.0  # Zero score = filtered out during ranking
+        deal_context = deal or {}
 
-        # Determine category priority
-        # Auto-categorize if category not set or is default
-        if not hasattr(bullet, 'category') or bullet.category is None or \
-           (hasattr(bullet.category, 'name') and bullet.category.name == 'EXPERIENCE'):
-            # Auto-categorize based on bullet text
-            bullet.category = self.evidence_extractor.categorize_bullet(bullet.text)
+        # Filter duplicates of header information so we never surface redundant bullets
+        candidate_name = (deal_context.get('candidate_name') or '').lower()
+        company_name = (deal_context.get('company_name') or '').lower()
+        location_text = (deal_context.get('location') or '').lower()
 
-        category_name = bullet.category.name if hasattr(bullet, 'category') and bullet.category else 'EXPERIENCE'
-        category_priority = category_priorities.get(category_name, 0.5)
+        if any([
+            text_lower.startswith('location:'),
+            text_lower.startswith('company:'),
+            text_lower.startswith('firm:'),
+            candidate_name and candidate_name in text_lower,
+            company_name and company_name in text_lower,
+            location_text and location_text in text_lower,
+        ]):
+            return 0.0
 
-        # Confidence score
-        confidence = bullet.confidence if hasattr(bullet, 'confidence') else 0.5
+        base_score: float
 
-        # Source reliability
-        source_weights = {
-            'CRM': 1.0,          # Most reliable
-            'Extraction': 0.85,  # AI-extracted from transcript
-            'Inferred': 0.6      # Least reliable
-        }
-        source = bullet.source if hasattr(bullet, 'source') else 'Inferred'
-        source_reliability = source_weights.get(source, 0.7)
+        # AUM / Book size (highest value)
+        if any(keyword in text_lower for keyword in ['aum:', 'book size:', 'assets under management', 'manages $', 'aum ']):
+            if any(unit in text_lower for unit in ['billion', 'b ', 'b)', '$5b+', '$1b–', ' $1b', ' $2b', ' $3b', ' $4b', ' $5b']):
+                base_score = 10.0
+            elif any(unit in text_lower for unit in ['million', 'm ', 'm)', '$500m', '$750m', '$1m']):
+                base_score = 9.8
+            else:
+                base_score = 9.5
 
-        # Evidence quality bonus
-        evidence_count = len(bullet.evidence) if hasattr(bullet, 'evidence') and bullet.evidence else 0
-        evidence_bonus = min(0.3, evidence_count * 0.1)
+        # Growth metrics
+        elif any(keyword in text_lower for keyword in ['grew', 'growth', 'increased', 'expanded', 'doubled', 'tripled']):
+            base_score = 9.0 if '%' in text_lower or '→' in text_lower else 8.8
 
-        # Calculate base composite score
-        base_score = (
-            (category_priority * 0.4) +
-            (confidence * 0.4) +
-            (source_reliability * 0.15) +
-            (evidence_bonus * 0.05)
-        )
+        # Production / revenue
+        elif 'production:' in text_lower or 'annual production' in text_lower or 'revenue' in text_lower:
+            base_score = 8.5
 
-        # Apply sentiment multiplier if sentiment analysis available and feature flag enabled
-        sentiment_multiplier = 1.0  # Default: no adjustment
+        # Rankings & achievements
+        elif any(keyword in text_lower for keyword in [
+            'top', 'ranking', 'president', 'club', 'award', 'recognition',
+            'best', 'leader', '#1', 'number one', 'first place', 'top producer'
+        ]):
+            base_score = 8.0
+
+        # Client metrics
+        elif any(keyword in text_lower for keyword in ['client', 'household', 'relationship', 'retention']):
+            base_score = 7.5 if any(char.isdigit() for char in text_lower) else 7.2
+
+        # Licenses / designations
+        elif any(keyword in text_lower for keyword in [
+            'series', 'license', 'designation', 'cfa', 'cfp', 'cpa', 'chfc',
+            'clu', 'cima', 'cpwa', 'certified', 'chartered'
+        ]):
+            base_score = 7.0 if (',' in text_lower or ' and ' in text_lower) else 6.8
+
+        # Team / management experience
+        elif any(keyword in text_lower for keyword in ['team', 'manage', 'lead', 'supervise', 'oversee']):
+            base_score = 6.0
+
+        # Experience (years)
+        elif 'experience:' in text_lower or 'years' in text_lower:
+            years_match = re.search(r'(\d+)\+?\s*years?', text_lower)
+            if years_match:
+                years = int(years_match.group(1))
+                if years >= 20:
+                    base_score = 5.5
+                elif years >= 10:
+                    base_score = 5.2
+                else:
+                    base_score = 5.0
+            else:
+                base_score = 5.0
+
+        # Education
+        elif 'education:' in text_lower or any(keyword in text_lower for keyword in ['degree', 'mba', 'bachelor', 'master']):
+            base_score = 4.0
+
+        # Specialties / focus
+        elif any(keyword in text_lower for keyword in ['specialt', 'focus', 'expertise', 'specialized']):
+            base_score = 3.5
+
+        # Availability
+        elif text_lower.startswith('available') or 'available:' in text_lower or 'available in' in text_lower or 'start date' in text_lower:
+            base_score = 3.0
+
+        # Compensation
+        elif 'compensation:' in text_lower or 'target comp:' in text_lower or 'salary' in text_lower:
+            base_score = 2.0
+
+        else:
+            base_score = 1.0
+
+        # Apply sentiment multiplier when enabled to subtly reorder close scores
+        sentiment_multiplier = 1.0
         if sentiment and FEATURE_LLM_SENTIMENT:
-            # Sentiment score ranges from 0.0 (negative) to 1.0 (positive)
             sentiment_score = sentiment.get('score', 0.5)
             enthusiasm = sentiment.get('enthusiasm_score', 0.5)
             concerns = sentiment.get('concerns_detected', False)
 
-            # Calculate multiplier based on sentiment components
-            # Positive sentiment (0.7-1.0) → 1.05-1.15 boost
-            # Neutral sentiment (0.4-0.7) → 0.95-1.05 (minimal impact)
-            # Negative sentiment (0.0-0.4) → 0.85-0.95 penalty
             if sentiment_score >= 0.7:
-                # Positive candidate: boost by up to 15%
-                sentiment_multiplier = 1.05 + (sentiment_score - 0.7) * 0.33  # 0.7→1.05, 1.0→1.15
+                sentiment_multiplier = 1.05 + (sentiment_score - 0.7) * 0.33
             elif sentiment_score >= 0.4:
-                # Neutral: minimal impact
-                sentiment_multiplier = 0.95 + (sentiment_score - 0.4) * 0.33  # 0.4→0.95, 0.7→1.05
+                sentiment_multiplier = 0.95 + (sentiment_score - 0.4) * 0.33
             else:
-                # Negative candidate: penalty up to 15%
-                sentiment_multiplier = 0.85 + sentiment_score * 0.25  # 0.0→0.85, 0.4→0.95
+                sentiment_multiplier = 0.85 + sentiment_score * 0.25
 
-            # Additional enthusiasm boost (up to +5%)
-            enthusiasm_boost = min(0.05, enthusiasm * 0.05)
-            sentiment_multiplier += enthusiasm_boost
-
-            # Concern penalty (if red flags detected, -10%)
+            sentiment_multiplier += min(0.05, enthusiasm * 0.05)
             if concerns:
                 sentiment_multiplier *= 0.9
 
-            # Clamp multiplier to [0.85, 1.15] range
             sentiment_multiplier = max(0.85, min(1.15, sentiment_multiplier))
 
-        # Final score = base * sentiment
         final_score = base_score * sentiment_multiplier
-
-        return round(min(1.0, final_score), 3)  # Cap at 1.0
+        return round(max(0.0, min(10.0, final_score)), 1)
 
     async def _analyze_candidate_sentiment(self, transcript: Optional[str]) -> Dict[str, Any]:
         """
@@ -1210,7 +1232,14 @@ Response format (JSON only):
 
         return result
 
-    def _rank_bullets_by_score(self, bullets: List[BulletPoint], top_n: int = 5, sentiment: Optional[Dict[str, Any]] = None) -> List[BulletPoint]:
+    def _rank_bullets_by_score(
+        self,
+        bullets: List[BulletPoint],
+        top_n: int = 5,
+        *,
+        deal: Optional[Dict[str, Any]] = None,
+        sentiment: Optional[Dict[str, Any]] = None
+    ) -> List[BulletPoint]:
         """
         Rank bullets by composite score and return top N.
 
@@ -1223,6 +1252,7 @@ Response format (JSON only):
         Args:
             bullets: List of bullet points to rank
             top_n: Number of top bullets to return (default: 5)
+            deal: Optional deal context for de-duplication checks
             sentiment: Optional sentiment analysis results for weighting
         """
         if not bullets:
@@ -1230,7 +1260,7 @@ Response format (JSON only):
 
         # Score each bullet (with optional sentiment weighting)
         scored_bullets = [
-            (bullet, self._score_bullet(bullet, sentiment=sentiment))
+            (bullet, self._score_bullet(bullet, deal=deal, sentiment=sentiment))
             for bullet in bullets
         ]
 
@@ -1245,7 +1275,7 @@ Response format (JSON only):
         for i, (bullet, score) in enumerate(scored_bullets[:top_n]):
             category = bullet.category.name if hasattr(bullet, 'category') and bullet.category else 'UNKNOWN'
             source = bullet.source if hasattr(bullet, 'source') else 'Unknown'
-            logger.info(f"  #{i+1}: {score:.3f} [{category}] [{source}] {bullet.text[:60]}...")
+            logger.info(f"  #{i+1}: {score:.1f} [{category}] [{source}] {bullet.text[:60]}...")
 
         # Return top N bullets (without scores)
         return [bullet for bullet, score in scored_bullets[:top_n]]
@@ -1675,7 +1705,9 @@ Response format (JSON only):
         self,
         deal: Dict[str, Any],
         enhanced_data: Dict[str, Any],
-        transcript: Optional[str]
+        transcript: Optional[str],
+        *,
+        sentiment: Optional[Dict[str, Any]] = None
     ) -> List[BulletPoint]:
         """Generate 3-5 hard skill bullets from ALL available data sources."""
         bullets = []
@@ -1826,10 +1858,20 @@ Response format (JSON only):
         # Use score-based ranking with sentiment weighting to select the best bullets (max 5)
         if len(bullets) > 5:
             logger.info(f"Ranking {len(bullets)} bullets using composite scoring with sentiment weighting...")
-            bullets = self._rank_bullets_by_score(bullets, top_n=5, sentiment=sentiment)
+            bullets = self._rank_bullets_by_score(
+                bullets,
+                top_n=5,
+                deal=deal,
+                sentiment=sentiment
+            )
         elif bullets:
             # Even if we have <=5 bullets, rank them for consistency
-            bullets = self._rank_bullets_by_score(bullets, top_n=min(5, len(bullets)), sentiment=sentiment)
+            bullets = self._rank_bullets_by_score(
+                bullets,
+                top_n=min(5, len(bullets)),
+                deal=deal,
+                sentiment=sentiment
+            )
 
         return bullets
     

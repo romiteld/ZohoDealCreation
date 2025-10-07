@@ -61,20 +61,24 @@ class QueryEngine:
             # Step 1: Classify intent using GPT-5-mini
             intent = await self._classify_intent(query, is_executive)
 
-            # Step 2: Apply owner filter for non-executives
+            # Step 2: Handle transcript summary requests separately
+            if intent.get("intent_type") == "transcript_summary":
+                return await self._handle_transcript_summary(intent, is_executive)
+
+            # Step 3: Apply owner filter for non-executives
             if not is_executive:
                 intent["owner_filter"] = user_email
             else:
                 intent["owner_filter"] = None
 
-            # Step 3: Build and execute Zoho query
+            # Step 4: Build and execute Zoho query
             results, _ = await self._build_query(intent)
             logger.info(f"Querying Zoho CRM with intent: {intent}")
 
-            # Step 4: Format response
+            # Step 5: Format response
             response = await self._format_response(query, results, intent)
 
-            logger.info(f"Query completed: {len(results)} vault candidates returned")
+            logger.info(f"Query completed: {len(results)} results returned")
             return response
 
         except Exception as e:
@@ -103,26 +107,49 @@ class QueryEngine:
         system_prompt = """You are a query classifier for a recruitment CRM system.
 Classify the user's intent and extract key entities.
 
-Available tables:
-- deals: Candidate deals (columns: deal_id, deal_name, owner_email, stage, contact_name, account_name, created_at, modified_at)
-- deal_notes: Notes on deals (columns: deal_id, note_content, created_by, created_at)
-- meetings: Meetings related to deals (columns: deal_id, subject, meeting_date, attendees)
+Available data sources:
+- vault_candidates: Published candidates with Zoom interviews (candidate_name, candidate_locator, job_title, location, date_published, transcript_url, meeting_id)
+- deals: Candidate deals in pipeline (deal_name, stage, contact_name, account_name, owner_email, created_at, modified_at)
+
+Pipeline Stages (for deals):
+- Lead, Engaged, Meeting Booked, Meetings Completed, Awaiting Offer, Offer Extended, Closed Won, Closed Lost
+
+Intent Types:
+- count: Count records ("how many interviews", "total deals")
+- list: Show records ("show me candidates", "list deals")
+- aggregate: Group by field ("breakdown by stage", "deals by owner")
+- search: Find specific records ("find John Smith", "deals with Morgan Stanley")
+- transcript_summary: Zoom interview summary ("summarize interview with X")
 
 Return JSON with:
 {
-    "intent_type": "count|list|aggregate|search",
-    "table": "deals|deal_notes|meetings",
+    "intent_type": "count|list|aggregate|search|transcript_summary",
+    "table": "vault_candidates|deals",
     "entities": {
-        "timeframe": "7d|30d|this_week|last_month|Q4|etc",
-        "entity_name": "person/company name if mentioned",
-        "search_terms": ["keywords to search"]
+        "timeframe": "last week|this month|Q4|September|etc",
+        "entity_name": "person/company name",
+        "search_terms": ["keywords"],
+        "candidate_name": "if specific candidate name",
+        "candidate_locator": "if TWAV ID mentioned (e.g., TWAV118252)",
+        "meeting_id": "if Zoom meeting ID",
+        "stage": "pipeline stage if mentioned"
     },
     "filters": {
-        "stage": "if mentioned",
-        "created_after": "ISO date if timeframe specified",
-        "created_before": "ISO date if timeframe specified"
-    }
+        "stage": "pipeline stage filter",
+        "created_after": "ISO date start",
+        "created_before": "ISO date end"
+    },
+    "group_by": "field to aggregate on (stage, owner_email, etc)"
 }
+
+Examples:
+- "how many interviews last week" → intent_type: "count", table: "vault_candidates", timeframe: "last week"
+- "show me TWAV118252" → intent_type: "search", table: "vault_candidates", candidate_locator: "TWAV118252"
+- "who is TWAV118220" → intent_type: "search", table: "vault_candidates", candidate_locator: "TWAV118220"
+- "show me all deals in Meeting Booked stage" → intent_type: "list", table: "deals", stage: "Meeting Booked"
+- "breakdown of deals by stage" → intent_type: "aggregate", table: "deals", group_by: "stage"
+- "find deals with Goldman Sachs" → intent_type: "search", table: "deals", search_terms: ["Goldman Sachs"]
+- "summarize interview with John Smith" → intent_type: "transcript_summary", candidate_name: "John Smith"
 """
 
         user_prompt = f"""Classify this query: "{query}"
@@ -164,23 +191,65 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
         Returns:
             Tuple of (candidates_list, empty_params_list)
         """
-        from app.integrations import ZohoClient
+        from app.integrations import ZohoApiClient
 
         intent_type = intent.get("intent_type", "list")
         filters = intent.get("filters", {})
         owner_filter = intent.get("owner_filter")
 
-        zoho_client = ZohoClient()
+        zoho_client = ZohoApiClient()
 
         # Build Zoho query filters
         zoho_filters = {
             "published_to_vault": True,  # Always query vault
-            "limit": 100
+            "limit": 500  # ✅ Handle all 144 vault candidates with headroom
         }
 
         # Apply owner filtering for regular users (not executives)
         if owner_filter:
             zoho_filters["owner"] = owner_filter
+
+        # Get entities from intent
+        entities = intent.get("entities", {})
+
+        # Parse timeframe entity and convert to dates
+        if "timeframe" in entities and entities["timeframe"]:
+            timeframe = str(entities["timeframe"]).lower().replace(" ", "_")  # Normalize "last week" → "last_week"
+            now = datetime.now()
+
+            # 7-day windows
+            if any(token in timeframe for token in ["7d", "last_week", "this_week"]):
+                filters["created_after"] = (now - timedelta(days=7)).isoformat()
+                filters["created_before"] = now.isoformat()
+
+            # 30-day windows
+            elif "30d" in timeframe:
+                filters["created_after"] = (now - timedelta(days=30)).isoformat()
+                filters["created_before"] = now.isoformat()
+
+            # Current month
+            elif "this_month" in timeframe:
+                filters["created_after"] = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
+                filters["created_before"] = now.isoformat()
+
+            # Previous month
+            elif "last_month" in timeframe:
+                last_month = now.replace(day=1) - timedelta(days=1)
+                filters["created_after"] = last_month.replace(day=1, hour=0, minute=0, second=0).isoformat()
+                filters["created_before"] = last_month.replace(hour=23, minute=59, second=59).isoformat()
+
+            # Q4 (Oct-Dec)
+            elif "q4" in timeframe:
+                filters["created_after"] = datetime(now.year, 10, 1).isoformat()
+                filters["created_before"] = datetime(now.year, 12, 31, 23, 59, 59).isoformat()
+
+            # Specific months
+            elif "september" in timeframe or "sep" in timeframe:
+                filters["created_after"] = f"{now.year}-09-01"
+                filters["created_before"] = f"{now.year}-09-30"
+            elif "october" in timeframe or "oct" in timeframe:
+                filters["created_after"] = f"{now.year}-10-01"
+                filters["created_before"] = f"{now.year}-10-31"
 
         # Date filters
         if "created_after" in filters:
@@ -190,9 +259,18 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
             zoho_filters["to_date"] = filters["created_before"]
 
         # Candidate type filter (advisors, c_suite, global)
-        entities = intent.get("entities", {})
         if "candidate_type" in entities:
             zoho_filters["candidate_type"] = entities["candidate_type"]
+
+        # Candidate Locator ID filter (exact match, highest priority)
+        if "candidate_locator" in entities and entities["candidate_locator"]:
+            # Don't need large limit for exact ID match
+            zoho_filters["limit"] = 10
+            logger.info(f"Searching by Candidate Locator ID: {entities['candidate_locator']}")
+
+        # Increase limit if searching by name (need more candidates to search through)
+        elif "entity_name" in entities or "candidate_name" in entities:
+            zoho_filters["limit"] = 500  # Fetch more for name search
 
         # Remove None values
         zoho_filters = {k: v for k, v in zoho_filters.items() if v is not None}
@@ -201,6 +279,29 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
 
         try:
             results = await zoho_client.query_candidates(**zoho_filters)
+
+            # Client-side filtering by candidate locator ID (exact match, highest priority)
+            candidate_locator = entities.get("candidate_locator")
+            if candidate_locator and results:
+                locator_upper = candidate_locator.upper()
+                filtered = [
+                    c for c in results
+                    if c.get('candidate_locator', '').upper() == locator_upper
+                ]
+                logger.info(f"Filtered {len(results)} → {len(filtered)} by Candidate Locator '{candidate_locator}'")
+                results = filtered
+
+            # Client-side filtering by candidate name if specified
+            elif entities.get("entity_name") or entities.get("candidate_name"):
+                search_name = entities.get("entity_name") or entities.get("candidate_name")
+                search_lower = search_name.lower()
+                filtered = [
+                    c for c in results
+                    if search_lower in c.get('candidate_name', '').lower()
+                ]
+                logger.info(f"Filtered {len(results)} → {len(filtered)} by name '{search_name}'")
+                results = filtered
+
             return results, []
         except Exception as e:
             logger.error(f"Error querying Zoho CRM: {e}", exc_info=True)
@@ -231,9 +332,10 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
 
         # Format based on intent type
         if intent_type == "count":
-            count = results[0]["count"]
+            # For Zoho API, results is a list of candidates, not a count aggregate
+            count = len(results)
             return {
-                "text": f"Found {count} {table}.",
+                "text": f"Found {count} vault candidates.",
                 "card": None,
                 "data": {"count": count}
             }
@@ -285,11 +387,211 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
 
+            else:  # Default: vault candidates (from Zoho API)
+                text = f"Found {len(results)} vault candidates:\n\n"
+                for i, row in enumerate(results[:5], 1):
+                    name = row.get('candidate_name', 'Unknown')
+                    title = row.get('job_title', 'No title')
+                    location = row.get('location', 'No location')
+                    pub_date = row.get('date_published', 'No date')
+                    transcript = row.get('transcript_url', '')
+
+                    text += f"{i}. {name}\n"
+                    text += f"   Title: {title}\n"
+                    text += f"   Location: {location}\n"
+                    text += f"   Published: {pub_date}\n"
+                    if transcript:
+                        text += f"   📹 Zoom transcript available\n"
+                    text += "\n"
+
+                if len(results) > 5:
+                    text += f"\n...and {len(results) - 5} more."
+
             return {
                 "text": text,
                 "card": None,  # TODO: Implement Adaptive Card formatting
-                "data": [dict(row) for row in results]
+                "data": results if isinstance(results, list) else [dict(row) for row in results]
             }
+
+    async def _handle_transcript_summary(
+        self,
+        intent: Dict[str, Any],
+        is_executive: bool
+    ) -> Dict[str, Any]:
+        """
+        Handle transcript summary requests by fetching Zoom transcript and generating AI summary.
+
+        Args:
+            intent: Classified intent with candidate_name or meeting_id
+            is_executive: Whether user has executive access
+
+        Returns:
+            Response dict with summary text
+        """
+        from app.zoom_client import ZoomClient
+        from app.integrations import ZohoApiClient
+
+        entities = intent.get("entities", {})
+        candidate_name = entities.get("candidate_name")
+        meeting_id = entities.get("meeting_id")
+
+        logger.info(f"Transcript summary request: candidate={candidate_name}, meeting_id={meeting_id}")
+
+        try:
+            # Step 1: Get candidate from vault if name provided
+            transcript_url = None
+            if candidate_name:
+                zoho_client = ZohoApiClient()
+                candidates = await zoho_client.query_candidates(
+                    published_to_vault=True,
+                    limit=500  # Fetch more to find the right candidate
+                )
+
+                # Find matching candidate
+                matching_candidate = None
+                for candidate in candidates:
+                    name = candidate.get('candidate_name', '').lower()
+                    if candidate_name.lower() in name:
+                        matching_candidate = candidate
+                        break
+
+                if not matching_candidate:
+                    return {
+                        "text": f"❌ Could not find candidate '{candidate_name}' in vault.",
+                        "card": None,
+                        "data": None
+                    }
+
+                transcript_url = matching_candidate.get('transcript_url')
+                meeting_id = matching_candidate.get('meeting_id')
+
+                if not transcript_url and not meeting_id:
+                    return {
+                        "text": f"❌ No Zoom recording found for {matching_candidate.get('candidate_name')}.",
+                        "card": None,
+                        "data": None
+                    }
+
+            # Step 2: Fetch transcript from Zoom
+            zoom_client = ZoomClient()
+
+            if meeting_id:
+                transcript = await zoom_client.fetch_zoom_transcript_for_meeting(meeting_id)
+            elif transcript_url:
+                # Extract meeting ID from Zoom URL (multiple formats supported)
+                import re
+
+                # Try multiple URL patterns:
+                # 1. /rec/share/{id}
+                # 2. /rec/player/{id}
+                # 3. ?startTime= before the share token
+                patterns = [
+                    r'/rec/share/([^/?&]+)',
+                    r'/rec/player/([^/?&]+)',
+                    r'share/([^/?&]+)',
+                ]
+
+                extracted_meeting_id = None
+                for pattern in patterns:
+                    match = re.search(pattern, transcript_url)
+                    if match:
+                        extracted_meeting_id = match.group(1)
+                        logger.info(f"Extracted meeting ID '{extracted_meeting_id}' from URL using pattern: {pattern}")
+                        break
+
+                if extracted_meeting_id:
+                    transcript = await zoom_client.fetch_zoom_transcript_for_meeting(extracted_meeting_id)
+                else:
+                    # Fallback: Use stored meeting_id hash if available
+                    if meeting_id:
+                        logger.warning(f"Could not extract meeting ID from URL, falling back to stored meeting_id: {meeting_id}")
+                        transcript = await zoom_client.fetch_zoom_transcript_for_meeting(meeting_id)
+                    else:
+                        return {
+                            "text": f"❌ Could not extract meeting ID from Zoom URL: {transcript_url[:100]}",
+                            "card": None,
+                            "data": None
+                        }
+            else:
+                return {
+                    "text": "❌ No meeting ID or transcript URL provided.",
+                    "card": None,
+                    "data": None
+                }
+
+            if not transcript:
+                return {
+                    "text": "❌ Could not fetch Zoom transcript. It may not be available yet.",
+                    "card": None,
+                    "data": None
+                }
+
+            # Step 3: Generate AI summary using GPT-5-mini
+            summary = await self._summarize_transcript(transcript, candidate_name)
+
+            return {
+                "text": summary,
+                "card": None,
+                "data": {"transcript_length": len(transcript), "summary": summary}
+            }
+
+        except Exception as e:
+            logger.error(f"Error handling transcript summary: {e}", exc_info=True)
+            return {
+                "text": f"❌ Error generating transcript summary: {str(e)}",
+                "card": None,
+                "data": None
+            }
+
+    async def _summarize_transcript(
+        self,
+        transcript: str,
+        candidate_name: Optional[str] = None
+    ) -> str:
+        """
+        Generate AI summary of Zoom transcript using GPT-5-mini.
+
+        Args:
+            transcript: Full Zoom transcript text
+            candidate_name: Optional candidate name for context
+
+        Returns:
+            Formatted summary text
+        """
+        system_prompt = """You are an expert recruiter analyzing interview transcripts.
+Provide a concise summary highlighting:
+1. **Candidate Background**: Current role, firm, book size/AUM
+2. **Key Qualifications**: Designations, production, achievements
+3. **Motivations**: Why they're seeking a new opportunity
+4. **Location Preferences**: Mobility, relocation preferences
+5. **Red Flags**: Any concerns or dealbreakers
+
+Keep the summary under 500 words and use bullet points for readability."""
+
+        user_prompt = f"""Summarize this interview transcript:
+
+{transcript[:8000]}  # Limit to ~8K chars to fit context window
+
+Candidate: {candidate_name if candidate_name else 'Unknown'}"""
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=1,  # CRITICAL: Always use temperature=1 for GPT-5 models
+                max_tokens=1000
+            )
+
+            summary = response.choices[0].message.content
+            logger.info(f"Generated transcript summary ({len(summary)} chars)")
+            return f"📹 **Interview Summary**\n\n{summary}"
+
+        except Exception as e:
+            logger.error(f"Error generating summary: {e}", exc_info=True)
+            return f"❌ Error generating summary: {str(e)}"
 
 
 async def process_natural_language_query(

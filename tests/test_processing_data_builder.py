@@ -5,13 +5,12 @@ This file contains tests to validate that the processing data construction
 matches the PostgreSQL schema requirements and handles all edge cases properly.
 """
 
-import json
 import pytest
 from datetime import datetime
 from typing import Dict, Any
 
-from .models import EmailPayload, ExtractedData, ProcessingResult
-from .processing_data_builder import (
+from app.models import EmailPayload, ExtractedData, ProcessingResult
+from app.processing_data_builder import (
     ProcessingDataBuilder,
     ProcessingDataValidator,
     create_processing_data,

@@ -1211,3 +1211,74 @@ async def get_analytics_data(
     except Exception as e:
         logger.error(f"Error getting analytics: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/admin/test-digest-delivery")
+async def test_digest_delivery(
+    user_id: str = "test-user-daniel",
+    api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
+    """
+    Test endpoint to trigger immediate digest delivery for a specific user.
+    Bypasses the scheduled time check.
+
+    Requires API key authentication.
+    """
+    # Verify API key
+    expected_api_key = os.getenv("API_KEY")
+    if not expected_api_key or api_key != expected_api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+    try:
+        from app.jobs.weekly_digest_scheduler import WeeklyDigestScheduler
+
+        # Create scheduler instance
+        scheduler = WeeklyDigestScheduler()
+        await scheduler.initialize()
+
+        # Get user preferences
+        async with scheduler.db_manager.get_connection() as conn:
+            user_prefs = await conn.fetchrow("""
+                SELECT
+                    user_id, user_email, user_name, delivery_email,
+                    default_audience, max_candidates_per_digest, timezone
+                FROM teams_user_preferences
+                WHERE user_id = $1 AND subscription_active = true
+            """, user_id)
+
+            if not user_prefs:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"No active subscription found for user {user_id}"
+                )
+
+            # Convert to dict for processing
+            subscription = dict(user_prefs)
+
+        # Process the subscription (this will generate and send the digest)
+        logger.info(f"Test delivery triggered for user {user_id}")
+        success = await scheduler.process_subscription(subscription)
+
+        await scheduler.close()
+
+        if success:
+            return {
+                "status": "success",
+                "message": f"Digest delivery triggered for {user_id}",
+                "user_id": user_id,
+                "delivery_email": subscription["delivery_email"],
+                "timestamp": datetime.now().isoformat()
+            }
+        else:
+            return {
+                "status": "failed",
+                "message": "Digest generation or delivery failed",
+                "user_id": user_id,
+                "timestamp": datetime.now().isoformat()
+            }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Test delivery error: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Test delivery failed: {str(e)}")

@@ -472,3 +472,250 @@ class TestAsyncZoho:
         # Test the methods exist
         assert hasattr(zoho_client, 'query_candidates_with_fields')
         assert hasattr(zoho_client, 'query_candidates_with_retry')
+
+    @pytest.mark.asyncio
+    async def test_date_boundary_inclusive(self, zoho_client):
+        """Test that to_date is inclusive for same-day publishes (Chad Terry bug)."""
+        # Simulate Chad Terry published Oct 6 at 2PM
+        sample_candidates = {
+            'data': [
+                {
+                    'id': 'TWAV118252',
+                    'Full_Name': 'Chad Terry',
+                    'Email': 'chad.terry@example.com',
+                    'Designation': 'Senior Financial Advisor',
+                    'Company': 'Morgan Stanley',
+                    'Current_Location': 'New York, NY',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-06T14:00:00',  # Oct 6 at 2PM
+                    'Candidate_Locator': 'TWAV118252'
+                },
+                {
+                    'id': 'TWAV118253',
+                    'Full_Name': 'John Smith',
+                    'Email': 'john.smith@example.com',
+                    'Designation': 'Wealth Advisor',
+                    'Company': 'Wells Fargo',
+                    'Current_Location': 'San Francisco, CA',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-01T09:00:00',  # Oct 1 at 9AM
+                    'Candidate_Locator': 'TWAV118253'
+                }
+            ],
+            'info': {'count': 2, 'more_records': False}
+        }
+
+        with patch.object(zoho_client, '_make_request') as mock_request:
+            mock_request.return_value = sample_candidates
+
+            # Query with date range: Oct 1 - Oct 7 (date-only strings as scheduler passes)
+            from datetime import date
+            to_date = date(2025, 10, 7)  # This becomes "2025-10-07" → midnight
+            from_date = to_date - timedelta(days=6)  # Oct 1
+
+            results = await zoho_client.query_candidates(
+                from_date=from_date,
+                to_date=to_date,
+                published_to_vault=True
+            )
+
+            # CRITICAL: Chad Terry published Oct 6 at 2PM should be INCLUDED
+            # even though to_date="2025-10-07" parses to midnight (00:00:00)
+            assert len(results) == 2, f"Expected 2 candidates, got {len(results)}"
+
+            chad_terry = next((c for c in results if c['candidate_name'] == 'Chad Terry'), None)
+            assert chad_terry is not None, "Chad Terry should be included (published Oct 6 at 2PM)"
+            assert chad_terry['candidate_locator'] == 'TWAV118252'
+
+            john_smith = next((c for c in results if c['candidate_name'] == 'John Smith'), None)
+            assert john_smith is not None, "John Smith should be included (published Oct 1 at 9AM)"
+
+    @pytest.mark.asyncio
+    async def test_timezone_aware_dates(self, zoho_client):
+        """Test that timezone-aware dates from Zoho don't cause TypeError on comparison."""
+        # Zoho may return UTC offset strings: "2025-10-06T14:00:00+00:00"
+        sample_candidates = {
+            'data': [
+                {
+                    'id': 'TZ001',
+                    'Full_Name': 'UTC Candidate',
+                    'Email': 'utc@example.com',
+                    'Designation': 'Advisor',
+                    'Company': 'Test Corp',
+                    'Current_Location': 'London, UK',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-06T14:00:00+00:00',  # UTC offset
+                    'Candidate_Locator': 'TZ001'
+                },
+                {
+                    'id': 'TZ002',
+                    'Full_Name': 'Naive Candidate',
+                    'Email': 'naive@example.com',
+                    'Designation': 'Advisor',
+                    'Company': 'Test Corp',
+                    'Current_Location': 'New York, NY',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-05T10:00:00',  # No offset
+                    'Candidate_Locator': 'TZ002'
+                },
+                {
+                    'id': 'TZ003',
+                    'Full_Name': 'Z Suffix Candidate',
+                    'Email': 'zsuffix@example.com',
+                    'Designation': 'Advisor',
+                    'Company': 'Test Corp',
+                    'Current_Location': 'Paris, France',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-04T08:00:00Z',  # Z suffix = UTC
+                    'Candidate_Locator': 'TZ003'
+                }
+            ],
+            'info': {'count': 3, 'more_records': False}
+        }
+
+        with patch.object(zoho_client, '_make_request') as mock_request:
+            mock_request.return_value = sample_candidates
+
+            # Query with date range that should include all three
+            from datetime import date
+            to_date = date(2025, 10, 7)
+            from_date = date(2025, 10, 1)
+
+            # This should NOT raise TypeError despite mixed offset-aware/naive strings
+            results = await zoho_client.query_candidates(
+                from_date=from_date,
+                to_date=to_date,
+                published_to_vault=True
+            )
+
+            # All three should be included (no TypeError crash)
+            assert len(results) == 3, f"Expected 3 candidates, got {len(results)}"
+
+            utc_candidate = next((c for c in results if c['candidate_name'] == 'UTC Candidate'), None)
+            assert utc_candidate is not None, "UTC offset candidate should be included"
+
+            naive_candidate = next((c for c in results if c['candidate_name'] == 'Naive Candidate'), None)
+            assert naive_candidate is not None, "Naive timestamp candidate should be included"
+
+            z_candidate = next((c for c in results if c['candidate_name'] == 'Z Suffix Candidate'), None)
+            assert z_candidate is not None, "Z-suffix UTC candidate should be included"
+
+    @pytest.mark.asyncio
+    async def test_date_boundary_edge_cases(self, zoho_client):
+        """Test date boundary edge cases: midnight publishes, invalid dates, missing dates."""
+        sample_candidates = {
+            'data': [
+                {
+                    'id': '1',
+                    'Full_Name': 'Midnight Publish',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-07T00:00:00',  # Exactly midnight on to_date
+                    'Candidate_Locator': 'TEST1'
+                },
+                {
+                    'id': '2',
+                    'Full_Name': 'End of Day',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-07T23:59:59',  # Last second of to_date
+                    'Candidate_Locator': 'TEST2'
+                },
+                {
+                    'id': '3',
+                    'Full_Name': 'Missing Date',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': None,  # Missing date should be skipped
+                    'Candidate_Locator': 'TEST3'
+                },
+                {
+                    'id': '4',
+                    'Full_Name': 'Invalid Date',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': 'not-a-date',  # Invalid format
+                    'Candidate_Locator': 'TEST4'
+                },
+                {
+                    'id': '5',
+                    'Full_Name': 'Before Range',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-09-30T12:00:00',  # Before from_date
+                    'Candidate_Locator': 'TEST5'
+                },
+                {
+                    'id': '6',
+                    'Full_Name': 'After Range',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-08T00:00:01',  # After to_date
+                    'Candidate_Locator': 'TEST6'
+                }
+            ],
+            'info': {'count': 6, 'more_records': False}
+        }
+
+        with patch.object(zoho_client, '_make_request') as mock_request:
+            mock_request.return_value = sample_candidates
+
+            from datetime import date
+            results = await zoho_client.query_candidates(
+                from_date=date(2025, 10, 1),
+                to_date=date(2025, 10, 7),
+                published_to_vault=True
+            )
+
+            # Should include: midnight, end of day (both within range)
+            # Should exclude: missing date, invalid date, before range, after range
+            assert len(results) == 2, f"Expected 2 valid candidates, got {len(results)}"
+
+            included_names = [c['candidate_name'] for c in results]
+            assert 'Midnight Publish' in included_names, "Midnight on to_date should be included"
+            assert 'End of Day' in included_names, "23:59:59 on to_date should be included"
+
+            # Verify exclusions
+            assert 'Missing Date' not in included_names
+            assert 'Invalid Date' not in included_names
+            assert 'Before Range' not in included_names
+            assert 'After Range' not in included_names
+
+    @pytest.mark.asyncio
+    async def test_date_normalization_string_datetime_date(self, zoho_client):
+        """Test date normalization handles string, datetime, and date objects."""
+        sample_candidates = {
+            'data': [
+                {
+                    'id': '1',
+                    'Full_Name': 'Test Candidate',
+                    'Publish_to_Vault': True,
+                    'Date_Published_to_Vault': '2025-10-05T15:00:00',
+                    'Candidate_Locator': 'TEST'
+                }
+            ],
+            'info': {'count': 1, 'more_records': False}
+        }
+
+        with patch.object(zoho_client, '_make_request') as mock_request:
+            mock_request.return_value = sample_candidates
+
+            from datetime import date, datetime
+
+            # Test with date objects (scheduler uses this)
+            results_date = await zoho_client.query_candidates(
+                from_date=date(2025, 10, 1),
+                to_date=date(2025, 10, 7),
+                published_to_vault=True
+            )
+            assert len(results_date) == 1, "date objects should work"
+
+            # Test with datetime objects
+            results_datetime = await zoho_client.query_candidates(
+                from_date=datetime(2025, 10, 1),
+                to_date=datetime(2025, 10, 7),
+                published_to_vault=True
+            )
+            assert len(results_datetime) == 1, "datetime objects should work"
+
+            # Test with ISO strings
+            results_string = await zoho_client.query_candidates(
+                from_date="2025-10-01",
+                to_date="2025-10-07",
+                published_to_vault=True
+            )
+            assert len(results_string) == 1, "ISO date strings should work"
