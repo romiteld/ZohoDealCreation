@@ -262,12 +262,13 @@ This system introduces **two groundbreaking algorithms** that optimize AI conten
 
 ## Architecture
 
-- FastAPI orchestrates LangGraph pipelines within Azure Container Apps, while the Outlook add-in provides the human-in-the-loop control surface.
+- FastAPI orchestrates LangGraph pipelines within Azure Container Apps, while the Outlook add-in and Teams Bot provide human-in-the-loop control surfaces.
 - **VoIT and C³ algorithms** operate as cross-cutting optimization layers across ALL processing paths - from email intake to candidate vault publishing.
 - Redis and PostgreSQL back persistent enrichment results; Azure Blob storage captures attachments and static assets.
 - Azure OpenAI, Firecrawl, Apollo, and Azure Maps supply enrichment signals, with OAuth proxying and Azure Key Vault safeguarding secrets.
 - GitHub Actions delivers container builds and warm cache scripts to keep endpoints responsive.
-- The **Candidate Vault Agent** is a specific feature that aggregates CRM data and produces formatted digest cards, leveraging the VoIT/C³ optimization layer.
+- The **Candidate Vault Agent** aggregates CRM data and produces formatted digest cards, leveraging the VoIT/C³ optimization layer.
+- The **Teams Bot** provides natural language query interface and weekly digest subscriptions, with Azure Communication Services handling email delivery.
 
 > **Diagram legend** - blue: operators, dark gray: platform services, amber: data stores, violet: third-party integrations, green: observability & ops, **coral: revolutionary VoIT/C³ optimization algorithms** (novel contribution).
 
@@ -292,9 +293,10 @@ flowchart TB
 
     subgraph ClientApps["Client Applications"]
         OutlookAddin["Outlook Add-in\n(Office.js, Manifest v1.1)"]
+        TeamsBot["Teams Bot\n(TalentWell Assistant)\nNatural language queries + digests"]
         WebHooks["Webhook Handlers\n(Inbound integrations)"]
     end
-    class OutlookAddin,WebHooks platform;
+    class OutlookAddin,TeamsBot,WebHooks platform;
 
     subgraph AzureInfra["Azure Infrastructure"]
         FrontDoor["Azure Front Door CDN\nwell-intake-api-dnajdub4azhjcgc3"]
@@ -315,11 +317,12 @@ flowchart TB
         FastAPI["FastAPI Core\n50+ endpoints"]
         OAuth["OAuth Proxy\n(Zoho token broker)"]
         VaultAgent["Candidate Vault Agent\n(CRM aggregation + formatting)"]
+        DigestScheduler["Weekly Digest Scheduler\n(Hourly background job)"]
         LangGraph["LangGraph Pipeline\n(Extract → Research → Validate)"]
         StreamAPI["Streaming API\n(WebSocket + SSE)"]
         GraphClient["Microsoft Graph Client\n(Email integration)"]
     end
-    class FastAPI,OAuth,VaultAgent,LangGraph,StreamAPI,GraphClient platform;
+    class FastAPI,OAuth,VaultAgent,DigestScheduler,LangGraph,StreamAPI,GraphClient platform;
 
     subgraph DataLayer["Data & Persistence Layer"]
         RedisCache["Azure Cache for Redis\n(C³ + standard cache)"]
@@ -341,9 +344,10 @@ flowchart TB
 
     subgraph ExternalSystems["External Business Systems"]
         ZohoCRM["Zoho CRM v8 API\n(Accounts/Contacts/Deals)"]
-        EmailProviders["Email Providers\n(SendGrid/Azure Comm)"]
+        ACS["Azure Communication Services\n(Weekly digest emails)"]
+        TeamsAPI["Microsoft Teams API\n(Bot Framework + Adaptive Cards)"]
     end
-    class ZohoCRM,EmailProviders external;
+    class ZohoCRM,ACS,TeamsAPI external;
 
     subgraph CICD["CI/CD & DevOps"]
         GitHub["GitHub Actions\n(3 workflows)"]
@@ -353,10 +357,12 @@ flowchart TB
 
     %% User flows
     Recruiter -->|"Open add-in"| OutlookAddin
-    Advisor -->|"Receive digests"| EmailProviders
+    Recruiter -->|"Chat + commands"| TeamsBot
+    Advisor -->|"Receive digests"| ACS
 
     %% Client to infrastructure
     OutlookAddin -->|"HTTPS/WSS"| FrontDoor
+    TeamsBot -->|"Bot Framework"| FrontDoor
     WebHooks -->|"HTTPS"| FrontDoor
     Admin -->|"Admin APIs"| FrontDoor
 
@@ -372,6 +378,7 @@ flowchart TB
     FastAPI -->|"Orchestrate"| LangGraph
     FastAPI -->|"Stream"| StreamAPI
     FastAPI -->|"Vault ops"| VaultAgent
+    FastAPI -->|"Schedule digests"| DigestScheduler
     FastAPI -->|"Read emails"| GraphClient
 
     %% Novel algorithms as cross-cutting layer
@@ -400,8 +407,10 @@ flowchart TB
 
     %% External systems
     FastAPI -->|"Create records"| ZohoCRM
+    FastAPI -->|"Bot messages"| TeamsAPI
     OAuth -->|"Token refresh"| ZohoCRM
-    VaultAgent -->|"Send digests"| EmailProviders
+    VaultAgent -->|"Query candidates"| ZohoCRM
+    DigestScheduler -->|"Send emails"| ACS
 
     %% CI/CD
     GitHub -->|"Build + Push"| ACR
