@@ -9,9 +9,11 @@ import logging
 import json
 import os
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncpg
 from openai import AsyncOpenAI
+
+from app.integrations import ZohoApiClient
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +25,51 @@ EXECUTIVE_USERS = [
 ]
 
 
+ADVISOR_KEYWORDS = {
+    "advisor",
+    "advisors",
+    "wealth",
+    "financial advisor",
+    "wealth advisor",
+    "investment advisor",
+    "book of business"
+}
+
+EXECUTIVE_KEYWORDS = {
+    "c-suite",
+    "c suite",
+    "executive",
+    "executives",
+    "vp",
+    "vice president",
+    "chief",
+    "ceo",
+    "cfo",
+    "coo",
+    "cto",
+    "president",
+    "director"
+}
+
+VAULT_SIGNALS = {
+    "talentwell",
+    "vault",
+    "vault digest",
+    "talentwell digest",
+    "published to the vault",
+    "published in the vault",
+    "vault locator",
+}
+
+CANDIDATE_SIGNALS = {
+    "candidate",
+    "candidates",
+    "talent",
+    "advisor digest",
+    "candidate digest",
+}
+
+
 class QueryEngine:
     """Natural language query engine with role-based access control."""
 
@@ -30,6 +77,7 @@ class QueryEngine:
         """Initialize query engine with OpenAI client."""
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = "gpt-5-mini"  # Fast model for query classification
+        self.zoho_client = ZohoApiClient()
 
     async def process_query(
         self,
@@ -60,6 +108,10 @@ class QueryEngine:
 
             # Step 1: Classify intent using GPT-4o
             intent = await self._classify_intent(query, is_executive)
+
+            # Special handling for vault candidate queries
+            if intent.get("table") == "vault_candidates":
+                return await self._process_candidate_intent(query, intent)
 
             # Step 2: Apply owner filter for non-executives
             if not is_executive:
@@ -116,11 +168,12 @@ Available tables:
 - deals: Candidate deals (columns: deal_id, deal_name, owner_email, stage, contact_name, account_name, created_at, modified_at)
 - deal_notes: Notes on deals (columns: deal_id, note_content, created_by, created_at)
 - meetings: Meetings related to deals (columns: deal_id, subject, meeting_date, attendees)
+- vault_candidates: TalentWell Vault candidates (columns: candidate_name, job_title, company_name, location, published_to_vault, date_published)
 
 Return JSON with:
 {
     "intent_type": "count|list|aggregate|search",
-    "table": "deals|deal_notes|meetings",
+    "table": "deals|deal_notes|meetings|vault_candidates",
     "entities": {
         "timeframe": "7d|30d|this_week|last_month|Q4|etc",
         "entity_name": "person/company name if mentioned",
@@ -129,7 +182,9 @@ Return JSON with:
     "filters": {
         "stage": "if mentioned",
         "created_after": "ISO date if timeframe specified",
-        "created_before": "ISO date if timeframe specified"
+        "created_before": "ISO date if timeframe specified",
+        "candidate_type": "advisors|c_suite if specified",
+        "vault_only": "true if user asks about candidates in the vault"
     }
 }
 """
@@ -151,6 +206,16 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
 
             intent = json.loads(response.choices[0].message.content)
             logger.debug(f"Classified intent: {intent}")
+
+            if intent.get("table") == "vault_candidates" or self._is_candidate_query(query):
+                intent["table"] = "vault_candidates"
+                if "filters" not in intent:
+                    intent["filters"] = {}
+                inferred_type = self._infer_candidate_type(query)
+                if inferred_type and not intent["filters"].get("candidate_type"):
+                    intent["filters"]["candidate_type"] = inferred_type
+                if "vault_only" not in intent["filters"] and "vault" in query.lower():
+                    intent["filters"]["vault_only"] = True
             return intent
 
         except Exception as e:
@@ -158,7 +223,7 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
             # Fallback to basic intent
             return {
                 "intent_type": "search",
-                "table": "deals",
+                "table": "vault_candidates" if self._is_candidate_query(query) else "deals",
                 "entities": {"search_terms": [query]},
                 "filters": {}
             }
@@ -357,11 +422,194 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
 
+        return {
+            "text": text,
+            "card": None,  # TODO: Implement Adaptive Card formatting
+            "data": [dict(row) for row in results]
+        }
+
+    def _is_candidate_query(self, query: str) -> bool:
+        """Determine if the query is about TalentWell Vault candidates."""
+        lowered = query.lower()
+
+        if any(signal in lowered for signal in VAULT_SIGNALS):
+            return True
+
+        if any(signal in lowered for signal in CANDIDATE_SIGNALS):
+            return True
+
+        if "vault" in lowered and any(keyword in lowered for keyword in (ADVISOR_KEYWORDS | EXECUTIVE_KEYWORDS)):
+            return True
+
+        return False
+
+    def _infer_candidate_type(self, query: str) -> Optional[str]:
+        """Infer candidate audience (advisors vs executives) from query keywords."""
+        lowered = query.lower()
+        if any(keyword in lowered for keyword in ADVISOR_KEYWORDS):
+            return "advisors"
+        if any(keyword in lowered for keyword in EXECUTIVE_KEYWORDS):
+            return "c_suite"
+        return None
+
+    def _resolve_timeframe(self, timeframe: Optional[str]) -> Optional[Tuple[datetime, datetime]]:
+        """Convert timeframe shorthand into a concrete date range."""
+        if not timeframe:
+            return None
+
+        now = datetime.now(timezone.utc)
+        normalized = timeframe.lower()
+
+        if normalized in {"7d", "last_7_days", "past_week"}:
+            return now - timedelta(days=7), now
+        if normalized in {"30d", "last_30_days", "past_month"}:
+            return now - timedelta(days=30), now
+        if normalized in {"this_week"}:
+            start = now - timedelta(days=now.weekday())
+            return start, now
+        if normalized in {"last_week"}:
+            end = now - timedelta(days=now.weekday() + 1)
+            start = end - timedelta(days=6)
+            return start, end
+        if normalized in {"this_month"}:
+            start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            return start, now
+        if normalized in {"last_month"}:
+            first_of_this_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            end = first_of_this_month - timedelta(seconds=1)
+            start = (first_of_this_month - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            return start, end
+        if normalized in {"ytd", "year_to_date"}:
+            start = now.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+            return start, now
+
+        # Handle explicit day counts like "14d"
+        if normalized.endswith("d") and normalized[:-1].isdigit():
+            days = int(normalized[:-1])
+            return now - timedelta(days=days), now
+
+        return None
+
+    def _parse_candidate_date(self, value: Optional[str]) -> Optional[datetime]:
+        """Parse candidate date strings from Zoho into datetime objects."""
+        if not value:
+            return None
+
+        value = value.strip()
+        iso_candidate = value[:-1] + '+00:00' if value.endswith('Z') else value
+        try:
+            parsed = datetime.fromisoformat(iso_candidate)
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=timezone.utc)
+            else:
+                parsed = parsed.astimezone(timezone.utc)
+            return parsed
+        except ValueError:
+            pass
+
+        for fmt in ("%Y-%m-%d", "%m/%d/%Y", "%Y-%m-%d %H:%M:%S"):
+            try:
+                parsed = datetime.strptime(value, fmt)
+                return parsed.replace(tzinfo=timezone.utc)
+            except ValueError:
+                continue
+        return None
+
+    async def _process_candidate_intent(self, query: str, intent: Dict[str, Any]) -> Dict[str, Any]:
+        """Handle natural language queries targeting TalentWell Vault candidates."""
+        filters = intent.get("filters", {})
+        candidate_type = filters.get("candidate_type") or self._infer_candidate_type(query)
+        vault_only = filters.get("vault_only") or ("vault" in query.lower())
+        timeframe = self._resolve_timeframe(intent.get("entities", {}).get("timeframe"))
+
+        try:
+            candidates = await self.zoho_client.query_candidates(
+                limit=200,
+                published_to_vault=True if vault_only else None,
+                candidate_type=candidate_type
+            )
+        except Exception as exc:
+            logger.error(f"Error fetching candidates from Zoho: {exc}", exc_info=True)
             return {
-                "text": text,
-                "card": None,  # TODO: Implement Adaptive Card formatting
-                "data": [dict(row) for row in results]
+                "text": f"❌ I couldn't retrieve candidate data from Zoho: {exc}",
+                "card": None,
+                "data": None
             }
+
+        # Filter by timeframe if requested
+        if timeframe:
+            start, end = timeframe
+
+            def published_within_range(candidate: Dict[str, Any]) -> bool:
+                published_raw = candidate.get("date_published") or candidate.get("Date_Published_to_Vault")
+                published_at = self._parse_candidate_date(published_raw)
+                if not published_at:
+                    return False
+                return start <= published_at <= end
+
+            candidates = [c for c in candidates if published_within_range(c)]
+
+        # Ensure deterministic ordering by published date (newest first)
+        def sort_key(candidate: Dict[str, Any]) -> datetime:
+            published_raw = candidate.get("date_published") or candidate.get("Date_Published_to_Vault")
+            published_at = self._parse_candidate_date(published_raw)
+            return published_at or datetime.min.replace(tzinfo=timezone.utc)
+
+        candidates.sort(key=sort_key, reverse=True)
+
+        if not candidates:
+            audience_desc = "candidates"
+            if candidate_type == "advisors":
+                audience_desc = "advisor candidates"
+            elif candidate_type == "c_suite":
+                audience_desc = "executive candidates"
+            return {
+                "text": f"I didn't find any {audience_desc} matching your query.",
+                "card": None,
+                "data": []
+            }
+
+        count = len(candidates)
+        summary_parts = [f"Found {count} candidate{'s' if count != 1 else ''}"]
+        if candidate_type == "advisors":
+            summary_parts.append("focused on the advisors audience")
+        elif candidate_type == "c_suite":
+            summary_parts.append("focused on the executive audience")
+        if vault_only:
+            summary_parts.append("published to the Vault")
+        if timeframe:
+            start, end = timeframe
+            summary_parts.append(f"between {start.date()} and {end.date()}")
+
+        summary = ' '.join(summary_parts) + "."
+
+        top_lines = []
+        for candidate in candidates[:5]:
+            name = candidate.get("candidate_name") or "Unnamed Candidate"
+            role = candidate.get("job_title") or "Role unknown"
+            location = candidate.get("location")
+            locator = candidate.get("candidate_locator")
+            line = f"• {name} – {role}"
+            if location:
+                line += f" ({location})"
+            if locator:
+                line += f" [Locator: {locator}]"
+            top_lines.append(line)
+
+        if top_lines:
+            summary += "\n\nTop matches:\n" + "\n".join(top_lines)
+
+        if len(candidates) > 5:
+            summary += f"\n\n…and {len(candidates) - 5} more candidates match your filters."
+
+        # Limit data payload to prevent oversized responses
+        data_preview = candidates[:50]
+
+        return {
+            "text": summary,
+            "card": None,
+            "data": data_preview
+        }
 
 
 async def process_natural_language_query(
