@@ -15,7 +15,7 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.3",
+            "version": "1.2",
             "body": [
                 {
                     "type": "TextBlock",
@@ -104,7 +104,7 @@ def create_help_card() -> Dict[str, Any]:
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.3",
+            "version": "1.2",
             "body": [
                 {
                     "type": "TextBlock",
@@ -344,7 +344,7 @@ def create_digest_preview_card(
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.3",
+            "version": "1.2",
             "body": [
                 {
                     "type": "TextBlock",
@@ -457,7 +457,7 @@ def create_error_card(error_message: str) -> Dict[str, Any]:
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.3",
+            "version": "1.2",
             "body": [
                 {
                     "type": "TextBlock",
@@ -509,7 +509,7 @@ def create_preferences_card(
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
             "type": "AdaptiveCard",
-            "version": "1.3",
+            "version": "1.2",
             "body": [
                 {
                     "type": "TextBlock",

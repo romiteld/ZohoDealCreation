@@ -1610,6 +1610,8 @@ class ZohoApiClient(ZohoClient):
                 # Use Leads module (displayed as Candidates in Zoho)
                 module_name = os.getenv("ZCAND_MODULE", "Leads")
                 response = self._make_request("GET", f"{module_name}/search", data=None, params=params)
+                candidates = response.get("data", [])
+                logger.info(f"Fetched {len(candidates)} candidates from search query")
             else:
                 # No search criteria - use custom view for Vault Candidates
                 # Custom view ID for "_Vault Candidates" (filters to Publish_to_Vault=True server-side)

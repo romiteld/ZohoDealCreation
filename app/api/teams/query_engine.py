@@ -119,7 +119,9 @@ Intent Types:
 - list: Show records ("show me candidates", "list deals")
 - aggregate: Group by field ("breakdown by stage", "deals by owner")
 - search: Find specific records ("find John Smith", "deals with Morgan Stanley")
-- transcript_summary: Zoom interview summary ("summarize interview with X")
+- transcript_summary: Zoom interview summary for ONE specific candidate ("summarize interview with John Smith")
+
+IMPORTANT: "summarize candidates" or "summarize advisors" = list intent (not transcript_summary)
 
 Return JSON with:
 {
@@ -149,6 +151,7 @@ Examples:
 - "show me all deals in Meeting Booked stage" → intent_type: "list", table: "deals", stage: "Meeting Booked"
 - "breakdown of deals by stage" → intent_type: "aggregate", table: "deals", group_by: "stage"
 - "find deals with Goldman Sachs" → intent_type: "search", table: "deals", search_terms: ["Goldman Sachs"]
+- "summarize financial advisor candidates" → intent_type: "list", table: "vault_candidates", candidate_type: "advisors"
 - "summarize interview with John Smith" → intent_type: "transcript_summary", candidate_name: "John Smith"
 """
 
@@ -320,12 +323,14 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
             Dict with text, card (optional), and data
         """
         intent_type = intent.get("intent_type", "list")
-        table = intent.get("table", "deals")
+        table = intent.get("table", "vault_candidates") or "vault_candidates"  # Default to vault_candidates, handle None
 
         # Handle empty results
         if not results:
+            # More helpful error message with table name
+            table_display = "vault candidates" if table == "vault_candidates" else table
             return {
-                "text": f"I didn't find any {table} matching your query.",
+                "text": f"I didn't find any {table_display} matching your query.",
                 "card": None,
                 "data": None
             }
@@ -473,7 +478,16 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
                     }
 
             # Step 2: Fetch transcript from Zoom
-            zoom_client = ZoomClient()
+            try:
+                zoom_client = ZoomClient()
+            except ValueError as e:
+                # Zoom credentials not configured
+                logger.warning(f"Zoom credentials not configured: {e}")
+                return {
+                    "text": "❌ Zoom transcript summaries are temporarily unavailable. Please contact your administrator to configure Zoom integration.",
+                    "card": None,
+                    "data": None
+                }
 
             if meeting_id:
                 transcript = await zoom_client.fetch_zoom_transcript_for_meeting(meeting_id)
