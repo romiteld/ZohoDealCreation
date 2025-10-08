@@ -1,0 +1,25 @@
+{
+  "Designation": null,
+  "Owner": {
+    "name": "Ally Hansen",
+    "id": "6221978000077981003",
+    "email": "ally.hansen@emailthewell.com"
+  },
+  "Modified_Time": "2025-10-07T16:59:26-04:00",
+  "Created_Time": "2025-10-07T12:47:20-04:00",
+  "Pipeline_Stage": "Not Yet Scheduled",
+  "Mobility_Details": "Okay with some travel - Up to 50% travel",
+  "Direct_Job": null,
+  "First_Name": "Jacob",
+  "Full_Name": "Jacob Fremgen",
+  "Interview_Recording_Link": "https://us02web.zoom.us/rec/share/zRQ1TP1LU5FhcDn24kWkCkv6LKDhMD3Yueri3eGqeRkY6QhJvhqVh5z-a682yg1P.W_R_8v4BNnJSNChL?startTime=1759854941000&pwd=DDhYhapBOZeFORURzAAAIAAAACvbMgvIrJSOvNHd_Sm5z7TbQsZBHNeEt-egMj9OuodD7FC8xO40gd1jS7oTy84fVjAwMDAwNA",
+  "Candidate_Locator": "TWAV118275",
+  "Last_Name": "Fremgen",
+  "Locked__s": false,
+  "Current_Location": "Austin, TX",
+  "$locked_for_me": false,
+  "id": "6221978000104128038",
+  "Date_Entered_Stage": "2025-10-07",
+  "Is_Mobile": "No",
+  "Date_Published_to_Vault": "2025-10-07"
+}

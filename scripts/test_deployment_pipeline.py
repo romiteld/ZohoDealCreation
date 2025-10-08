@@ -24,7 +24,7 @@ import xml.etree.ElementTree as ET
 sys.path.append(str(Path(__file__).parent.parent))
 
 try:
-    from app.redis_cache_manager import RedisCacheManager
+    from well_shared.cache.redis_manager import RedisCacheManager
     REDIS_AVAILABLE = True
 except ImportError:
     print("Warning: RedisCacheManager not available for testing")

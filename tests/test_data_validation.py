@@ -35,7 +35,7 @@ load_dotenv(env_path)
 from app.models import EmailPayload, ExtractedData, ProcessingResult
 from app.integrations import PostgreSQLClient, ZohoApiClient
 from app.business_rules import BusinessRulesEngine, format_deal_name, determine_source
-from app.redis_cache_manager import RedisCacheManager
+from well_shared.cache.redis_manager import RedisCacheManager
 
 class TestDataConsistency:
     """Test data consistency across all storage methods"""

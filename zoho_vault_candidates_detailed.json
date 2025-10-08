@@ -1,0 +1,356 @@
+[
+  {
+    "id": "6221978000104128038",
+    "Full_Name": "Jacob Fremgen",
+    "Candidate_Locator": "TWAV118275",
+    "Email": null,
+    "Desired_Comp": "$300k to 350k OTE for the year",
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 0,
+    "notes": []
+  },
+  {
+    "id": "6221978000103916046",
+    "Full_Name": "Chad Terry",
+    "Candidate_Locator": "TWAV118252",
+    "Email": "chadt124@gmail.com",
+    "Desired_Comp": "$400k+ OTE first year",
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 0,
+    "notes": []
+  },
+  {
+    "id": "6221978000103702003",
+    "Full_Name": "Johnathon Thomas",
+    "Candidate_Locator": "TWAV118220",
+    "Email": "NO_EMAIL_FOUND@johnathon.thomas.com",
+    "Desired_Comp": "70+",
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 0,
+    "notes": []
+  },
+  {
+    "id": "6221978000103575001",
+    "Full_Name": "Ruxin (Clair) Duan",
+    "Candidate_Locator": "TWAV118203",
+    "Email": "Clementineduan@gmail.com",
+    "Desired_Comp": null,
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 1,
+    "notes": [
+      {
+        "Owner": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Modified_Time": "2025-09-29T16:06:55-04:00",
+        "$attachments": null,
+        "$field_states": null,
+        "Created_Time": "2025-09-29T16:06:55-04:00",
+        "Parent_Id": {
+          "name": "Ruxin (Clair) Duan",
+          "id": "6221978000103575001"
+        },
+        "$editable": true,
+        "$se_module": "Leads",
+        "$is_shared_to_client": false,
+        "Modified_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "$size": null,
+        "$state": "save",
+        "$voice_note": false,
+        "id": "6221978000103546175",
+        "Created_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Note_Title": "Discovery Call",
+        "Note_Content": "Clair comes to us with 1.5 years of hands on tax experience, however, throughout her internships and working experience, she has a combined total of 5 years. She is currently in Minneapolis and is looking to move closer to Chicago (and willing to settle in Paxton) as this is where the bulk of her friends and family are.<span style=\"color:rgba(0, 0, 0, 0.9);\"> She holds a Master\u2019s degree in Accounting from the University of Illinois Urbana-Champaign with a specialization in taxation and business analysis. She can interview immediately &amp; relocating will be no issue. She's on the market for 82k. </span>"
+      }
+    ]
+  },
+  {
+    "id": "6221978000103563001",
+    "Full_Name": "Chad Akselrad",
+    "Candidate_Locator": "TWAV118201",
+    "Email": "cia106@gmail.com",
+    "Desired_Comp": "$100k base + bonus",
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 0,
+    "notes": []
+  },
+  {
+    "id": "6221978000103009008",
+    "Full_Name": "Richard Selzler",
+    "Candidate_Locator": "TWAV118187",
+    "Email": "richard.selzler@gmail.com",
+    "Desired_Comp": null,
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 1,
+    "notes": [
+      {
+        "Owner": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Modified_Time": "2025-10-02T18:22:55-04:00",
+        "$attachments": null,
+        "$field_states": null,
+        "Created_Time": "2025-09-25T10:25:30-04:00",
+        "Parent_Id": {
+          "name": "Richard Selzler",
+          "id": "6221978000103009008"
+        },
+        "$editable": true,
+        "$se_module": "Leads",
+        "$is_shared_to_client": false,
+        "Modified_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "$size": null,
+        "$state": "save",
+        "$voice_note": false,
+        "id": "6221978000103043063",
+        "Created_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Note_Title": "Discovery Call",
+        "Note_Content": "<span style=\"color:rgb(0, 0, 0);\">Richard comes to us with 13 years in the financial services firm. He has been with Morgan Stanley for the last 2.5 years and is now feeling stagnant and looking for growth. Along with this, their compensation plan has changed. Richard has served as the point of contact for new clients, converted new leads, scheduled discovery calls, written plans/delivered plans. Strong sales and closing skills. He looks to obtain his CFP, skills, and knowledge. Richard's book of business, just this year is about 27M with about 100 clients (non-transferable).  He prefers to work with leadership that will help him build knowledge, advance his career, and support him.</span>"
+      }
+    ]
+  },
+  {
+    "id": "6221978000102949016",
+    "Full_Name": "Eric Yunker",
+    "Candidate_Locator": "TWAV118190",
+    "Email": "eric.yunker@outlook.com",
+    "Desired_Comp": null,
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 2,
+    "notes": [
+      {
+        "Owner": {
+          "name": "Lindsay Kuhel",
+          "id": "6221978000047822001",
+          "email": "lindsay.kuhel@emailthewell.com"
+        },
+        "Modified_Time": "2025-10-02T23:44:44-04:00",
+        "$attachments": null,
+        "$field_states": null,
+        "Created_Time": "2025-10-02T21:25:49-04:00",
+        "Parent_Id": {
+          "name": "Eric Yunker",
+          "id": "6221978000102949016"
+        },
+        "$editable": true,
+        "$se_module": "Leads",
+        "$is_shared_to_client": false,
+        "Modified_By": {
+          "name": "Lindsay Kuhel",
+          "id": "6221978000047822001",
+          "email": "lindsay.kuhel@emailthewell.com"
+        },
+        "$size": null,
+        "$state": "save",
+        "$voice_note": false,
+        "id": "6221978000103788278",
+        "Created_By": {
+          "name": "Lindsay Kuhel",
+          "id": "6221978000047822001",
+          "email": "lindsay.kuhel@emailthewell.com"
+        },
+        "Note_Title": "Feedback",
+        "Note_Content": "crm[user#6221978000100225032#898434912]crm Really like him! Has Eric mentioned any leadership experience in sales? He only has 2 yeras of exp. from what I see. If you can get this answered, I am happy to submit him!"
+      },
+      {
+        "Owner": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Modified_Time": "2025-09-25T16:24:41-04:00",
+        "$attachments": null,
+        "$field_states": null,
+        "Created_Time": "2025-09-25T16:24:41-04:00",
+        "Parent_Id": {
+          "name": "Eric Yunker",
+          "id": "6221978000102949016"
+        },
+        "$editable": true,
+        "$se_module": "Leads",
+        "$is_shared_to_client": false,
+        "Modified_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "$size": null,
+        "$state": "save",
+        "$voice_note": false,
+        "id": "6221978000103043098",
+        "Created_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Note_Title": "Discovery Call",
+        "Note_Content": "Eric has a passion for sales and finances. He has just completed his master's and is looking for a position that aligns with what he wants. He is currently responsible for sales, process management, cold/warm outreach, building rapport, client retention, and more. He is strong in the closing aspect and enjoys bringing in new business. Eric is looking to grow with a faith-based, motivating, and front line leadership."
+      }
+    ]
+  },
+  {
+    "id": "6221978000102799025",
+    "Full_Name": "John Mbiti",
+    "Candidate_Locator": "TWAV118177",
+    "Email": "johnmbiti@outlook.com",
+    "Desired_Comp": null,
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 1,
+    "notes": [
+      {
+        "Owner": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Modified_Time": "2025-09-24T19:02:11-04:00",
+        "$attachments": null,
+        "$field_states": null,
+        "Created_Time": "2025-09-24T19:02:11-04:00",
+        "Parent_Id": {
+          "name": "John Mbiti",
+          "id": "6221978000102799025"
+        },
+        "$editable": true,
+        "$se_module": "Leads",
+        "$is_shared_to_client": false,
+        "Modified_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "$size": null,
+        "$state": "save",
+        "$voice_note": false,
+        "id": "6221978000102741302",
+        "Created_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Note_Title": "Discovery Call",
+        "Note_Content": "John comes to us with 18 years of experience in the financial services industry. In June 2024, John's previous employer, BNY Mellon, decided to do a reorganization of  operations and unfortunately, John's position as senior vice president was eliminated.  He has been with Kubes Enterprises as a consultant, since July 2024, however, he would like to get back into client relations as this better aligns with what he is looking for. John is seasoned in high level financial planning, budgeting, forecasting, sales, leading FDNA, investment decisions, and much more. John is looking for a challenging environment within a faith-based company that will allow him to not only grow, but also utilize his skills and knowledge to train other. <br><span><br></span>"
+      }
+    ]
+  },
+  {
+    "id": "6221978000102789299",
+    "Full_Name": "Emily Fain",
+    "Candidate_Locator": "TWAV118174",
+    "Email": "emilyffain@gmail.com",
+    "Desired_Comp": "Incentive comp motivated, base $175-200K",
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 1,
+    "notes": [
+      {
+        "Owner": {
+          "name": "Lindsay Kuhel",
+          "id": "6221978000047822001",
+          "email": "lindsay.kuhel@emailthewell.com"
+        },
+        "Modified_Time": "2025-09-24T15:09:17-04:00",
+        "$attachments": null,
+        "$field_states": null,
+        "Created_Time": "2025-09-24T15:09:17-04:00",
+        "Parent_Id": {
+          "name": "Emily Fain",
+          "id": "6221978000102789299"
+        },
+        "$editable": true,
+        "$se_module": "Leads",
+        "$is_shared_to_client": false,
+        "Modified_By": {
+          "name": "Lindsay Kuhel",
+          "id": "6221978000047822001",
+          "email": "lindsay.kuhel@emailthewell.com"
+        },
+        "$size": null,
+        "$state": "save",
+        "$voice_note": false,
+        "id": "6221978000102789331",
+        "Created_By": {
+          "name": "Lindsay Kuhel",
+          "id": "6221978000047822001",
+          "email": "lindsay.kuhel@emailthewell.com"
+        },
+        "Note_Title": "Discovery Call",
+        "Note_Content": "Senior Wealth Advisor position to bring clients in and set up their book. On a referral program with Schwab and has warm leads come into Sonora. Warm leads, talk with clients. 2 years of advisory 10 years in finance. 20M / 15. Stay in AZ or remote, potential to relocate, but sometimes next year. Scottsdale/N. Phoenix, 30 min commute. Close to the mall. Closing experience. Doesn't currently use annuities but familiar and CFP certified and series 65. Pace of growth - She's a Junior advisor looking to step into Sr role."
+      }
+    ]
+  },
+  {
+    "id": "6221978000102776028",
+    "Full_Name": "Elio Carranza",
+    "Candidate_Locator": "TWAV118178",
+    "Email": "elio_carranza@yahoo.com",
+    "Desired_Comp": null,
+    "Earning_80k": false,
+    "Hired_Salary": null,
+    "notes_count": 1,
+    "notes": [
+      {
+        "Owner": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Modified_Time": "2025-09-24T18:34:55-04:00",
+        "$attachments": null,
+        "$field_states": null,
+        "Created_Time": "2025-09-24T18:34:55-04:00",
+        "Parent_Id": {
+          "name": "Elio Carranza",
+          "id": "6221978000102776028"
+        },
+        "$editable": true,
+        "$se_module": "Leads",
+        "$is_shared_to_client": false,
+        "Modified_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "$size": null,
+        "$state": "save",
+        "$voice_note": false,
+        "id": "6221978000102741251",
+        "Created_By": {
+          "name": "Ashlee Klingler",
+          "id": "6221978000100225032",
+          "email": "ashlee.klingler@emailthewell.com"
+        },
+        "Note_Title": "Discovery Call",
+        "Note_Content": "Elio comes to us with 3 years of experience as a client relationship manager. He is currently on the market as his significant other has just accepted an offer in Orlando and they have relocated to the West side of the city.  In his position with JP Morgan, he acts as the point of contact for product solutions, loans, credit lines, and more for current and potential clients. He has managed a portfolio of clients up to 5M in revenue. Elio is looking for a faith-based firm with a structured and hands-on management team in which he can grow his skillset and further advance his career. He is on the market for $100k/ annually."
+      }
+    ]
+  }
+]

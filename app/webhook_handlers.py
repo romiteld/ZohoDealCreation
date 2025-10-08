@@ -178,7 +178,7 @@ class GitHubWebhookHandler:
         total_deleted = 0
         
         try:
-            from app.redis_cache_manager import get_cache_manager
+            from well_shared.cache.redis_manager import get_cache_manager
             from app.azure_cdn_manager import get_cdn_manager, purge_cdn_on_manifest_change
             
             cache_manager = await get_cache_manager()

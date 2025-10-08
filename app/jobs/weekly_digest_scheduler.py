@@ -22,7 +22,7 @@ import uuid
 import asyncpg
 
 from app.jobs.talentwell_curator import TalentWellCurator
-from app.database_connection_manager import DatabaseConnectionManager
+from well_shared.database.connection import DatabaseConnectionManager
 
 logger = logging.getLogger(__name__)
 

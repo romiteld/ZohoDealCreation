@@ -20,12 +20,12 @@ from langgraph.graph.message import add_messages
 from langgraph.types import Send
 
 # Cache imports
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 from app.cache_strategies import get_strategy_manager
 from app.business_rules import filter_well_info
 
 # C³ and VoIT imports
-from app.cache.c3 import (
+from well_shared.cache.c3 import (
     C3Entry, DependencyCertificate, 
     c3_reuse_or_rebuild, update_calibration, 
     generate_cache_key, score
@@ -1632,7 +1632,7 @@ class EmailProcessingWorkflow:
         # Use Firecrawl research service with caching
         try:
             from app.firecrawl_research import CompanyResearchService
-            from app.redis_cache_manager import RedisCacheManager
+            from well_shared.cache.redis_manager import RedisCacheManager
 
             # Import the Firecrawl v2 Fire Agent for enhanced enrichment
             try:

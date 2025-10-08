@@ -38,7 +38,7 @@ from dotenv import load_dotenv
 sys.path.append(str(Path(__file__).parent.parent))
 
 try:
-    from app.redis_cache_manager import RedisCacheManager
+    from well_shared.cache.redis_manager import RedisCacheManager
 except ImportError:
     print("Warning: Could not import RedisCacheManager, cache operations may not work")
     RedisCacheManager = None

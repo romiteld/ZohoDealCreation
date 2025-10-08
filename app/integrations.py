@@ -1458,7 +1458,7 @@ class ZohoApiClient(ZohoClient):
         """Cache enrichment data for TalentWell integration with 7-day TTL."""
         try:
             # Import Redis client
-            from app.redis_cache_manager import get_cache_manager
+            from well_shared.cache.redis_manager import get_cache_manager
 
             cache_manager = await get_cache_manager()
             if not cache_manager:
@@ -1568,6 +1568,315 @@ class ZohoApiClient(ZohoClient):
             logger.warning(f"Error checking Zoho account duplicate: {e}")
             return None
     
+    async def query_deals(self,
+                         limit: int = 100,
+                         page: int = 1,
+                         from_date: Optional[datetime] = None,
+                         to_date: Optional[datetime] = None,
+                         owner_email: Optional[str] = None,
+                         stage: Optional[str] = None,
+                         contact_name: Optional[str] = None,
+                         account_name: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Query deals from Zoho CRM for Teams Bot queries.
+        Normalizes Zoho's PascalCase field names to snake_case for query engine compatibility.
+
+        Args:
+            limit: Maximum number of deals to return
+            page: Page number for pagination
+            from_date: Filter deals created after this date
+            to_date: Filter deals created before this date
+            owner_email: Filter by owner email address
+            stage: Filter by deal stage
+            contact_name: Filter by contact name
+            account_name: Filter by account/company name
+
+        Returns:
+            List of normalized deal dictionaries with snake_case field names
+        """
+        try:
+            # Build search criteria
+            criteria_parts = []
+
+            # Date filters
+            if from_date:
+                date_str = from_date.strftime("%Y-%m-%d")
+                criteria_parts.append(f"(Created_Time:greater_equal:{date_str})")
+
+            if to_date:
+                date_str = to_date.strftime("%Y-%m-%d")
+                criteria_parts.append(f"(Created_Time:less_equal:{date_str})")
+
+            # Owner filter (by email)
+            if owner_email:
+                criteria_parts.append(f"(Owner.email:equals:{owner_email})")
+
+            # Stage filter
+            if stage:
+                criteria_parts.append(f"(Stage:equals:{stage})")
+
+            # Contact name filter
+            if contact_name:
+                criteria_parts.append(f"(Contact_Name.name:contains:{contact_name})")
+
+            # Account name filter
+            if account_name:
+                criteria_parts.append(f"(Account_Name.name:contains:{account_name})")
+
+            # Make API request
+            if criteria_parts:
+                # Combine criteria with AND (spaces are critical!)
+                search_criteria = " and ".join(criteria_parts)
+                params = {
+                    "criteria": search_criteria,
+                    "fields": "id,Deal_Name,Stage,Contact_Name,Account_Name,Owner,Created_Time,Modified_Time,Closing_Date,Amount,Description,Source,Source_Detail",
+                    "page": page,
+                    "per_page": min(limit, 200)
+                }
+                logger.info(f"Querying Deals with search criteria: {search_criteria}")
+                response = self._make_request("GET", "Deals/search", data=None, params=params)
+            else:
+                # No filters - get all deals
+                params = {
+                    "fields": "id,Deal_Name,Stage,Contact_Name,Account_Name,Owner,Created_Time,Modified_Time,Closing_Date,Amount,Description,Source,Source_Detail",
+                    "page": page,
+                    "per_page": min(limit, 200)
+                }
+                logger.info("Querying all Deals (no filters)")
+                response = self._make_request("GET", "Deals", data=None, params=params)
+
+            deals = response.get("data", [])
+            logger.info(f"Fetched {len(deals)} deals from Zoho (response status: {response.get('status', 'unknown')})")
+
+            # Normalize field names from PascalCase to snake_case
+            processed_deals = []
+            for deal in deals:
+                # Extract owner email from Owner object
+                owner = deal.get("Owner", {})
+                owner_email_value = owner.get("email") if isinstance(owner, dict) else None
+                owner_name_value = owner.get("name") if isinstance(owner, dict) else None
+
+                # Extract contact name from Contact_Name object
+                contact = deal.get("Contact_Name", {})
+                contact_name_value = contact.get("name") if isinstance(contact, dict) else None
+
+                # Extract account name from Account_Name object
+                account = deal.get("Account_Name", {})
+                account_name_value = account.get("name") if isinstance(account, dict) else None
+
+                # Parse datetime strings to datetime objects for query engine compatibility
+                created_at_str = deal.get("Created_Time")
+                modified_at_str = deal.get("Modified_Time")
+                closing_date_str = deal.get("Closing_Date")
+
+                created_at = None
+                modified_at = None
+                closing_date = None
+
+                if created_at_str:
+                    try:
+                        created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid Created_Time format: {created_at_str}")
+
+                if modified_at_str:
+                    try:
+                        modified_at = datetime.fromisoformat(modified_at_str.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid Modified_Time format: {modified_at_str}")
+
+                if closing_date_str:
+                    try:
+                        # Closing_Date may be just a date (YYYY-MM-DD) without time
+                        if 'T' in closing_date_str:
+                            closing_date = datetime.fromisoformat(closing_date_str.replace('Z', '+00:00'))
+                        else:
+                            closing_date = datetime.strptime(closing_date_str, "%Y-%m-%d")
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid Closing_Date format: {closing_date_str}")
+
+                processed = {
+                    "id": deal.get("id"),
+                    "deal_name": deal.get("Deal_Name"),
+                    "stage": deal.get("Stage"),
+                    "contact_name": contact_name_value,
+                    "account_name": account_name_value,
+                    "owner_email": owner_email_value,
+                    "owner_name": owner_name_value,
+                    "created_at": created_at,
+                    "modified_at": modified_at,
+                    "closing_date": closing_date,
+                    "amount": deal.get("Amount"),
+                    "description": deal.get("Description"),
+                    "source": deal.get("Source"),
+                    "source_detail": deal.get("Source_Detail")
+                }
+                processed_deals.append(processed)
+
+            logger.info(f"Normalized {len(processed_deals)} deals to snake_case format")
+            return processed_deals
+
+        except Exception as e:
+            logger.error(f"Error querying deals from Zoho: {e}")
+            return []
+
+    async def query_meetings(self,
+                            limit: int = 100,
+                            page: int = 1,
+                            from_date: Optional[datetime] = None,
+                            to_date: Optional[datetime] = None,
+                            owner_email: Optional[str] = None,
+                            event_title: Optional[str] = None,
+                            related_to: Optional[str] = None) -> List[Dict[str, Any]]:
+        """
+        Query events/meetings from Zoho CRM Events module.
+        Normalizes Zoho's PascalCase field names to snake_case for query engine compatibility.
+
+        Args:
+            limit: Maximum number of events to return
+            page: Page number for pagination
+            from_date: Filter events starting after this date
+            to_date: Filter events starting before this date
+            owner_email: Filter by owner email address
+            event_title: Filter by event title (contains search)
+            related_to: Filter by related record name (What_Id lookup)
+
+        Returns:
+            List of normalized event dictionaries with snake_case field names
+        """
+        try:
+            # Build search criteria
+            criteria_parts = []
+
+            # Date filters (use Start_DateTime for event start time)
+            if from_date:
+                date_str = from_date.strftime("%Y-%m-%d")
+                criteria_parts.append(f"(Start_DateTime:greater_equal:{date_str})")
+
+            if to_date:
+                date_str = to_date.strftime("%Y-%m-%d")
+                criteria_parts.append(f"(Start_DateTime:less_equal:{date_str})")
+
+            # Owner filter (by email)
+            if owner_email:
+                criteria_parts.append(f"(Owner.email:equals:{owner_email})")
+
+            # Event title filter (contains search)
+            if event_title:
+                criteria_parts.append(f"(Event_Title:contains:{event_title})")
+
+            # Related record filter (What_Id lookup - searches related record name)
+            if related_to:
+                criteria_parts.append(f"(What_Id.name:contains:{related_to})")
+
+            # Make API request
+            if criteria_parts:
+                # Combine criteria with AND (spaces are critical!)
+                search_criteria = " and ".join(criteria_parts)
+                params = {
+                    "criteria": search_criteria,
+                    "fields": "id,Event_Title,Start_DateTime,End_DateTime,Participants,Owner,What_Id,se_module,Description,Location,Created_Time,Modified_Time",
+                    "page": page,
+                    "per_page": min(limit, 200)
+                }
+                logger.info(f"Querying Events with search criteria: {search_criteria}")
+                response = self._make_request("GET", "Events/search", data=None, params=params)
+            else:
+                # No filters - get all events
+                params = {
+                    "fields": "id,Event_Title,Start_DateTime,End_DateTime,Participants,Owner,What_Id,se_module,Description,Location,Created_Time,Modified_Time",
+                    "page": page,
+                    "per_page": min(limit, 200)
+                }
+                logger.info("Querying all Events (no filters)")
+                response = self._make_request("GET", "Events", data=None, params=params)
+
+            events = response.get("data", [])
+            logger.info(f"Fetched {len(events)} events from Zoho (response status: {response.get('status', 'unknown')})")
+
+            # Normalize field names from PascalCase to snake_case
+            processed_events = []
+            for event in events:
+                # Extract owner email from Owner object
+                owner = event.get("Owner", {})
+                owner_email_value = owner.get("email") if isinstance(owner, dict) else None
+                owner_name_value = owner.get("name") if isinstance(owner, dict) else None
+
+                # Extract related record info from What_Id lookup
+                what_id = event.get("What_Id", {})
+                related_record_name = what_id.get("name") if isinstance(what_id, dict) else None
+                related_record_id = what_id.get("id") if isinstance(what_id, dict) else None
+
+                # Extract participants list
+                participants = event.get("Participants", [])
+                attendee_names = []
+                if isinstance(participants, list):
+                    for participant in participants:
+                        if isinstance(participant, dict):
+                            attendee_names.append(participant.get("name", "Unknown"))
+
+                # Parse datetime strings to datetime objects
+                start_datetime_str = event.get("Start_DateTime")
+                end_datetime_str = event.get("End_DateTime")
+                created_at_str = event.get("Created_Time")
+                modified_at_str = event.get("Modified_Time")
+
+                start_datetime = None
+                end_datetime = None
+                created_at = None
+                modified_at = None
+
+                if start_datetime_str:
+                    try:
+                        start_datetime = datetime.fromisoformat(start_datetime_str.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid Start_DateTime format: {start_datetime_str}")
+
+                if end_datetime_str:
+                    try:
+                        end_datetime = datetime.fromisoformat(end_datetime_str.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid End_DateTime format: {end_datetime_str}")
+
+                if created_at_str:
+                    try:
+                        created_at = datetime.fromisoformat(created_at_str.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid Created_Time format: {created_at_str}")
+
+                if modified_at_str:
+                    try:
+                        modified_at = datetime.fromisoformat(modified_at_str.replace('Z', '+00:00'))
+                    except (ValueError, AttributeError):
+                        logger.warning(f"Invalid Modified_Time format: {modified_at_str}")
+
+                processed = {
+                    "id": event.get("id"),
+                    "subject": event.get("Event_Title"),  # Map to 'subject' for consistency
+                    "event_title": event.get("Event_Title"),
+                    "start_datetime": start_datetime,
+                    "end_datetime": end_datetime,
+                    "meeting_date": start_datetime,  # Alias for query engine compatibility
+                    "attendees": attendee_names,
+                    "owner_email": owner_email_value,
+                    "owner_name": owner_name_value,
+                    "related_to": related_record_name,
+                    "related_to_id": related_record_id,
+                    "related_module": event.get("se_module"),  # Module type (Deals, Contacts, etc.)
+                    "description": event.get("Description"),
+                    "location": event.get("Location"),
+                    "created_at": created_at,
+                    "modified_at": modified_at
+                }
+                processed_events.append(processed)
+
+            logger.info(f"Normalized {len(processed_events)} events to snake_case format")
+            return processed_events
+
+        except Exception as e:
+            logger.error(f"Error querying events from Zoho: {e}")
+            return []
+
     async def query_candidates(self,
                               limit: int = 100,
                               page: int = 1,
@@ -1602,7 +1911,7 @@ class ZohoApiClient(ZohoClient):
                 # Make API request with search - include fields to avoid N+1 queries
                 params = {
                     "criteria": search_criteria,
-                    "fields": "id,Full_Name,Email,Company,Designation,Current_Location,Candidate_Locator,Title,Current_Firm,Is_Mobile,Remote_Preference,Hybrid_Preference,Professional_Designations,Book_Size_AUM,Production_12mo,Desired_Comp,When_Available,Source,Source_Detail,Meeting_Date,Meeting_ID,Transcript_URL,Phone,Referrer_Name,Publish_to_Vault,Date_Published_to_Vault",
+                    "fields": "id,Full_Name,Email,Employer,Designation,Current_Location,Candidate_Locator,Is_Mobile,Remote,Open_to_Hybrid,Professional_Designations,Book_Size_AUM,Production_L12Mo,Desired_Comp,When_Available,Lead_Source,Candidate_Source_Details,Next_Interview_Scheduled,Interview_Recording_Link,Full_Interview_URL,Phone,Sourced_By,Publish_to_Vault,Date_Published_to_Vault",
                     "page": page,
                     "per_page": limit
                 }
@@ -1623,7 +1932,7 @@ class ZohoApiClient(ZohoClient):
 
                 # Fetch using custom view (supports up to 2000 records with simple pagination)
                 params = {
-                    "fields": "id,Full_Name,Email,Company,Designation,Current_Location,Candidate_Locator,Title,Current_Firm,Is_Mobile,Remote_Preference,Hybrid_Preference,Professional_Designations,Book_Size_AUM,Production_12mo,Desired_Comp,When_Available,Source,Source_Detail,Meeting_Date,Meeting_ID,Transcript_URL,Phone,Referrer_Name,Publish_to_Vault,Date_Published_to_Vault",
+                    "fields": "id,Full_Name,Email,Employer,Designation,Current_Location,Candidate_Locator,Is_Mobile,Remote,Open_to_Hybrid,Professional_Designations,Book_Size_AUM,Production_L12Mo,Desired_Comp,When_Available,Lead_Source,Candidate_Source_Details,Next_Interview_Scheduled,Interview_Recording_Link,Full_Interview_URL,Phone,Sourced_By,Publish_to_Vault,Date_Published_to_Vault",
                     "cvid": vault_view_id,  # Use custom view to filter server-side
                     "page": page,
                     "per_page": limit if limit <= 200 else 200
@@ -1743,27 +2052,27 @@ class ZohoApiClient(ZohoClient):
                         "id": candidate.get("id"),
                         "candidate_locator": candidate.get("Candidate_Locator") or candidate.get("id"),
                         "candidate_name": candidate.get("Full_Name"),
-                        "job_title": candidate.get("Designation") or candidate.get("Title"),
-                        "company_name": candidate.get("Company") or candidate.get("Current_Firm"),
+                        "job_title": candidate.get("Designation"),
+                        "company_name": candidate.get("Employer"),
                         "location": candidate.get("Current_Location"),
                         "is_mobile": candidate.get("Is_Mobile", False),
-                        "remote_preference": candidate.get("Remote_Preference") or candidate.get("Open_to_Remote"),
-                        "hybrid_preference": candidate.get("Hybrid_Preference") or candidate.get("Open_to_Hybrid"),
-                        "professional_designations": candidate.get("Professional_Designations") or candidate.get("Licenses_Exams"),
-                        "book_size_aum": candidate.get("Book_Size_AUM") or candidate.get("AUM"),
-                        "production_12mo": candidate.get("Production_12mo") or candidate.get("Production"),
-                        "desired_comp": candidate.get("Desired_Comp") or candidate.get("Compensation_Desired"),
-                        "when_available": candidate.get("When_Available") or candidate.get("Availability"),
-                        "source": candidate.get("Source"),
-                        "source_detail": candidate.get("Source_Detail"),
+                        "remote_preference": candidate.get("Remote"),
+                        "hybrid_preference": candidate.get("Open_to_Hybrid"),
+                        "professional_designations": candidate.get("Professional_Designations"),
+                        "book_size_aum": candidate.get("Book_Size_AUM"),
+                        "production_12mo": candidate.get("Production_L12Mo"),
+                        "desired_comp": candidate.get("Desired_Comp"),
+                        "when_available": candidate.get("When_Available"),
+                        "source": candidate.get("Lead_Source"),
+                        "source_detail": candidate.get("Candidate_Source_Details"),
                         "date_published": candidate.get("Date_Published_to_Vault"),
-                        "meeting_date": candidate.get("Meeting_Date") or candidate.get("Interview_Date"),
-                        "meeting_id": candidate.get("Meeting_ID") or candidate.get("Zoom_Meeting_ID"),
-                        "transcript_url": candidate.get("Transcript_URL") or candidate.get("Recording_URL"),
+                        "meeting_date": candidate.get("Next_Interview_Scheduled"),
+                        "meeting_id": None,  # Field does not exist in Zoho - extract from Interview_Recording_Link if needed
+                        "transcript_url": candidate.get("Interview_Recording_Link") or candidate.get("Full_Interview_URL"),
                         "email": candidate.get("Email"),
                         "phone": candidate.get("Phone"),
-                        "referrer_name": candidate.get("Referrer_Name") or candidate.get("Referred_By"),
-                        "published_to_vault": candidate.get("Publish_to_Vault", False)  # Note: field is "Publish_to_Vault" not "Published_to_Vault"
+                        "referrer_name": candidate.get("Sourced_By"),
+                        "published_to_vault": candidate.get("Publish_to_Vault", False)
                     }
                     processed_candidates.append(processed)
 

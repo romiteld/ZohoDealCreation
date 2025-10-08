@@ -10,7 +10,7 @@ import asyncio
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 from dotenv import load_dotenv
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 from app.integrations import PostgreSQLClient
 
 # Load environment variables

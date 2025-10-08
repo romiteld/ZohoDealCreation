@@ -20,7 +20,7 @@ async def manifest_dashboard(request: Request):
     try:
         from app.manifest_cache_service import get_manifest_cache_service
         from app.webhook_handlers import get_webhook_handler
-        from app.redis_cache_manager import get_cache_manager
+        from well_shared.cache.redis_manager import get_cache_manager
         
         # Get services
         manifest_service = await get_manifest_cache_service()

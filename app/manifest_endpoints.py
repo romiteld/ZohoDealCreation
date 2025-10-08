@@ -22,7 +22,7 @@ from scripts.manifest_warmup import (
     ManifestCacheManager, 
     ManifestWarmupService
 )
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 
 logger = logging.getLogger(__name__)
 

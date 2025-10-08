@@ -115,7 +115,7 @@ class ManifestCacheService:
         """Get or create Redis manager instance"""
         if self.redis_manager is None:
             # Import here to avoid circular imports
-            from app.redis_cache_manager import get_cache_manager
+            from well_shared.cache.redis_manager import get_cache_manager
             self.redis_manager = await get_cache_manager()
         return self.redis_manager
     

@@ -8,6 +8,33 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Architecture
 
+### Service Architecture (Phase 1)
+
+The Well Intake API is transitioning to a microservices architecture with three independent services:
+
+1. **Main API Service** (`app/`) - Email processing, LangGraph workflows, Zoho integration
+   - Port: 8000
+   - Container: `well-intake-api`
+   - Endpoints: `/api/*`, `/health`, `/manifest.xml`
+
+2. **Teams Bot Service** (`teams_bot/`) - Microsoft Teams integration
+   - Port: 8001
+   - Container: `teams-bot`
+   - Endpoints: `/api/teams/*`, `/health`
+   - Dependencies: Bot Framework, TalentWell Curator
+
+3. **Vault Agent Service** (Future - Phase 2) - Weekly digest generation
+   - Port: 8002
+   - Container: `vault-agent`
+   - Background job: Digest scheduler
+
+**Shared Library** (`well_shared/`) - Common utilities used across all services:
+- Database connection management (PostgreSQL)
+- Redis cache manager
+- Email delivery (Azure Communication Services)
+- Evidence extraction utilities
+- VoIT configuration and telemetry
+
 ### Core Stack
 - **LangGraph v0.2.74** - Workflow orchestration (replaced CrewAI)
 - **FastAPI** - Main API framework with REST endpoints
@@ -29,13 +56,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - **Main API** (`app/main.py`): FastAPI with batch, streaming, and learning endpoints
 - **LangGraph Manager** (`app/langgraph_manager.py`): Three-node StateGraph workflow
 - **Database Enhancements** (`app/database_enhancements.py`): 400K context and vector search
-- **Redis Cache Manager** (`app/redis_cache_manager.py`): Intelligent caching with 24hr TTL
+- **Redis Cache Manager** (`well_shared/well_shared/cache/redis_manager.py`): Intelligent caching with 24hr TTL (migrated to well_shared)
 - **Cache Strategies** (`app/cache_strategies.py`): Email classification and pattern recognition
 - **Azure Cost Optimizer** (`app/azure_cost_optimizer.py`): Model tier selection and budget tracking
 - **Service Bus Manager** (`app/service_bus_manager.py`): Batch queue management
 - **Batch Processor** (`app/batch_processor.py`): Multi-email single-context processing
 - **Azure AI Search Manager** (`app/azure_ai_search_manager.py`): Semantic search and learning
 - **Learning Analytics** (`app/learning_analytics.py`): A/B testing and accuracy tracking
+- **Power BI Integration** (`app/powerbi_integration.py`): Real-time analytics streaming to Power BI Premium
 - **Monitoring** (`app/monitoring.py`): Application Insights integration
 - **Security Config** (`app/security_config.py`): Key Vault and API key management
 - **Business Rules** (`app/business_rules.py`): Deal name formatting, source determination
@@ -77,13 +105,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Project Structure
 
 ### Directory Organization
-- `app/` - FastAPI APIs, LangGraph pipelines, integration clients
+- `app/` - Main API service (email processing, LangGraph workflows)
   - Entry points: `app/main.py`, `app/langgraph_manager.py`
+- `teams_bot/` - Teams Bot service (Microsoft Teams integration)
+  - Entry point: `teams_bot/app/main.py`
+  - Dockerfile: `teams_bot/Dockerfile`
+  - Dependencies: `teams_bot/requirements.txt`
+- `well_shared/` - Shared library for all services
+  - Package: `well_shared/well_shared/`
+  - Modules: database, cache, mail, evidence, config
 - `addin/` - Outlook Add-in frontend (JavaScript, HTML, manifest)
   - Primary file: `addin/taskpane.js`
 - `oauth_service/` - Flask OAuth proxy for Zoho token brokering
 - `tests/` - pytest suites with integration and browser test harnesses
   - `tests/integration/` - End-to-end tests
+  - `tests/smoke/` - Staging smoke tests per service
   - `tests/fixtures/` - Shared test fixtures
 - `docs/` - Architecture Decision Records (ADRs) and technical docs
 - `scripts/` - Deployment scripts, database utilities, automation
@@ -221,21 +257,103 @@ python scripts/cleanup_old_records.py   # Clean old records
 python scripts/vacuum_database.py       # Optimize database
 ```
 
-### Deployment
+### Power BI Integration
 ```bash
-# Full deployment (DB migrations, Docker build, Azure deploy)
+# Generate dataset schemas for Power BI workspace
+python -c "
+from app.powerbi_integration import powerbi
+import json
+schemas = powerbi.create_datasets_schema()
+print(json.dumps(schemas, indent=2))
+"
+
+# Environment variables (add to .env)
+POWERBI_WORKSPACE_ID=your-workspace-id
+POWERBI_API_KEY=your-premium-api-key
+ENABLE_POWERBI_STREAMING=true
+POWERBI_BATCH_SIZE=100  # Optional, default 100
+```
+
+**Datasets**:
+- **extraction_metrics**: Per-email extraction quality and model performance
+- **ab_test_results**: Prompt variant A/B testing outcomes
+- **cost_optimization**: Model tier usage, token counts, budget tracking
+- **field_accuracy**: Field-level correction rates and template effectiveness
+- **learning_patterns**: Pattern recognition, template usage, improvement trends
+- **deal_processing**: Individual deal tracking from email → Zoho with full traceability
+
+**Usage in Code**:
+```python
+from app.powerbi_integration import powerbi, DealProcessingRow
+
+# Log deal processing
+deal_row = DealProcessingRow(
+    deal_id=deal["id"],
+    extraction_id=extraction_id,
+    timestamp=datetime.utcnow(),
+    deal_name=deal["Deal_Name"],
+    company_name=company,
+    contact_name=contact,
+    email_domain=domain,
+    source=source,
+    processing_stage="Create",
+    success=True,
+    processing_time_ms=duration_ms,
+    extraction_confidence=0.95,
+    fields_corrected=2,
+    used_template=True,
+    used_firecrawl=True,
+    used_apollo=False,
+    model_used="gpt-5-mini",
+    tokens_input=1500,
+    tokens_output=800,
+    cost_usd=0.0012,
+    owner_email="recruiter@emailthewell.com"
+)
+powerbi.log_deal_processing(deal_row)
+```
+
+### Deployment
+
+#### Multi-Service Deployment (Phase 1)
+```bash
+# Deploy Teams Bot service
+./scripts/deploy_teams_bot.sh
+
+# Deploy Main API service (existing)
 ./scripts/deploy.sh
 
-# Quick Docker deployment (use --no-cache for fresh builds)
+# Deployment gate (validate staging before production)
+python scripts/deployment_gate.py --service teams-bot
+python scripts/deployment_gate.py --service main-api
+python scripts/deployment_gate.py --all  # Validate all services
+```
+
+#### Service-Specific Deployment
+```bash
+# Teams Bot Service
+docker build -f teams_bot/Dockerfile -t wellintakeacr0903.azurecr.io/teams-bot:latest .
+az acr login --name wellintakeacr0903
+docker push wellintakeacr0903.azurecr.io/teams-bot:latest
+az containerapp update --name teams-bot --resource-group TheWell-Infra-East \
+  --image wellintakeacr0903.azurecr.io/teams-bot:latest \
+  --revision-suffix "v$(date +%Y%m%d-%H%M%S)"
+
+# Main API Service
 docker build -t wellintakeacr0903.azurecr.io/well-intake-api:latest .
 az acr login --name wellintakeacr0903
 docker push wellintakeacr0903.azurecr.io/well-intake-api:latest
-
-# Force Container App to use new image with revision suffix
 az containerapp update --name well-intake-api --resource-group TheWell-Infra-East \
   --image wellintakeacr0903.azurecr.io/well-intake-api:latest \
   --revision-suffix "v$(date +%Y%m%d-%H%M%S)"
 
+# View service logs
+az containerapp logs show --name teams-bot --resource-group TheWell-Infra-East --follow
+az containerapp logs show --name well-intake-api --resource-group TheWell-Infra-East --follow
+```
+
+#### CDN and Cache Management
+```bash
 # Purge CDN cache after deployment
 az afd endpoint purge --resource-group TheWell-Infra-East \
   --profile-name well-intake-frontdoor \
@@ -246,11 +364,10 @@ az afd endpoint purge --resource-group TheWell-Infra-East \
 # Alternative: Use API endpoint for CDN purge
 curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/cdn/purge" \
   -H "Content-Type: application/json" -d '{"paths": ["/*"]}'
+```
 
-# View logs
-az containerapp logs show --name well-intake-api --resource-group TheWell-Infra-East --follow
-
-# GitHub Actions deployment (automated)
+#### GitHub Actions (Automated)
+```bash
 # Workflows: manifest-cache-bust.yml (active), deploy-production.yml (disabled)
 # Manual workflow dispatch available in GitHub Actions tab
 ```

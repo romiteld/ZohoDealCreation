@@ -12,7 +12,7 @@ import json
 
 import app.jobs.talentwell_curator as curator_module
 from app.jobs.talentwell_curator import TalentWellCurator, DigestCard, BulletPoint
-from app.extract.evidence import EvidenceExtractor
+from well_shared.evidence.extractor import EvidenceExtractor
 
 
 class TestDataQuality:

@@ -20,8 +20,10 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from dotenv import load_dotenv
 
 # Load environment variables
-load_dotenv('.env.local')
-load_dotenv()
+# Priority: .env (captured by startup.sh) > .env.local (dev overrides) > system env
+load_dotenv('/app/.env')  # Azure Container Apps environment variables
+load_dotenv('.env.local')  # Local development overrides
+load_dotenv()  # Fallback to default .env
 
 # Initialize logging
 logging.basicConfig(level=logging.INFO)
@@ -202,7 +204,7 @@ async def lifespan(app: FastAPI):
     database_url = os.getenv("DATABASE_URL")
     if database_url:
         try:
-            from app.database_connection_manager import get_connection_manager, ensure_learning_services_ready
+            from well_shared.database.connection import get_connection_manager, ensure_learning_services_ready
             
             # Get the centralized connection manager
             connection_manager = await get_connection_manager()
@@ -324,7 +326,7 @@ async def lifespan(app: FastAPI):
     # Initialize Redis monitoring service
     try:
         from app.redis_monitoring import get_monitoring_service
-        from app.redis_cache_manager import get_cache_manager
+        from well_shared.cache.redis_manager import get_cache_manager
         
         monitoring_service = get_monitoring_service()
         cache_manager = await get_cache_manager()
@@ -650,7 +652,7 @@ async def run_curator_and_send(filters: WeeklyDigestFilters, req: Request) -> Di
     if not filters.dry_run and recipients:
         if cards_count > 0:
             try:
-                from app.mail.send import mailer
+                from well_shared.mail.sender import mailer
                 
                 # Send to each recipient
                 for recipient in recipients:
@@ -1126,7 +1128,7 @@ async def health_check():
     
     # Check Redis Cache with enhanced fallback status
     try:
-        from app.redis_cache_manager import get_redis_health_status
+        from well_shared.cache.redis_manager import get_redis_health_status
         redis_health = await get_redis_health_status()
         
         # Map Redis health status to service status
@@ -1154,7 +1156,7 @@ async def health_check():
         
         # Get performance metrics if available
         try:
-            from app.redis_cache_manager import get_cache_manager
+            from well_shared.cache.redis_manager import get_cache_manager
             cache_manager = await get_cache_manager()
             metrics = await cache_manager.get_metrics()
             health_status["cache_metrics"] = {
@@ -1233,7 +1235,7 @@ async def database_health_check():
             health_report = app.state.connection_manager.get_health_report()
             
             # Test learning services readiness
-            from app.database_connection_manager import ensure_learning_services_ready
+            from well_shared.database.connection import ensure_learning_services_ready
             learning_ready = await ensure_learning_services_ready()
             
             health_report['learning_services'] = {
@@ -3246,7 +3248,7 @@ app.include_router(teams_router)
 async def get_cache_status():
     """Get comprehensive Redis cache performance metrics, health status, and optimization recommendations"""
     try:
-        from app.redis_cache_manager import get_cache_manager, get_redis_health_status
+        from well_shared.cache.redis_manager import get_cache_manager, get_redis_health_status
         from app.cache_strategies import get_strategy_manager
         
         cache_manager = await get_cache_manager()
@@ -3380,7 +3382,7 @@ async def get_prompt_enhancement_status(email_domain: str = "example.com"):
 async def invalidate_cache(pattern: Optional[str] = None):
     """Invalidate cache entries matching a pattern with graceful fallback handling"""
     try:
-        from app.redis_cache_manager import get_cache_manager
+        from well_shared.cache.redis_manager import get_cache_manager
         
         cache_manager = await get_cache_manager()
         deleted_count = await cache_manager.invalidate_cache(pattern)
@@ -3416,7 +3418,7 @@ async def invalidate_cache(pattern: Optional[str] = None):
 async def warmup_cache():
     """Pre-warm cache with common email patterns with graceful fallback handling"""
     try:
-        from app.redis_cache_manager import get_cache_manager
+        from well_shared.cache.redis_manager import get_cache_manager
         from app.cache_strategies import get_strategy_manager
         
         cache_manager = await get_cache_manager()
@@ -3507,7 +3509,7 @@ async def start_cache_monitoring(interval_minutes: int = 5):
     """Start Redis cache monitoring service"""
     try:
         from app.redis_monitoring import get_monitoring_service
-        from app.redis_cache_manager import get_cache_manager
+        from well_shared.cache.redis_manager import get_cache_manager
         
         monitoring_service = get_monitoring_service()
         cache_manager = await get_cache_manager()
@@ -3532,7 +3534,7 @@ async def get_detailed_cache_health():
     """Get detailed Redis cache health with monitoring data"""
     try:
         from app.redis_monitoring import get_monitoring_service
-        from app.redis_cache_manager import get_redis_health_status
+        from well_shared.cache.redis_manager import get_redis_health_status
         from datetime import datetime
         
         # Get basic health status
@@ -5346,7 +5348,7 @@ async def test_send_digest(request: Request):
     """Test send TalentWell digest to specific recipient"""
     try:
         from app.validation.talentwell_validator import validator
-        from app.mail.send import mailer
+        from well_shared.mail.sender import mailer
         
         # Get request body
         body = await request.body()
@@ -5522,7 +5524,7 @@ async def diagnose_weekly_digest(filters: WeeklyDigestFilters, req: Request):
 async def get_email_system_status(req: Request):
     """Get TalentWell email system status and configuration"""
     try:
-        from app.mail.send import mailer
+        from well_shared.mail.sender import mailer
         
         status = mailer.get_email_status()
         

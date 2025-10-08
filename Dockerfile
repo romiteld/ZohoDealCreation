@@ -52,13 +52,17 @@ COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser addin/ ./addin/
 COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser startup.sh ./startup.sh
 
 # Create static directory (may not exist in repo due to .gitignore)
 RUN mkdir -p ./static/icons && chown -R appuser:appuser ./static
 
-# Create logs directory
+# Create logs directory and make startup script executable
 RUN mkdir -p /app/logs && \
-    chown -R appuser:appuser /app
+    chmod +x /app/startup.sh && \
+    chown -R appuser:appuser /app && \
+    ls -la /app/startup.sh && \
+    cat /app/startup.sh
 
 # Switch to non-root user
 USER appuser
@@ -70,16 +74,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=10s --start-period=10s --retries=3 \
   CMD curl -f http://localhost:8000/health || exit 1
 
-# Run with optimized Gunicorn settings
-CMD ["gunicorn", \
-     "--bind", "0.0.0.0:8000", \
-     "--timeout", "600", \
-     "--workers", "2", \
-     "--worker-class", "uvicorn.workers.UvicornWorker", \
-     "--worker-connections", "1000", \
-     "--max-requests", "1000", \
-     "--max-requests-jitter", "50", \
-     "--preload", \
-     "--access-logfile", "-", \
-     "--error-logfile", "-", \
-     "app.main:app"]
+# Run with startup script for environment variable capture
+CMD ["bash", "/app/startup.sh"]

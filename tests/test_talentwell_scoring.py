@@ -7,7 +7,7 @@ import asyncio
 from typing import Dict, List, Any
 from unittest.mock import Mock, AsyncMock, patch
 
-from app.extract.evidence import BulletPoint
+from well_shared.evidence.extractor import BulletPoint
 from app.jobs.talentwell_curator import TalentWellCurator
 
 

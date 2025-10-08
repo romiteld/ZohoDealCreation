@@ -203,7 +203,7 @@ async def test_redis_connection():
     print_section("🔄 Redis Connection Test")
     
     try:
-        from app.redis_cache_manager import get_cache_manager
+        from well_shared.cache.redis_manager import get_cache_manager
         cache_mgr = await get_cache_manager()
         
         if cache_mgr and cache_mgr.client:

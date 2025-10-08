@@ -18,7 +18,7 @@ os.environ.setdefault('ZOHO_OAUTH_SERVICE_URL', 'https://well-zoho-oauth.azurewe
 os.environ.setdefault('DATABASE_URL', 'postgresql://test:test@localhost:5432/test')
 
 from app.jobs.talentwell_curator import TalentWellCurator, DigestCard
-from app.extract.evidence import BulletPoint
+from well_shared.evidence.extractor import BulletPoint
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)

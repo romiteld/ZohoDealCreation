@@ -11,7 +11,7 @@ import os
 from unittest.mock import Mock, AsyncMock, patch, MagicMock
 from typing import Dict, Any
 
-from app.cache.voit import voit_orchestration, _extract_basic_metrics
+from well_shared.cache.voit import voit_orchestration, _extract_basic_metrics
 
 
 class TestVoIT:

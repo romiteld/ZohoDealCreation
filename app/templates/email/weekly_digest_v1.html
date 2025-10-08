@@ -6,226 +6,97 @@
     <title data-ast="subject">TalentWell Weekly Digest</title>
     <style data-ast="style">
         body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
             line-height: 1.6;
-            color: #333;
-            max-width: 800px;
+            color: #333333;
+            max-width: 650px;
             margin: 0 auto;
             padding: 20px;
             background-color: #f5f5f5;
         }
-        .container {
-            background-color: white;
-            border-radius: 8px;
+        .email-container {
+            background-color: #ffffff;
             padding: 30px;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            border-radius: 8px;
         }
         .header {
-            border-bottom: 2px solid #0066cc;
-            padding-bottom: 20px;
+            text-align: center;
             margin-bottom: 30px;
+            border-bottom: 2px solid #0078d4;
+            padding-bottom: 20px;
         }
         .header h1 {
-            color: #0066cc;
+            color: #0078d4;
             margin: 0;
-            font-size: 28px;
+            font-size: 24px;
         }
-        .header .subtitle {
-            color: #666;
-            font-size: 14px;
-            margin-top: 5px;
-        }
-        .intro-block {
-            background-color: #f8f9fa;
-            padding: 20px;
-            border-radius: 6px;
+        .intro {
             margin-bottom: 30px;
+            font-size: 15px;
+            color: #555555;
         }
-        .calendly-widget {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            padding: 20px;
-            border-radius: 6px;
-            text-align: center;
-            margin: 30px 0;
+        .candidate {
+            margin-bottom: 35px;
+            padding-bottom: 25px;
+            border-bottom: 1px solid #e0e0e0;
         }
-        .calendly-widget a {
-            color: white;
-            text-decoration: none;
-            font-weight: bold;
+        .candidate:last-child {
+            border-bottom: none;
+        }
+        .candidate-title {
             font-size: 18px;
-        }
-        .calendly-widget a:hover {
-            text-decoration: underline;
-        }
-        .candidate-card {
-            border: 1px solid #e0e0e0;
-            border-radius: 6px;
-            padding: 20px;
-            margin-bottom: 20px;
-            background-color: #fff;
-        }
-        .candidate-card h3 {
-            color: #0066cc;
-            margin-top: 0;
-            font-size: 20px;
             font-weight: bold;
+            color: #000000;
+            margin-bottom: 8px;
         }
         .candidate-location {
-            color: #666;
-            font-size: 14px;
-            margin-bottom: 10px;
+            font-size: 15px;
+            font-weight: bold;
+            color: #0078d4;
+            margin-bottom: 15px;
         }
-        .candidate-details {
-            margin: 15px 0;
-        }
-        .detail-label {
-            font-weight: 600;
-            color: #333;
-            display: inline-block;
-            width: 120px;
-        }
-        .skill-list {
-            margin: 10px 0;
-        }
-        .skill-list ul {
-            margin: 5px 0;
+        .candidate-bullets {
+            margin-left: 0;
             padding-left: 20px;
         }
-        .skill-list li {
-            margin: 5px 0;
-            color: #555;
-        }
-        .availability-comp {
-            background-color: #f0f8ff;
-            padding: 10px;
-            border-radius: 4px;
-            margin: 10px 0;
+        .candidate-bullets li {
+            margin-bottom: 8px;
+            font-size: 14px;
+            line-height: 1.5;
         }
         .ref-code {
-            color: #999;
-            font-size: 12px;
-            text-align: right;
-            margin-top: 10px;
+            font-size: 13px;
+            color: #666666;
             font-style: italic;
+            margin-top: 10px;
         }
         .footer {
             margin-top: 40px;
             padding-top: 20px;
-            border-top: 1px solid #e0e0e0;
+            border-top: 2px solid #e0e0e0;
             text-align: center;
-            color: #666;
-            font-size: 14px;
-        }
-        .footer a {
-            color: #0066cc;
-            text-decoration: none;
-        }
-        .footer a:hover {
-            text-decoration: underline;
-        }
-        .internal-note {
-            background-color: #fff3cd;
-            border: 1px solid #ffc107;
-            padding: 10px;
-            border-radius: 4px;
-            margin: 20px 0;
             font-size: 13px;
+            color: #777777;
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <!-- Header Section (NOT MODIFIABLE) -->
+    <div class="email-container">
         <div class="header" data-tag="div">
             <h1>TalentWell Weekly Digest</h1>
-            <div class="subtitle">Curated talent matches for Steve Perry</div>
         </div>
 
-        <!-- Intro Block (MODIFIABLE) -->
-        <div class="intro-block" data-ast="intro_block" data-tag="div">
-            <p>Hi Steve,</p>
-            <p>Here are this week's top candidate matches based on your search criteria. Each candidate has been carefully vetted and matched to your specific requirements.</p>
+        <div class="intro" data-ast="intro_block" data-tag="div">
+            <p>Weekly candidate alerts from TalentWell Vault.</p>
         </div>
 
-        <!-- Calendly Widget (NOT MODIFIABLE) -->
-        <div class="calendly-widget" data-tag="div" data-ast="calendly">
-            <p>Ready to discuss these candidates?</p>
-            <a href="https://calendly.com/talentwell-steve/30min" target="_blank">
-                📅 Schedule a Review Call
-            </a>
+        <div class="candidates" data-ast="cards" data-tag="div">
+            <!-- Candidate cards will be inserted here -->
         </div>
 
-        <!-- Candidate Cards (MODIFIABLE) -->
-        <div class="cards-container" data-ast="cards" data-tag="div">
-            <!-- Example Card Structure -->
-            <div class="candidate-card">
-                <h3><strong>John Smith</strong></h3>
-                <div class="candidate-location">
-                    <strong>Location:</strong> Boston, MA (Open to relocation)
-                </div>
-                
-                <div class="candidate-details">
-                    <div class="skill-list">
-                        <div class="detail-label">Hard Skills:</div>
-                        <ul>
-                            <li>10+ years portfolio management experience</li>
-                            <li>Series 7 & 66 licensed</li>
-                            <li>CFA Level II candidate</li>
-                        </ul>
-                    </div>
-                    
-                    <div class="availability-comp">
-                        <div><span class="detail-label">Availability:</span> 30 days notice</div>
-                        <div><span class="detail-label">Compensation:</span> $150K-$180K base</div>
-                    </div>
-                </div>
-                
-                <div class="ref-code">REF-2025-WK36-001</div>
-            </div>
-
-            <div class="candidate-card">
-                <h3><strong>Sarah Johnson</strong></h3>
-                <div class="candidate-location">
-                    <strong>Location:</strong> Chicago, IL (Remote preferred)
-                </div>
-                
-                <div class="candidate-details">
-                    <div class="skill-list">
-                        <div class="detail-label">Hard Skills:</div>
-                        <ul>
-                            <li>8 years wealth management experience</li>
-                            <li>CFP certified</li>
-                            <li>Specializes in HNW clients ($5M+)</li>
-                        </ul>
-                    </div>
-                    
-                    <div class="availability-comp">
-                        <div><span class="detail-label">Availability:</span> Immediate</div>
-                        <div><span class="detail-label">Compensation:</span> $125K-$145K base + bonus</div>
-                    </div>
-                </div>
-                
-                <div class="ref-code">REF-2025-WK36-002</div>
-            </div>
-        </div>
-
-        <!-- Internal Note (NOT MODIFIABLE) -->
-        <div class="internal-note" data-tag="div">
-            <strong>Internal Recipients:</strong> This digest has been sent to brandon@emailthewell.com and leadership@emailthewell.com for visibility.
-        </div>
-
-        <!-- Footer (NOT MODIFIABLE) -->
         <div class="footer" data-tag="div">
-            <p>© 2025 TalentWell | Confidential</p>
-            <p>
-                <a href="https://talentwell.com/unsubscribe">Unsubscribe</a> | 
-                <a href="https://talentwell.com/preferences">Update Preferences</a> | 
-                <a href="https://talentwell.com/privacy">Privacy Policy</a>
-            </p>
-            <p style="font-size: 12px; color: #999;">
-                This email contains confidential candidate information. Please do not forward.
-            </p>
+            <p>This is an automated weekly digest from TalentWell Vault.</p>
+            <p>Questions? Contact your recruitment team.</p>
         </div>
     </div>
 </body>

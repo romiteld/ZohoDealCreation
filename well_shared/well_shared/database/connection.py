@@ -29,12 +29,17 @@ except ImportError:
     register_vector = None
 
 # Enhanced database client
+# Try importing from well_shared first, fall back to app (Phase 3 migration)
 try:
     from .database_enhancements import EnhancedPostgreSQLClient
     HAS_ENHANCED_DB = True
 except ImportError:
-    HAS_ENHANCED_DB = False
-    EnhancedPostgreSQLClient = None
+    try:
+        from app.database_enhancements import EnhancedPostgreSQLClient
+        HAS_ENHANCED_DB = True
+    except ImportError:
+        HAS_ENHANCED_DB = False
+        EnhancedPostgreSQLClient = None
 
 logger = logging.getLogger(__name__)
 

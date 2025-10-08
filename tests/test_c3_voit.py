@@ -2,7 +2,7 @@ import pytest
 import numpy as np
 import time
 import json
-from app.cache.c3 import (
+from well_shared.cache.c3 import (
     score, c3_reuse_or_rebuild, C3Entry, DependencyCertificate,
     update_calibration, generate_cache_key, _conformal_tau, _voi
 )

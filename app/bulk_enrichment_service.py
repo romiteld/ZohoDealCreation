@@ -32,7 +32,7 @@ from app.apollo_enricher import (
 )
 
 # Database connection
-from app.database_connection_manager import DatabaseConnectionManager
+from well_shared.database.connection import DatabaseConnectionManager
 
 # WebSocket manager for progress updates
 try:

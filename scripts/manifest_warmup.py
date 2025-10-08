@@ -36,7 +36,7 @@ from dotenv import load_dotenv
 # Local imports - integrate with existing caching
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from app.redis_cache_manager import RedisCacheManager
+from well_shared.cache.redis_manager import RedisCacheManager
 
 # Load environment variables
 load_dotenv('.env.local')

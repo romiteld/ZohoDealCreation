@@ -24,7 +24,7 @@ from app.bulk_enrichment_service import (
     BulkEnrichmentRequest,
     EnrichmentPriority
 )
-from app.database_connection_manager import DatabaseConnectionManager
+from well_shared.database.connection import DatabaseConnectionManager
 
 logger = logging.getLogger(__name__)
 

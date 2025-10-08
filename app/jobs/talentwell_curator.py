@@ -13,10 +13,10 @@ from dataclasses import dataclass, asdict
 import hashlib
 from dotenv import load_dotenv
 
-from app.redis_cache_manager import get_cache_manager
-from app.cache.c3 import c3_reuse_or_rebuild, C3Entry, DependencyCertificate
-from app.cache.voit import voit_orchestration
-from app.extract.evidence import EvidenceExtractor, BulletPoint
+from well_shared.cache.redis_manager import get_cache_manager
+from well_shared.cache.c3 import c3_reuse_or_rebuild, C3Entry, DependencyCertificate
+from well_shared.cache.voit import voit_orchestration
+from well_shared.evidence.extractor import EvidenceExtractor, BulletPoint
 from app.templates.ast import ASTCompiler
 from app.bandits.subject_bandit import SubjectLineBandit as SubjectBandit
 from app.integrations import get_zoho_headers, fetch_deal_from_zoho
@@ -1547,7 +1547,7 @@ Response format (JSON only):
         return intros.get(audience, intros['default'])
     
     def _format_card_html(self, card: DigestCard) -> str:
-        """Format card matching Brandon's exact template with emojis."""
+        """Format card matching simple bullet-list format from PDF reference."""
         bullets_html = '\n'.join([
             f'<li>{bullet.text}</li>'
             for bullet in card.bullets
@@ -1556,21 +1556,16 @@ Response format (JSON only):
         # Generate ref code: TWAV366105 (no hyphen)
         ref_code = f"TWAV{card.deal_id[-8:]}" if card.deal_id else "TWAV00000000"
 
-        # Extract role from job title
+        # Extract role from job title (e.g., "Senior Advisor", "Lead Advisor", "Director")
         role = card.job_title or "Advisor"
 
         return f"""
-        <div class="candidate-card">
-            <h3>‼️ {role} Candidate Alert 🔔</h3>
-            <h4><strong>{card.candidate_name}</strong></h4>
-            <div class="candidate-location">
-                📍 {card.location}
-            </div>
-            <div class="candidate-details">
-                <ul>
-                    {bullets_html}
-                </ul>
-            </div>
+        <div class="candidate">
+            <div class="candidate-title">‼️ <strong>{role} Candidate Alert</strong> 🔔</div>
+            <div class="candidate-location">📍 <strong>{card.location}</strong></div>
+            <ul class="candidate-bullets">
+                {bullets_html}
+            </ul>
             <div class="ref-code">Ref code: {ref_code}</div>
         </div>
         """

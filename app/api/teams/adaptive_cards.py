@@ -84,8 +84,13 @@ def create_welcome_card(user_name: str = "there") -> Dict[str, Any]:
                     "type": "Action.Submit",
                     "title": "📊 Generate Digest",
                     "data": {
-                        "action": "generate_digest_preview",
-                        "audience": "global"
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "generate_digest_preview",
+                                "audience": "global"
+                            }
+                        }
                     }
                 }
             ]
@@ -251,15 +256,25 @@ def create_help_card() -> Dict[str, Any]:
                     "type": "Action.Submit",
                     "title": "📊 Generate Digest",
                     "data": {
-                        "action": "generate_digest_preview",
-                        "audience": "global"
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "generate_digest_preview",
+                                "audience": "global"
+                            }
+                        }
                     }
                 },
                 {
                     "type": "Action.Submit",
                     "title": "⚙️ My Preferences",
                     "data": {
-                        "action": "show_preferences"
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "show_preferences"
+                            }
+                        }
                     }
                 }
             ]
@@ -390,10 +405,15 @@ def create_digest_preview_card(
                     "type": "Action.Submit",
                     "title": "✅ Generate Full Digest",
                     "data": {
-                        "action": "generate_digest",
-                        "audience": audience,
-                        "request_id": request_id,
-                        "dry_run": False
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "generate_digest",
+                                "audience": audience,
+                                "request_id": request_id,
+                                "dry_run": False
+                            }
+                        }
                     }
                 },
                 {
@@ -437,7 +457,12 @@ def create_digest_preview_card(
                                 "type": "Action.Submit",
                                 "title": "Apply",
                                 "data": {
-                                    "action": "apply_filters"
+                                    "msteams": {
+                                        "type": "invoke",
+                                        "value": {
+                                            "action": "apply_filters"
+                                        }
+                                    }
                                 }
                             }
                         ]
@@ -483,8 +508,13 @@ def create_error_card(error_message: str) -> Dict[str, Any]:
                     "type": "Action.Submit",
                     "title": "Try Again",
                     "data": {
-                        "action": "generate_digest_preview",
-                        "audience": "global"
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "generate_digest_preview",
+                                "audience": "global"
+                            }
+                        }
                     }
                 }
             ]
@@ -657,7 +687,12 @@ def create_preferences_card(
                     "type": "Action.Submit",
                     "title": "💾 Save Preferences",
                     "data": {
-                        "action": "save_preferences"
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "save_preferences"
+                            }
+                        }
                     }
                 }
             ]

@@ -20,7 +20,7 @@ async def test_redis_cache():
     print("Redis Cache Testing for Well Intake API")
     print("=" * 60)
     
-    from app.redis_cache_manager import RedisCacheManager
+    from well_shared.cache.redis_manager import RedisCacheManager
     from app.cache_strategies import CacheStrategyManager
     
     # Initialize cache manager

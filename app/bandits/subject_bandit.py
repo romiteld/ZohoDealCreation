@@ -9,7 +9,7 @@ import asyncio
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 import numpy as np
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 
 logger = logging.getLogger(__name__)
 

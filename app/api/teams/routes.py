@@ -16,6 +16,7 @@ import asyncpg
 # Microsoft Bot Framework imports
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext, MessageFactory, CardFactory
 from botbuilder.schema import Activity, ActivityTypes
+from botbuilder.schema.teams import InvokeResponse
 from botframework.connector.auth import MicrosoftAppCredentials
 
 from app.api.teams.adaptive_cards import (
@@ -26,7 +27,7 @@ from app.api.teams.adaptive_cards import (
     create_preferences_card
 )
 from app.jobs.talentwell_curator import TalentWellCurator
-from app.database_connection_manager import get_database_connection
+from well_shared.database.connection import get_database_connection
 from app.api.teams.query_engine import process_natural_language_query
 
 logger = logging.getLogger(__name__)
@@ -228,7 +229,7 @@ async def teams_webhook(request: Request):
 
             try:
                 # Get database connection for this request
-                from app.database_connection_manager import get_connection_manager
+                from well_shared.database.connection import get_connection_manager
                 manager = await get_connection_manager()
                 async with manager.get_connection() as db:
                     # Log: bot_logic started
@@ -413,6 +414,13 @@ async def handle_message_activity(
             if audience == "steve_perry":
                 audience = "advisors"  # Map legacy steve_perry to advisors
 
+        # Enhanced logging for debugging
+        import os
+        logger.info(f"=== DIGEST COMMAND ===")
+        logger.info(f"Audience: {audience}")
+        logger.info(f"ZOHO_VAULT_VIEW_ID: {os.getenv('ZOHO_VAULT_VIEW_ID', 'NOT SET')}")
+        logger.info(f"ZCAND_MODULE: {os.getenv('ZCAND_MODULE', 'NOT SET')}")
+
         return await generate_digest_preview(
             user_id=user_id,
             user_email=user_email,
@@ -500,7 +508,20 @@ async def handle_invoke_activity(
         activity = turn_context.activity
         # Extract action data
         action_data = activity.value or {}
+
+        # Check if data is wrapped in msteams.value (new pattern from adaptive cards)
+        if "msteams" in action_data:
+            msteams_data = action_data.get("msteams", {})
+            if "value" in msteams_data:
+                action_data = msteams_data["value"]
+
         action = action_data.get("action", "")
+
+        # Enhanced logging for debugging button clicks
+        logger.info(f"=== INVOKE ACTIVITY RECEIVED ===")
+        logger.info(f"Action: {action}")
+        logger.info(f"Action Data: {json.dumps(action_data, indent=2)}")
+        print(f"=== INVOKE: action={action}, data={action_data}", flush=True)
 
         user_id = activity.from_property.id if activity.from_property else ""
         user_email = extract_user_email(activity)  # Use helper to get real email, not GUID

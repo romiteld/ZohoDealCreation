@@ -173,7 +173,7 @@ class TestTeamsBot:
     def test_adaptive_card_generation(self, command_handler):
         """Test Adaptive Card generation."""
         from app.jobs.talentwell_curator import DigestCard
-        from app.extract.evidence import BulletPoint
+        from well_shared.evidence.extractor import BulletPoint
 
         # Create sample cards
         cards = [

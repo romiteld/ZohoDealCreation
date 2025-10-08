@@ -17,7 +17,7 @@ from langextract.config import ModelProvider
 
 # Local imports
 from app.models import ExtractedData
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 
 logger = logging.getLogger(__name__)
 

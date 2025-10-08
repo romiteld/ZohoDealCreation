@@ -14,7 +14,7 @@ from datetime import timedelta
 import httpx
 from pydantic import BaseModel
 
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 from app.config_manager import get_extraction_config
 from app.security_config import SecurityConfig
 

@@ -1,7 +1,7 @@
 import json
 import logging
 from typing import Optional
-from app.cache.c3 import C3Entry, DependencyCertificate
+from well_shared.cache.c3 import C3Entry, DependencyCertificate
 import redis.asyncio as redis
 
 logger = logging.getLogger(__name__)

@@ -8,7 +8,7 @@ import logging
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from app.mail.send import EmailMessage, EmailDeliveryManager, inline_css_for_email
+from well_shared.mail.sender import EmailMessage, EmailDeliveryManager, inline_css_for_email
 
 logger = logging.getLogger(__name__)
 

@@ -11,7 +11,10 @@ from openai import AsyncOpenAI
 from dotenv import load_dotenv
 
 # Import shared VoIT configuration
-from app.config import VoITConfig
+try:
+    from well_shared.config.voit_config import VoITConfig
+except ImportError:
+    from app.config import VoITConfig
 
 logger = logging.getLogger(__name__)
 

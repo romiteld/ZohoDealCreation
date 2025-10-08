@@ -7,10 +7,10 @@ import time
 import uuid
 import os
 import logging
-from app.cache.c3 import C3Entry, DependencyCertificate, c3_reuse_or_rebuild, update_calibration, generate_cache_key
+from well_shared.cache.c3 import C3Entry, DependencyCertificate, c3_reuse_or_rebuild, update_calibration, generate_cache_key
 from app.cache.redis_io import load_c3_entry, save_c3_entry
 from app.orchestrator.voit import voit_controller
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 from app.models import ExtractedData
 import numpy as np
 

@@ -11,7 +11,7 @@ from typing import List
 
 import app.jobs.talentwell_curator as curator_module
 from app.jobs.talentwell_curator import TalentWellCurator, DigestCard, BulletPoint
-from app.extract.evidence import EvidenceExtractor, BulletCategory
+from well_shared.evidence.extractor import EvidenceExtractor, BulletCategory
 
 
 class TestBulletRanking:

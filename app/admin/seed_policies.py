@@ -14,7 +14,7 @@ from collections import defaultdict
 from dotenv import load_dotenv
 
 from app.integrations import PostgreSQLClient
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 
 # Load environment variables
 load_dotenv('.env.local')

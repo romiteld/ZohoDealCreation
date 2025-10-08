@@ -37,7 +37,7 @@ load_dotenv(env_path)
 from app.models import EmailPayload, ExtractedData
 from app.langgraph_manager import LangGraphWorkflowManager
 from app.batch_processor import BatchProcessor
-from app.redis_cache_manager import RedisCacheManager
+from well_shared.cache.redis_manager import RedisCacheManager
 from app.integrations import PostgreSQLClient
 
 # Performance test configuration

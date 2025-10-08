@@ -17,7 +17,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).parent.parent.parent))
 
 from app.integrations import PostgreSQLClient
-from app.redis_cache_manager import RedisCacheManager
+from well_shared.cache.redis_manager import RedisCacheManager
 from dotenv import load_dotenv
 
 # Load environment variables

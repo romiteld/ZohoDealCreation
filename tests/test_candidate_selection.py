@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from app.jobs.talentwell_curator import TalentWellCurator
-from app.redis_cache_manager import get_cache_manager
+from well_shared.cache.redis_manager import get_cache_manager
 
 # Load environment variables
 load_dotenv('.env.local')

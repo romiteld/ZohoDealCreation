@@ -13,8 +13,8 @@ from datetime import datetime, timedelta
 import hashlib
 
 from app.jobs.talentwell_curator import TalentWellCurator, DigestCard, BulletPoint
-from app.redis_cache_manager import RedisCacheManager
-from app.cache.c3 import C3Entry, DependencyCertificate
+from well_shared.cache.redis_manager import RedisCacheManager
+from well_shared.cache.c3 import C3Entry, DependencyCertificate
 
 
 class TestIntegration:
