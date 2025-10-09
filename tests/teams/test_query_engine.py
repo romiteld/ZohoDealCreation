@@ -11,6 +11,19 @@ from app.api.teams.query_engine import QueryEngine
 pytestmark = pytest.mark.anyio
 
 
+def make_openai_response(content: str) -> MagicMock:
+    response = MagicMock()
+    choice = MagicMock()
+    choice.message.content = content
+    response.choices = [choice]
+    return response
+
+
+def setup_openai_responses(mock_openai, *contents: str) -> None:
+    responses = [make_openai_response(content) for content in contents]
+    mock_openai.chat.completions.create = AsyncMock(side_effect=responses)
+
+
 @pytest.fixture
 def mock_zoho_client():
     """Mock ZohoApiClient for testing."""
@@ -67,9 +80,7 @@ def sample_vault_candidates():
 async def test_candidate_locator_query(mock_zoho_client, mock_openai, sample_vault_candidates):
     """Test querying by Candidate Locator ID."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "search",
         "table": "vault_candidates",
         "entities": {
@@ -77,7 +88,8 @@ async def test_candidate_locator_query(mock_zoho_client, mock_openai, sample_vau
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Chad Terry is the only vault candidate matching TWAV118252."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API response
     mock_zoho_client.query_candidates = AsyncMock(return_value=sample_vault_candidates[:1])
@@ -99,9 +111,7 @@ async def test_candidate_locator_query(mock_zoho_client, mock_openai, sample_vau
 async def test_timeframe_filtering_last_week(mock_zoho_client, mock_openai, sample_vault_candidates):
     """Test 'last week' timeframe converts to date filters."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "count",
         "table": "vault_candidates",
         "entities": {
@@ -109,7 +119,7 @@ async def test_timeframe_filtering_last_week(mock_zoho_client, mock_openai, samp
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    setup_openai_responses(mock_openai, classification)
 
     # Mock Zoho API response with recent candidates only
     recent_candidates = [c for c in sample_vault_candidates if c['date_published'] >= '2025-10-01']
@@ -135,15 +145,14 @@ async def test_timeframe_filtering_last_week(mock_zoho_client, mock_openai, samp
 async def test_base_limit_raised(mock_zoho_client, mock_openai):
     """Test base limit is 500, not 100."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "vault_candidates",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Pulled 144 vault candidates so you can skim the highlights."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API response with 144 candidates
     mock_candidates = [
@@ -177,9 +186,7 @@ async def test_base_limit_raised(mock_zoho_client, mock_openai):
 async def test_name_search_filtering(mock_zoho_client, mock_openai, sample_vault_candidates):
     """Test client-side name filtering works."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "search",
         "table": "vault_candidates",
         "entities": {
@@ -187,7 +194,8 @@ async def test_name_search_filtering(mock_zoho_client, mock_openai, sample_vault
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "I pulled John Smith from the vault along with the supporting context."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API returns all candidates
     mock_zoho_client.query_candidates = AsyncMock(return_value=sample_vault_candidates)
@@ -208,15 +216,14 @@ async def test_name_search_filtering(mock_zoho_client, mock_openai, sample_vault
 async def test_executive_access_no_owner_filter(mock_zoho_client, mock_openai, sample_vault_candidates):
     """Test executive users get full data access."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "vault_candidates",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Sharing the latest three vault candidates without any owner filter."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API
     mock_zoho_client.query_candidates = AsyncMock(return_value=sample_vault_candidates)
@@ -240,15 +247,14 @@ async def test_executive_access_no_owner_filter(mock_zoho_client, mock_openai, s
 async def test_regular_user_owner_filter(mock_zoho_client, mock_openai, sample_vault_candidates):
     """Test regular users get owner-filtered data."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "vault_candidates",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Filtering down to your vault candidates only."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API
     mock_zoho_client.query_candidates = AsyncMock(return_value=sample_vault_candidates[:1])
@@ -265,13 +271,35 @@ async def test_regular_user_owner_filter(mock_zoho_client, mock_openai, sample_v
     assert call_kwargs["owner"] == "recruiter@emailthewell.com"
 
 
+async def test_owner_filter_skipped_without_email(mock_zoho_client, mock_openai, sample_vault_candidates):
+    """Ensure we don't scope results when the caller email is missing."""
+
+    classification = """{
+        "intent_type": "list",
+        "table": "vault_candidates",
+        "entities": {},
+        "filters": {}
+    }"""
+    summary = "Sharing the latest vault candidates without applying an owner filter."
+    setup_openai_responses(mock_openai, classification, summary)
+
+    mock_zoho_client.query_candidates = AsyncMock(return_value=sample_vault_candidates)
+
+    engine = QueryEngine()
+    result = await engine.process_query(
+        query="list my candidates",
+        user_email=""
+    )
+
+    call_kwargs = mock_zoho_client.query_candidates.call_args.kwargs
+    assert "owner" not in call_kwargs
+    assert len(result["data"]) == len(sample_vault_candidates)
+
 
 async def test_month_filtering_september(mock_zoho_client, mock_openai, sample_vault_candidates):
     """Test September timeframe generates correct date range."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "vault_candidates",
         "entities": {
@@ -279,7 +307,8 @@ async def test_month_filtering_september(mock_zoho_client, mock_openai, sample_v
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Here are the September vault candidates you asked about."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API
     september_candidates = [c for c in sample_vault_candidates if c['date_published'].startswith('2025-09')]
@@ -422,15 +451,13 @@ def sample_meetings():
 async def test_deal_count_query(mock_zoho_client, mock_openai, sample_deals):
     """Test counting deals with correct response formatting."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "count",
         "table": "deals",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    setup_openai_responses(mock_openai, classification)
 
     # Mock Zoho API response
     mock_zoho_client.query_deals = AsyncMock(return_value=sample_deals)
@@ -443,7 +470,7 @@ async def test_deal_count_query(mock_zoho_client, mock_openai, sample_deals):
     )
 
     # Verify correct count response wording
-    assert result["text"] == "Found 3 deals."
+    assert result["text"] == "I found 3 deals for you."
     assert result["data"]["count"] == 3
 
 
@@ -451,9 +478,7 @@ async def test_deal_count_query(mock_zoho_client, mock_openai, sample_deals):
 async def test_deal_timeframe_filtering(mock_zoho_client, mock_openai, sample_deals):
     """Test deals filtered by timeframe (last month)."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "count",
         "table": "deals",
         "entities": {
@@ -461,7 +486,7 @@ async def test_deal_timeframe_filtering(mock_zoho_client, mock_openai, sample_de
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    setup_openai_responses(mock_openai, classification)
 
     # Mock Zoho API - should be called with date filters
     recent_deals = [d for d in sample_deals if d['created_at'] and d['created_at'] >= datetime(2025, 9, 1)]
@@ -487,9 +512,7 @@ async def test_deal_timeframe_filtering(mock_zoho_client, mock_openai, sample_de
 async def test_deal_stage_filtering(mock_zoho_client, mock_openai, sample_deals):
     """Test deals filtered by stage."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "deals",
         "entities": {
@@ -497,7 +520,8 @@ async def test_deal_stage_filtering(mock_zoho_client, mock_openai, sample_deals)
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Here are the deals currently sitting in Meeting Booked."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API
     meeting_booked_deals = [d for d in sample_deals if d['stage'] == 'Meeting Booked']
@@ -523,9 +547,7 @@ async def test_deal_stage_filtering(mock_zoho_client, mock_openai, sample_deals)
 async def test_deal_name_search(mock_zoho_client, mock_openai, sample_deals):
     """Test client-side filtering by contact/account name."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "search",
         "table": "deals",
         "entities": {
@@ -533,7 +555,8 @@ async def test_deal_name_search(mock_zoho_client, mock_openai, sample_deals):
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Goldman Sachs pops up in this deal summary."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API returns all deals
     mock_zoho_client.query_deals = AsyncMock(return_value=sample_deals)
@@ -554,15 +577,14 @@ async def test_deal_name_search(mock_zoho_client, mock_openai, sample_deals):
 async def test_deal_datetime_none_fallback(mock_zoho_client, mock_openai, sample_deals):
     """Test deals with missing created_at show 'N/A' instead of crashing."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "deals",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Here are the deals on your radar right now."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API - include deal with None timestamp
     mock_zoho_client.query_deals = AsyncMock(return_value=sample_deals)
@@ -583,15 +605,13 @@ async def test_deal_datetime_none_fallback(mock_zoho_client, mock_openai, sample
 async def test_meeting_count_query(mock_zoho_client, mock_openai, sample_meetings):
     """Test counting meetings with correct response formatting."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "count",
         "table": "meetings",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    setup_openai_responses(mock_openai, classification)
 
     # Mock Zoho API response
     mock_zoho_client.query_meetings = AsyncMock(return_value=sample_meetings)
@@ -604,7 +624,7 @@ async def test_meeting_count_query(mock_zoho_client, mock_openai, sample_meeting
     )
 
     # Verify correct count response wording
-    assert result["text"] == "Found 3 meetings."
+    assert result["text"] == "I found 3 meetings for you."
     assert result["data"]["count"] == 3
 
 
@@ -612,9 +632,7 @@ async def test_meeting_count_query(mock_zoho_client, mock_openai, sample_meeting
 async def test_meeting_timeframe_filtering(mock_zoho_client, mock_openai, sample_meetings):
     """Test meetings filtered by timeframe (last week)."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "meetings",
         "entities": {
@@ -622,7 +640,8 @@ async def test_meeting_timeframe_filtering(mock_zoho_client, mock_openai, sample
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Here are your meetings from last week."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API
     recent_meetings = [m for m in sample_meetings if m['meeting_date'] and m['meeting_date'] >= datetime.now() - timedelta(days=7)]
@@ -645,9 +664,7 @@ async def test_meeting_timeframe_filtering(mock_zoho_client, mock_openai, sample
 async def test_meeting_name_search_or_logic(mock_zoho_client, mock_openai, sample_meetings):
     """Test client-side OR filtering for meeting name (title OR related_to)."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "search",
         "table": "meetings",
         "entities": {
@@ -655,7 +672,8 @@ async def test_meeting_name_search_or_logic(mock_zoho_client, mock_openai, sampl
         },
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Highlighting the meeting tied to Goldman Sachs."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API returns all meetings
     mock_zoho_client.query_meetings = AsyncMock(return_value=sample_meetings)
@@ -677,15 +695,14 @@ async def test_meeting_name_search_or_logic(mock_zoho_client, mock_openai, sampl
 async def test_meeting_datetime_none_fallback(mock_zoho_client, mock_openai, sample_meetings):
     """Test meetings with missing meeting_date show 'N/A' instead of crashing."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "meetings",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Here are the meetings on your calendar right now."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API - include meeting with None timestamp
     mock_zoho_client.query_meetings = AsyncMock(return_value=sample_meetings)
@@ -706,15 +723,14 @@ async def test_meeting_datetime_none_fallback(mock_zoho_client, mock_openai, sam
 async def test_meeting_owner_filtering_regular_user(mock_zoho_client, mock_openai, sample_meetings):
     """Test regular users only see their own meetings."""
     # Mock OpenAI intent classification
-    mock_response = MagicMock()
-    mock_response.choices = [MagicMock()]
-    mock_response.choices[0].message.content = """{
+    classification = """{
         "intent_type": "list",
         "table": "meetings",
         "entities": {},
         "filters": {}
     }"""
-    mock_openai.chat.completions.create = AsyncMock(return_value=mock_response)
+    summary = "Surfaced the meetings tied to your owner email."
+    setup_openai_responses(mock_openai, classification, summary)
 
     # Mock Zoho API
     user_meetings = [m for m in sample_meetings if m['owner_email'] == 'brandon@emailthewell.com']

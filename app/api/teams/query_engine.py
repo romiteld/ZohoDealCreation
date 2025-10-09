@@ -11,17 +11,27 @@ import os
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 import asyncpg
-from openai import AsyncOpenAI
+import openai
 
 logger = logging.getLogger(__name__)
 
+# Access control constants
+EXECUTIVE_USERS = {
+    "steve@emailthewell.com",  # CEO access
+    "daniel.romitelli@emailthewell.com"
+}
+
 class QueryEngine:
-    """Natural language query engine for Teams Bot - all users have full access."""
+    """Natural language query engine with friendly responses and role-aware filtering."""
 
     def __init__(self):
         """Initialize query engine with OpenAI client."""
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = "gpt-5-mini"  # Fast model for query classification
+        self.response_model = os.getenv(
+            "TEAMS_QUERY_RESPONSE_MODEL",
+            "gpt-5.1-mini",
+        )
 
     async def process_query(
         self,
@@ -49,7 +59,12 @@ class QueryEngine:
             - confidence_score: Intent classification confidence (0.0-1.0)
         """
         try:
-            logger.info(f"Processing query from {user_email}: {query}")
+            normalized_email = (user_email or "").strip().lower()
+            email_is_valid = self._looks_like_email(normalized_email)
+            is_executive = normalized_email in EXECUTIVE_USERS
+            scope = "full" if is_executive else "user_only"
+
+            logger.info(f"Processing query from {user_email} (scope: {scope}): {query}")
 
             # Step 1: Classify intent OR use override
             if override_intent:
@@ -64,8 +79,38 @@ class QueryEngine:
             if intent.get("intent_type") == "transcript_summary":
                 return await self._handle_transcript_summary(intent)
 
-            # Step 3: No owner filtering - all users see all data
-            intent["owner_filter"] = None
+            # Step 3: Apply owner filter for non-executives (override any requested owner)
+            if not is_executive:
+                requested_owner = intent.get("owner_filter")
+                if email_is_valid:
+                    if requested_owner and requested_owner != normalized_email:
+                        logger.info(
+                            "Overriding requested owner '%s' for non-executive %s",
+                            requested_owner,
+                            normalized_email,
+                        )
+                    intent["owner_filter"] = normalized_email
+                else:
+                    if normalized_email:
+                        logger.warning(
+                            "Skipping owner scoping for %s due to invalid email format '%s'",
+                            user_email,
+                            normalized_email,
+                        )
+                    else:
+                        logger.warning(
+                            "Skipping owner scoping for %s because no email was provided",
+                            user_email or "<unknown>",
+                        )
+                    if requested_owner:
+                        logger.info(
+                            "Preserving requested owner filter '%s' from intent despite missing valid email",
+                            requested_owner,
+                        )
+                    else:
+                        intent.pop("owner_filter", None)
+            else:
+                intent["owner_filter"] = None
 
             # Step 4: Build and execute Zoho query
             results, _ = await self._build_query(intent)
@@ -88,6 +133,14 @@ class QueryEngine:
                 "data": None,
                 "confidence_score": 0.0
             }
+
+    @staticmethod
+    def _looks_like_email(value: str) -> bool:
+        """Return True if the provided value resembles an email address."""
+        if not value or "@" not in value:
+            return False
+        local, _, domain = value.partition("@")
+        return bool(local and domain and "." in domain)
 
     async def _classify_intent(
         self,
@@ -504,7 +557,7 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             # More helpful error message with table name
             table_display = "vault candidates" if table == "vault_candidates" else table
             return {
-                "text": f"I didn't find any {table_display} matching your query.",
+                "text": f"I couldn't find any {table_display} that match that yet. Want to try different filters?",
                 "card": None,
                 "data": None
             }
@@ -521,27 +574,45 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
                 "deal_notes": "notes"
             }
             label = table_labels.get(table, "records")
+            if count == 1 and label.endswith("s"):
+                label = label[:-1]
+            base_text = f"I found {count} {label} for you."
             return {
-                "text": f"Found {count} {label}.",
+                "text": base_text,
                 "card": None,
                 "data": {"count": count}
             }
 
         elif intent_type == "aggregate":
             # Format stage aggregation
-            text = "Here's the breakdown:\n\n"
+            text = "Here's the breakdown I pulled together:\n\n"
             for row in results:
                 text += f"- {row['stage']}: {row['count']}\n"
+
+            structured_results = [dict(row) for row in results]
+            conversational = await self._generate_conversational_summary(
+                query=query,
+                intent=intent,
+                table=table,
+                intent_type=intent_type,
+                base_text=text,
+                structured_results=structured_results,
+            )
+            if conversational:
+                text = conversational
+
             return {
                 "text": text,
                 "card": None,
-                "data": [dict(row) for row in results]
+                "data": structured_results
             }
 
         else:  # list or search
             # Format based on table
+            structured_results = results if isinstance(results, list) else [dict(row) for row in results]
+
             if table == "deals":
-                text = f"Found {len(results)} deals:\n\n"
+                text = f"Here's what I found for {len(results)} deals:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     text += f"{i}. {row['deal_name']}\n"
                     text += f"   Contact: {row['contact_name'] or 'N/A'}\n"
@@ -554,9 +625,10 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nLet me know if you'd like more detail on any of them."
 
             elif table == "deal_notes":
-                text = f"Found {len(results)} notes:\n\n"
+                text = f"Here are the latest {len(results)} notes I pulled:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     text += f"{i}. {row['note_content'][:100]}...\n"
                     text += f"   By: {row['created_by'] or 'N/A'}\n"
@@ -567,9 +639,10 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nHappy to drill into any specific note if you need it."
 
             elif table == "meetings":
-                text = f"Found {len(results)} meetings:\n\n"
+                text = f"Here's what I rounded up for {len(results)} meetings:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     text += f"{i}. {row['subject']}\n"
                     # Safe datetime formatting with fallback
@@ -582,9 +655,10 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nNeed a deep dive on any meeting? Just say the word."
 
             else:  # Default: vault candidates (from Zoho API)
-                text = f"Found {len(results)} vault candidates:\n\n"
+                text = f"Here's what I found across {len(results)} vault candidates:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     name = row.get('candidate_name', 'Unknown')
                     title = row.get('job_title', 'No title')
@@ -602,12 +676,160 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nWant me to summarize or filter further?"
+
+            conversational = await self._generate_conversational_summary(
+                query=query,
+                intent=intent,
+                table=table,
+                intent_type=intent_type,
+                base_text=text,
+                structured_results=structured_results,
+            )
+            if conversational:
+                text = conversational
 
             return {
                 "text": text,
                 "card": None,  # TODO: Implement Adaptive Card formatting
-                "data": results if isinstance(results, list) else [dict(row) for row in results]
+                "data": structured_results
             }
+
+    async def _generate_conversational_summary(
+        self,
+        *,
+        query: str,
+        intent: Dict[str, Any],
+        table: str,
+        intent_type: str,
+        base_text: str,
+        structured_results: List[Dict[str, Any]],
+    ) -> Optional[str]:
+        """Generate a conversational summary of the results using GPT."""
+
+        if not structured_results:
+            return None
+
+        # Only send a small sample to the model to keep prompts compact
+        sample_records = structured_results[:5]
+
+        def _sanitize(value: Any) -> Any:
+            if isinstance(value, datetime):
+                return value.isoformat()
+            if isinstance(value, list):
+                return [_sanitize(v) for v in value[:5]]
+            if isinstance(value, dict):
+                return {k: _sanitize(v) for k, v in value.items()}
+            if isinstance(value, (str, int, float, bool)) or value is None:
+                return value
+            return str(value)
+
+        sanitized_records = []
+        for record in sample_records:
+            sanitized_records.append({k: _sanitize(v) for k, v in record.items()})
+
+        payload = json.dumps(
+            {
+                "table": table,
+                "intent_type": intent_type,
+                "total_results": len(structured_results),
+                "records": sanitized_records,
+                "entities": intent.get("entities", {}),
+            },
+            ensure_ascii=False,
+        )
+
+        system_prompt = (
+            "You are TalentWell's recruiting assistant. Respond conversationally while staying faithful "
+            "to the structured Zoho CRM results provided. Highlight the most relevant data points, avoid "
+            "speculation, and mention next-step offers (e.g., deeper filters, summaries) when appropriate."
+        )
+
+        user_prompt = (
+            f"User query: {query}\n\n"
+            f"Structured results (JSON):\n{payload}\n\n"
+            "Rewrite the assistant's draft response below into a friendly paragraph or two. "
+            "Keep all concrete facts sourced from the data. If there are additional records beyond the "
+            "sample, note how many remain. Encourage the user to ask follow-up questions.\n\n"
+            f"Draft response:\n{base_text}"
+        )
+
+        try:
+            response = await self.client.chat.completions.create(
+                model=self.response_model,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                temperature=0.4,
+                max_tokens=350,
+            )
+
+            summary = response.choices[0].message.content.strip()
+            if not summary:
+                return None
+
+            highlights = self._format_highlights(table, sanitized_records)
+            if highlights:
+                return f"{summary}\n\nTop results:\n{highlights}"
+            return summary
+        except Exception as exc:
+            logger.warning(f"Failed to generate conversational summary: {exc}")
+            return None
+
+    def _format_highlights(self, table: str, records: List[Dict[str, Any]]) -> str:
+        """Create concise highlight lines for the conversational summary."""
+
+        if not records:
+            return ""
+
+        lines: List[str] = []
+        for idx, record in enumerate(records[:3], 1):
+            if table == "deals":
+                name = record.get("deal_name") or "Unnamed deal"
+                stage = record.get("stage") or "N/A"
+                company = record.get("account_name") or "N/A"
+                created_at = record.get("created_at") or "N/A"
+                if isinstance(created_at, str) and len(created_at) >= 10:
+                    created_at = created_at[:10]
+                lines.append(
+                    f"{idx}. {name} — Stage: {stage}; Company: {company}; Created: {created_at}"
+                )
+            elif table == "meetings":
+                subject = record.get("subject") or "Meeting"
+                meeting_date = record.get("meeting_date") or "N/A"
+                if isinstance(meeting_date, str) and len(meeting_date) >= 16:
+                    meeting_date = meeting_date[:16]
+                owner = record.get("owner_email") or record.get("owner_name") or "N/A"
+                lines.append(
+                    f"{idx}. {subject} — When: {meeting_date}; Owner: {owner}"
+                )
+            elif table == "vault_candidates":
+                name = record.get("candidate_name") or "Candidate"
+                title = record.get("job_title") or "N/A"
+                location = record.get("location") or "N/A"
+                lines.append(
+                    f"{idx}. {name} — Title: {title}; Location: {location}"
+                )
+            elif table == "deal_notes":
+                content = record.get("note_content") or "Note"
+                author = record.get("created_by") or "N/A"
+                created_at = record.get("created_at") or "N/A"
+                if isinstance(created_at, str) and len(created_at) >= 10:
+                    created_at = created_at[:10]
+                snippet = content[:80] + ("…" if len(content) > 80 else "")
+                lines.append(
+                    f"{idx}. {snippet} — By: {author}; Date: {created_at}"
+                )
+            elif table == "aggregate":
+                stage = record.get("stage") or record.get("group") or "Group"
+                count = record.get("count") or 0
+                lines.append(f"{idx}. {stage}: {count}")
+            else:
+                # Fallback: compact JSON dump
+                lines.append(f"{idx}. {json.dumps(record, ensure_ascii=False)}")
+
+        return "\n".join(lines)
 
     async def _handle_transcript_summary(
         self,

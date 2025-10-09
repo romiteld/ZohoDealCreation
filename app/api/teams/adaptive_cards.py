@@ -285,7 +285,8 @@ def create_help_card() -> Dict[str, Any]:
 def create_digest_preview_card(
     cards_metadata: List[Dict[str, Any]],
     audience: str,
-    request_id: str
+    request_id: str,
+    test_recipient_email: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     Create digest preview card with candidate summaries.
@@ -354,7 +355,7 @@ def create_digest_preview_card(
     total_candidates = len(cards_metadata)
     showing = min(3, total_candidates)
 
-    return {
+    card = {
         "contentType": "application/vnd.microsoft.card.adaptive",
         "content": {
             "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
@@ -471,6 +472,34 @@ def create_digest_preview_card(
             ]
         }
     }
+
+    if test_recipient_email:
+        # Insert a reminder banner near the top of the card body
+        banner = {
+            "type": "TextBlock",
+            "text": f"⚠️ Test mode: the digest email will be sent to {test_recipient_email}",
+            "wrap": True,
+            "spacing": "Small",
+            "color": "Warning"
+        }
+        card["content"]["body"].insert(1, banner)
+
+        # Propagate test recipient metadata on all submit actions
+        def _add_test_recipient_to_action(action: Dict[str, Any]) -> None:
+            if action.get("type") != "Action.Submit":
+                return
+            action.setdefault("data", {}).setdefault("msteams", {}).setdefault("value", {})[
+                "test_recipient_email"
+            ] = test_recipient_email
+
+        for action in card["content"].get("actions", []):
+            _add_test_recipient_to_action(action)
+            if action.get("type") == "Action.ShowCard":
+                inner_card = action.get("card") or {}
+                for inner_action in inner_card.get("actions", []):
+                    _add_test_recipient_to_action(inner_action)
+
+    return card
 
 
 def create_error_card(error_message: str) -> Dict[str, Any]:
