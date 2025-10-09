@@ -10,6 +10,14 @@ This guide provides step-by-step instructions for setting up a Microsoft Teams b
 - **Messaging Endpoint**: Webhook URL for Teams messages
 - **Authentication**: Azure AD app registration for secure access
 
+### Conversational CRM Query Architecture (RAG)
+- **Dedicated RAG Endpoint**: Expose a FastAPI route such as `POST /api/crm/query` that the Teams bot can call when it detects a free-form question about CRM data. This keeps natural language handling decoupled from the `/chat` webhook logic while still reusing the same application container.
+- **LangGraph Orchestration**: Route each request through the existing LangGraph pipelines so the bot can determine intent (e.g., `QueryDeals`), extract entities (account names, stages, owners), and decide whether a clarification turn is required.
+- **Retrieval Layer**: Convert the recognized intent/entities into structured searches. Prefer semantic lookup against the Azure PostgreSQL + `pgvector` index that mirrors Zoho CRM data; fall back to direct Zoho CRM API calls when semantic data is unavailable or stale. Return normalized deal/contact objects so downstream consumers stay consistent.
+- **Generation Layer**: Provide the retrieved objects and prior conversation turns to Azure OpenAI (GPT-5) to produce conversational answers. Keep prompts inside `app/prompts/` and include safeguards (max tokens, temperature) that align with production usage.
+- **State Management**: Persist Teams conversation state (keyed by Teams user ID + conversation ID) inside Azure Cache for Redis. Store both the high-level intent history and message transcript so follow-up questions automatically inherit context when invoking the RAG endpoint.
+- **Telemetry**: Record each RAG invocation (intent, latency, retrieval source) via Application Insights to monitor quality and surface retraining opportunities.
+
 ### 2. API Endpoints
 - **Location**: `/app/api/teams/routes.py`
 - **Base URL**: `https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/teams`
