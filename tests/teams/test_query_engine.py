@@ -443,7 +443,7 @@ async def test_deal_count_query(mock_zoho_client, mock_openai, sample_deals):
     )
 
     # Verify correct count response wording
-    assert result["text"] == "Found 3 deals."
+    assert result["text"] == "I found 3 deals for you."
     assert result["data"]["count"] == 3
 
 
@@ -604,7 +604,7 @@ async def test_meeting_count_query(mock_zoho_client, mock_openai, sample_meeting
     )
 
     # Verify correct count response wording
-    assert result["text"] == "Found 3 meetings."
+    assert result["text"] == "I found 3 meetings for you."
     assert result["data"]["count"] == 3
 
 

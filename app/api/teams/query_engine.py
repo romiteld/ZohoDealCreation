@@ -11,16 +11,22 @@ import os
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta
 import asyncpg
-from openai import AsyncOpenAI
+import openai
 
 logger = logging.getLogger(__name__)
 
+# Access control constants
+EXECUTIVE_USERS = {
+    "steve@emailthewell.com",  # CEO access
+    "daniel.romitelli@emailthewell.com"
+}
+
 class QueryEngine:
-    """Natural language query engine for Teams Bot - all users have full access."""
+    """Natural language query engine with friendly responses and role-aware filtering."""
 
     def __init__(self):
         """Initialize query engine with OpenAI client."""
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = openai.AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = "gpt-5-mini"  # Fast model for query classification
 
     async def process_query(
@@ -49,7 +55,11 @@ class QueryEngine:
             - confidence_score: Intent classification confidence (0.0-1.0)
         """
         try:
-            logger.info(f"Processing query from {user_email}: {query}")
+            normalized_email = (user_email or "").lower()
+            is_executive = normalized_email in EXECUTIVE_USERS
+            scope = "full" if is_executive else "user_only"
+
+            logger.info(f"Processing query from {user_email} (scope: {scope}): {query}")
 
             # Step 1: Classify intent OR use override
             if override_intent:
@@ -64,8 +74,11 @@ class QueryEngine:
             if intent.get("intent_type") == "transcript_summary":
                 return await self._handle_transcript_summary(intent)
 
-            # Step 3: No owner filtering - all users see all data
-            intent["owner_filter"] = None
+            # Step 3: Apply owner filter for non-executives unless override supplied one
+            if not is_executive:
+                intent.setdefault("owner_filter", normalized_email)
+            else:
+                intent["owner_filter"] = None
 
             # Step 4: Build and execute Zoho query
             results, _ = await self._build_query(intent)
@@ -504,7 +517,7 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             # More helpful error message with table name
             table_display = "vault candidates" if table == "vault_candidates" else table
             return {
-                "text": f"I didn't find any {table_display} matching your query.",
+                "text": f"I couldn't find any {table_display} that match that yet. Want to try different filters?",
                 "card": None,
                 "data": None
             }
@@ -521,15 +534,17 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
                 "deal_notes": "notes"
             }
             label = table_labels.get(table, "records")
+            if count == 1 and label.endswith("s"):
+                label = label[:-1]
             return {
-                "text": f"Found {count} {label}.",
+                "text": f"I found {count} {label} for you.",
                 "card": None,
                 "data": {"count": count}
             }
 
         elif intent_type == "aggregate":
             # Format stage aggregation
-            text = "Here's the breakdown:\n\n"
+            text = "Here's the breakdown I pulled together:\n\n"
             for row in results:
                 text += f"- {row['stage']}: {row['count']}\n"
             return {
@@ -541,7 +556,7 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
         else:  # list or search
             # Format based on table
             if table == "deals":
-                text = f"Found {len(results)} deals:\n\n"
+                text = f"Here's what I found for {len(results)} deals:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     text += f"{i}. {row['deal_name']}\n"
                     text += f"   Contact: {row['contact_name'] or 'N/A'}\n"
@@ -554,9 +569,10 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nLet me know if you'd like more detail on any of them."
 
             elif table == "deal_notes":
-                text = f"Found {len(results)} notes:\n\n"
+                text = f"Here are the latest {len(results)} notes I pulled:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     text += f"{i}. {row['note_content'][:100]}...\n"
                     text += f"   By: {row['created_by'] or 'N/A'}\n"
@@ -567,9 +583,10 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nHappy to drill into any specific note if you need it."
 
             elif table == "meetings":
-                text = f"Found {len(results)} meetings:\n\n"
+                text = f"Here's what I rounded up for {len(results)} meetings:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     text += f"{i}. {row['subject']}\n"
                     # Safe datetime formatting with fallback
@@ -582,9 +599,10 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nNeed a deep dive on any meeting? Just say the word."
 
             else:  # Default: vault candidates (from Zoho API)
-                text = f"Found {len(results)} vault candidates:\n\n"
+                text = f"Here's what I found across {len(results)} vault candidates:\n\n"
                 for i, row in enumerate(results[:5], 1):
                     name = row.get('candidate_name', 'Unknown')
                     title = row.get('job_title', 'No title')
@@ -602,6 +620,7 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 if len(results) > 5:
                     text += f"\n...and {len(results) - 5} more."
+                text += "\nWant me to summarize or filter further?"
 
             return {
                 "text": text,

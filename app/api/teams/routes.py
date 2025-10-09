@@ -2,6 +2,7 @@
 Microsoft Teams Bot Framework webhook endpoints for TalentWell.
 Handles Teams activities, user preferences, and digest generation with database tracking.
 """
+import asyncio
 import logging
 import uuid
 import json
@@ -43,6 +44,17 @@ APP_ID = os.getenv("TEAMS_BOT_APP_ID")
 APP_PASSWORD = os.getenv("TEAMS_BOT_APP_PASSWORD")
 TENANT_ID = os.getenv("TEAMS_BOT_TENANT_ID", "29ee1479-b5f7-48c5-b665-7de9a8a9033e")
 DEBUG_ENABLED = os.getenv("TEAMS_DEBUG_ENABLED", "false").lower() == "true"
+
+ACS_CONNECTION_STRING = os.getenv("ACS_EMAIL_CONNECTION_STRING")
+SMTP_FROM_EMAIL = os.getenv(
+    "SMTP_FROM_EMAIL",
+    "DoNotReply@389fbf3b-307d-4882-af6a-d86d98329028.azurecomm.net",
+)
+SMTP_FROM_NAME = os.getenv("SMTP_FROM_NAME", "TalentWell Vault")
+DEFAULT_TEST_RECIPIENT_EMAIL = os.getenv(
+    "TEAMS_DIGEST_TEST_RECIPIENT",
+    "daniel.romitelli@emailthewell.com",
+)
 
 # Set Microsoft App credentials for SingleTenant auth
 from botframework.connector.auth import MicrosoftAppCredentials
@@ -164,6 +176,44 @@ async def log_bot_audit(
     except Exception as e:
         # Don't let audit failures break the bot
         logger.error(f"Failed to log audit event {event_type}: {e}")
+
+
+async def send_test_digest_email(
+    *, subject: str, html_body: str, recipient: str
+) -> str:
+    """Send a digest email preview via Azure Communication Services."""
+
+    if not ACS_CONNECTION_STRING:
+        raise ValueError("ACS_EMAIL_CONNECTION_STRING environment variable is required")
+
+    from azure.communication.email import EmailClient
+
+    message = {
+        "content": {
+            "subject": subject,
+            "html": html_body,
+        },
+        "recipients": {
+            "to": [
+                {
+                    "address": recipient,
+                    "displayName": recipient.split("@")[0],
+                }
+            ]
+        },
+        "senderAddress": SMTP_FROM_EMAIL,
+        "senderDisplayName": SMTP_FROM_NAME,
+    }
+
+    loop = asyncio.get_running_loop()
+
+    def _send_email() -> str:
+        email_client = EmailClient.from_connection_string(ACS_CONNECTION_STRING)
+        poller = email_client.begin_send(message)
+        result = poller.result()
+        return result.get("messageId", "unknown")
+
+    return await loop.run_in_executor(None, _send_email)
 
 
 # Teams Bot Framework Activity Models
@@ -401,64 +451,102 @@ async def handle_message_activity(
         attachment = CardFactory.adaptive_card(card["content"])
         return MessageFactory.attachment(attachment)
 
-    elif message_text.startswith("digest"):
-        # Parse audience from message (e.g., "digest advisors", "digest c_suite", or "digest daniel.romitelli@emailthewell.com")
-        parts = message_text.split()
-        audience_input = parts[1] if len(parts) > 1 else "global"
-
-        # Check if input is an email address (test mode)
-        test_email = None
-        if "@" in audience_input:
-            test_email = audience_input
-            audience = "global"  # Default to global for test emails
-            logger.info(f"Test mode detected: will route digest to {test_email}")
-        else:
-            audience = audience_input
-            # Normalize legacy values
-            if audience == "steve_perry":
-                audience = "advisors"  # Map legacy steve_perry to advisors
-
-        # Enhanced logging for debugging
-        import os
-        logger.info(f"=== DIGEST COMMAND ===")
-        logger.info(f"Audience: {audience}")
-        logger.info(f"ZOHO_VAULT_VIEW_ID: {os.getenv('ZOHO_VAULT_VIEW_ID', 'NOT SET')}")
-        logger.info(f"ZCAND_MODULE: {os.getenv('ZCAND_MODULE', 'NOT SET')}")
-
-        return await generate_digest_preview(
-            user_id=user_id,
-            user_email=user_email,
-            conversation_id=conversation_id,
-            audience=audience,
-            db=db,
-            test_recipient_email=test_email
-        )
-
-    elif message_text.startswith("preferences"):
-        return await show_user_preferences(user_id, user_email, user_name, db)
-
-    elif message_text.startswith("analytics"):
-        return await show_analytics(user_id, user_email, db)
-
-    # ========================================
-    # STEP 2: If NOT a command → Process as natural language query with conversation memory
-    # ========================================
     else:
-        # All users have full access to data
-        logger.info(f"Natural language query from {user_email}: {cleaned_text}")
+        def _normalize_digest_command(text: str) -> str:
+            """Strip leading helper verbs/aliases so users can say "vault digest" or "generate digest"."""
 
-        # Initialize conversation memory and clarification engine
-        memory_manager = await get_memory_manager()
-        clarification_engine = await get_clarification_engine()
+            prefixes = ("vault ", "generate ", "send ", "run ", "please ")
+            normalized = text
+            # Remove repeating helper prefixes (e.g., "vault generate digest")
+            changed = True
+            while changed:
+                changed = False
+                for prefix in prefixes:
+                    if normalized.startswith(prefix):
+                        normalized = normalized[len(prefix):].lstrip()
+                        changed = True
+            return normalized
 
-        # Process query with multi-turn dialogue
-        try:
-            # Get conversation history for context
-            conversation_context = await memory_manager.get_context_for_query(
+        normalized_command = _normalize_digest_command(message_text)
+
+        if normalized_command.startswith("digest"):
+            # Parse audience from message (supports "digest advisors", "vault digest advisors", etc.)
+            parts = normalized_command.split()
+            remainder = parts[1:]
+
+            audience_input = "global"
+            skip_tokens = {"preview", "now", "today", "please", "send", "generate", "run", "vault"}
+            for token in remainder:
+                if token in skip_tokens:
+                    continue
+                audience_input = token
+                break
+
+            test_email = None
+            if not remainder:
+                test_email = DEFAULT_TEST_RECIPIENT_EMAIL
+                audience = "global"
+                logger.info(
+                    "No audience specified; defaulting digest preview to test recipient %s",
+                    test_email,
+                )
+            elif audience_input in {"test", "preview"}:
+                test_email = DEFAULT_TEST_RECIPIENT_EMAIL
+                audience = "global"
+                logger.info(
+                    "Test alias detected; routing digest preview to %s", test_email
+                )
+            elif "@" in audience_input:
+                test_email = audience_input
+                audience = "global"  # Default to global for test emails
+                logger.info(f"Test mode detected: will route digest to {test_email}")
+            else:
+                audience = audience_input
+                # Normalize legacy values
+                if audience == "steve_perry":
+                    audience = "advisors"  # Map legacy steve_perry to advisors
+
+            # Enhanced logging for debugging
+            import os
+            logger.info(f"=== DIGEST COMMAND ===")
+            logger.info(f"Audience: {audience}")
+            logger.info(f"ZOHO_VAULT_VIEW_ID: {os.getenv('ZOHO_VAULT_VIEW_ID', 'NOT SET')}")
+            logger.info(f"ZCAND_MODULE: {os.getenv('ZCAND_MODULE', 'NOT SET')}")
+
+            return await generate_digest_preview(
                 user_id=user_id,
-                current_query=cleaned_text,
-                db=db
+                user_email=user_email,
+                conversation_id=conversation_id,
+                audience=audience,
+                db=db,
+                test_recipient_email=test_email
             )
+
+        elif message_text.startswith("preferences"):
+            return await show_user_preferences(user_id, user_email, user_name, db)
+
+        elif message_text.startswith("analytics"):
+            return await show_analytics(user_id, user_email, db)
+
+        # ========================================
+        # STEP 2: If NOT a command → Process as natural language query with conversation memory
+        # ========================================
+        else:
+            # All users have full access to data
+            logger.info(f"Natural language query from {user_email}: {cleaned_text}")
+
+            # Initialize conversation memory and clarification engine
+            memory_manager = await get_memory_manager()
+            clarification_engine = await get_clarification_engine()
+
+            # Process query with multi-turn dialogue
+            try:
+                # Get conversation history for context
+                conversation_context = await memory_manager.get_context_for_query(
+                    user_id=user_id,
+                    current_query=cleaned_text,
+                    db=db
+                )
 
             # Execute query ONCE before branching (CRITICAL: no double query)
             result = await process_natural_language_query(
@@ -645,13 +733,15 @@ async def handle_invoke_activity(
     try:
         activity = turn_context.activity
         # Extract action data
-        action_data = activity.value or {}
+        raw_action_data = activity.value or {}
 
-        # Check if data is wrapped in msteams.value (new pattern from adaptive cards)
-        if "msteams" in action_data:
-            msteams_data = action_data.get("msteams", {})
-            if "value" in msteams_data:
-                action_data = msteams_data["value"]
+        # Extract user inputs and msteams metadata
+        submitted_inputs = raw_action_data.copy()
+        msteams_payload = submitted_inputs.pop("msteams", None) or {}
+        action_metadata = msteams_payload.get("value") or {}
+
+        # Merge so that action metadata (action, request_id, etc.) wins on conflicts
+        action_data: Dict[str, Any] = {**submitted_inputs, **action_metadata}
 
         action = action_data.get("action", "")
 
@@ -668,15 +758,25 @@ async def handle_invoke_activity(
         logger.info(f"Invoke action: {action} from user {user_email}")
 
         response = None
+        test_recipient_email = action_data.get("test_recipient_email") or action_data.get("test_email")
 
         if action == "generate_digest_preview":
             audience = action_data.get("audience", "global")
+            filters_payload = {
+                "audience": audience,
+                "from_date": action_data.get("from_date"),
+                "to_date": action_data.get("to_date"),
+                "owner": action_data.get("owner"),
+                "max_candidates": action_data.get("max_candidates", 6)
+            }
             response = await generate_digest_preview(
                 user_id=user_id,
                 user_email=user_email,
                 conversation_id=conversation_id,
                 audience=audience,
-                db=db
+                db=db,
+                filters=filters_payload,
+                test_recipient_email=test_recipient_email
             )
 
         elif action == "generate_digest":
@@ -691,7 +791,8 @@ async def handle_invoke_activity(
                 request_id=request_id,
                 audience=audience,
                 dry_run=dry_run,
-                db=db
+                db=db,
+                test_recipient_email=test_recipient_email
             )
 
         elif action == "refine_query":
@@ -757,7 +858,8 @@ async def handle_invoke_activity(
                 conversation_id=conversation_id,
                 audience=filters["audience"],
                 db=db,
-                filters=filters
+                filters=filters,
+                test_recipient_email=test_recipient_email
             )
 
         elif action == "show_preferences":
@@ -899,6 +1001,12 @@ async def generate_digest_preview(
             WHERE request_id = $1
         """, request_id)
 
+        if test_recipient_email:
+            logger.info(f"Digest preview running in test mode for {test_recipient_email}")
+
+        if test_recipient_email:
+            logger.info(f"Full digest generation running in test mode for {test_recipient_email}")
+
         # Run curator
         curator = TalentWellCurator()
         await curator.initialize()
@@ -952,7 +1060,8 @@ async def generate_digest_preview(
         card = create_digest_preview_card(
             cards_metadata=cards_metadata,
             audience=audience,
-            request_id=request_id
+            request_id=request_id,
+            test_recipient_email=test_recipient_email
         )
         attachment = CardFactory.adaptive_card(card["content"])
 
@@ -1031,12 +1140,51 @@ async def generate_full_digest(
             WHERE request_id = $3
         """, result.get("email_html"), result.get("subject"), request_id)
 
-        success_msg = f"✅ Digest generated successfully!\n\nSubject: {result.get('subject')}\n\n{len(result.get('cards_metadata', []))} candidates included."
+        email_subject = result.get('subject') or "TalentWell Vault Digest"
+        digest_html = result.get("email_html")
+        delivery_message = ""
+        if test_recipient_email and digest_html:
+            try:
+                message_id = await send_test_digest_email(
+                    subject=email_subject,
+                    html_body=digest_html,
+                    recipient=test_recipient_email,
+                )
+                logger.info(
+                    "Digest preview email sent to %s (message_id=%s)",
+                    test_recipient_email,
+                    message_id,
+                )
+                delivery_message = (
+                    f"\n\n📬 Sent preview to {test_recipient_email} "
+                    f"(message ID: {message_id})"
+                )
+            except Exception as send_error:
+                logger.error(
+                    "Failed to send digest preview to %s: %s",
+                    test_recipient_email,
+                    send_error,
+                    exc_info=True,
+                )
+                delivery_message = (
+                    "\n\n⚠️ TEST MODE: Failed to send preview to "
+                    f"{test_recipient_email}: {send_error}"
+                )
 
-        if test_recipient_email:
-            success_msg += f"\n\n⚠️ TEST MODE: Email would be sent to {test_recipient_email} instead of {audience}"
-        elif dry_run:
-            success_msg += "\n\n⚠️ DRY RUN: No email sent"
+        success_msg = (
+            "✅ Digest generated successfully!\n\n"
+            f"Subject: {email_subject}\n\n"
+            f"{len(result.get('cards_metadata', []))} candidates included."
+        )
+
+        if test_recipient_email and not delivery_message:
+            delivery_message = (
+                f"\n\n⚠️ TEST MODE: Digest will be sent to {test_recipient_email}"
+            )
+        elif dry_run and not test_recipient_email:
+            delivery_message = "\n\n⚠️ DRY RUN: No email sent"
+
+        success_msg += delivery_message
 
         return {
             "type": "message",
