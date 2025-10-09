@@ -15,16 +15,8 @@ from openai import AsyncOpenAI
 
 logger = logging.getLogger(__name__)
 
-# Access control constants
-EXECUTIVE_USERS = [
-    "steve@emailthewell.com",      # CEO
-    "brandon@emailthewell.com",    # Executive
-    "daniel.romitelli@emailthewell.com"  # Executive
-]
-
-
 class QueryEngine:
-    """Natural language query engine with role-based access control."""
+    """Natural language query engine for Teams Bot - all users have full access."""
 
     def __init__(self):
         """Initialize query engine with OpenAI client."""
@@ -35,50 +27,57 @@ class QueryEngine:
         self,
         query: str,
         user_email: str,
-        db: asyncpg.Connection = None  # Optional for backward compatibility
+        db: asyncpg.Connection = None,  # Optional for backward compatibility
+        conversation_context: Optional[str] = None,  # Conversation history for context
+        override_intent: Optional[Dict[str, Any]] = None  # NEW: Skip classification if provided
     ) -> Dict[str, Any]:
         """
-        Process natural language query with access control using ZohoClient.
+        Process natural language query using ZohoClient - all users have full access.
 
         Args:
             query: User's natural language query
-            user_email: Email of requesting user (for access control)
+            user_email: Email of requesting user (for logging only)
             db: Database connection (no longer used, kept for compatibility)
+            conversation_context: Optional conversation history for context-aware classification
+            override_intent: Optional intent to skip classification (used after clarification)
 
         Returns:
             Dict with:
             - text: Response text for user
             - card: Optional Adaptive Card (None for now)
             - data: Raw query results
+            - confidence_score: Intent classification confidence (0.0-1.0)
         """
         try:
-            # Determine user access level
-            is_executive = user_email in EXECUTIVE_USERS
-            scope = "full" if is_executive else "user_only"
+            logger.info(f"Processing query from {user_email}: {query}")
 
-            logger.info(f"Processing query from {user_email} (scope: {scope}): {query}")
-
-            # Step 1: Classify intent using GPT-5-mini
-            intent = await self._classify_intent(query, is_executive)
+            # Step 1: Classify intent OR use override
+            if override_intent:
+                intent = override_intent
+                confidence = 1.0  # User clarified, now certain
+                logger.info("Using override intent, skipping classification")
+            else:
+                # Normal classification path
+                intent, confidence = await self._classify_intent(query, conversation_context)
 
             # Step 2: Handle transcript summary requests separately
             if intent.get("intent_type") == "transcript_summary":
-                return await self._handle_transcript_summary(intent, is_executive)
+                return await self._handle_transcript_summary(intent)
 
-            # Step 3: Apply owner filter for non-executives
-            if not is_executive:
-                intent["owner_filter"] = user_email
-            else:
-                intent["owner_filter"] = None
+            # Step 3: No owner filtering - all users see all data
+            intent["owner_filter"] = None
 
             # Step 4: Build and execute Zoho query
             results, _ = await self._build_query(intent)
             logger.info(f"Querying Zoho CRM with intent: {intent}")
 
-            # Step 5: Format response
+            # Step 5: CRITICAL - Preserve async format flow (user's final correction)
             response = await self._format_response(query, results, intent)
 
-            logger.info(f"Query completed: {len(results)} results returned")
+            # Step 6: Inject confidence score
+            response["confidence_score"] = confidence
+
+            logger.info(f"Query completed: {len(results)} results returned (confidence: {confidence:.2f})")
             return response
 
         except Exception as e:
@@ -86,23 +85,29 @@ class QueryEngine:
             return {
                 "text": f"❌ Sorry, I encountered an error processing your query: {str(e)}",
                 "card": None,
-                "data": None
+                "data": None,
+                "confidence_score": 0.0
             }
 
     async def _classify_intent(
         self,
         query: str,
-        is_executive: bool
-    ) -> Dict[str, Any]:
+        conversation_context: Optional[str] = None
+    ) -> Tuple[Dict[str, Any], float]:
         """
-        Classify user intent using GPT-5-mini.
+        Classify user intent using GPT-5-mini with conversation context.
+
+        Args:
+            query: User's natural language query
+            conversation_context: Optional conversation history for context awareness
 
         Returns:
-            Intent dict with:
+            Tuple of (intent dict, confidence score):
             - intent_type: "count", "list", "aggregate", "search"
             - entities: Extracted entities (dates, names, etc.)
             - table: Primary table to query
             - filters: Query filters
+            - confidence: Float 0.0-1.0 indicating classification confidence
         """
         system_prompt = """You are a query classifier for a recruitment CRM system.
 Classify the user's intent and extract key entities.
@@ -142,7 +147,8 @@ Return JSON with:
         "created_after": "ISO date start",
         "created_before": "ISO date end"
     },
-    "group_by": "field to aggregate on (stage, owner_email, etc)"
+    "group_by": "field to aggregate on (stage, owner_email, etc)",
+    "confidence": 0.0-1.0  // How confident you are in this classification
 }
 
 Examples:
@@ -156,9 +162,17 @@ Examples:
 - "summarize interview with John Smith" → intent_type: "transcript_summary", candidate_name: "John Smith"
 """
 
-        user_prompt = f"""Classify this query: "{query}"
+        # Build user prompt with conversation context if available
+        context_text = ""
+        if conversation_context:
+            context_text = f"\nRecent conversation:\n{conversation_context}\n"
 
-Current date: {datetime.now().strftime('%Y-%m-%d')}"""
+        user_prompt = f"""{context_text}Classify this query: "{query}"
+
+Current date: {datetime.now().strftime('%Y-%m-%d')}
+
+If conversation context is provided, use it to resolve ambiguous references (e.g., "what about last month?" after discussing deals).
+Rate your confidence 0.0-1.0 based on clarity and context."""
 
         try:
             response = await self.client.chat.completions.create(
@@ -172,18 +186,19 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
             )
 
             intent = json.loads(response.choices[0].message.content)
-            logger.debug(f"Classified intent: {intent}")
-            return intent
+            confidence = intent.pop("confidence", 0.8)  # Extract confidence, default 0.8
+            logger.debug(f"Classified intent: {intent} (confidence: {confidence:.2f})")
+            return intent, confidence
 
         except Exception as e:
             logger.error(f"Error classifying intent: {e}", exc_info=True)
-            # Fallback to basic intent
+            # Fallback to basic intent with low confidence
             return {
                 "intent_type": "search",
                 "table": "deals",
                 "entities": {"search_terms": [query]},
                 "filters": {}
-            }
+            }, 0.3  # Low confidence for fallback
 
     async def _build_query(
         self,
@@ -596,15 +611,13 @@ Current date: {datetime.now().strftime('%Y-%m-%d')}"""
 
     async def _handle_transcript_summary(
         self,
-        intent: Dict[str, Any],
-        is_executive: bool
+        intent: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
         Handle transcript summary requests by fetching Zoom transcript and generating AI summary.
 
         Args:
             intent: Classified intent with candidate_name or meeting_id
-            is_executive: Whether user has executive access
 
         Returns:
             Response dict with summary text
@@ -787,7 +800,9 @@ Candidate: {candidate_name if candidate_name else 'Unknown'}"""
 async def process_natural_language_query(
     query: str,
     user_email: str,
-    db: asyncpg.Connection
+    db: asyncpg.Connection,
+    conversation_context: Optional[str] = None,
+    override_intent: Optional[Dict[str, Any]] = None
 ) -> Dict[str, Any]:
     """
     Convenience function to process natural language queries.
@@ -796,9 +811,11 @@ async def process_natural_language_query(
         query: User's natural language query
         user_email: Email of requesting user
         db: Database connection
+        conversation_context: Optional conversation history for context
+        override_intent: Optional intent to skip classification (used after clarification)
 
     Returns:
         Response dict with text, card, and data
     """
     engine = QueryEngine()
-    return await engine.process_query(query, user_email, db)
+    return await engine.process_query(query, user_email, db, conversation_context, override_intent)

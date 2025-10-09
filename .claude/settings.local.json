@@ -41,7 +41,10 @@
       "Bash(az keyvault secret set:*)",
       "Bash(sed:*)",
       "Bash(timeout 10 az containerapp logs show:*)",
-      "Bash(chmod:*)"
+      "Bash(chmod:*)",
+      "Bash(az containerapp list:*)",
+      "Bash(PGPASSWORD='W3llDB2025Pass' psql:*)",
+      "Bash(timeout 30 az containerapp logs show:*)"
     ],
     "deny": [],
     "ask": [],

@@ -7,6 +7,8 @@ import base64
 import json
 import logging
 import re
+import asyncio
+import random
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timedelta
 import httpx
@@ -32,7 +34,53 @@ class ZoomClient:
         self.oauth_url = "https://zoom.us/oauth/token"
         self._access_token = None
         self._token_expiry = None
-        
+
+    async def _request_with_retry(
+        self,
+        method: str,
+        url: str,
+        max_retries: int = 3,
+        timeout: int = 10,
+        **kwargs
+    ) -> httpx.Response:
+        """
+        Exponential backoff with jitter for Zoom API requests.
+
+        Args:
+            method: HTTP method (GET, POST, etc.)
+            url: Request URL
+            max_retries: Maximum retry attempts (default: 3)
+            timeout: Request timeout in seconds (default: 10)
+            **kwargs: Additional httpx request parameters
+
+        Returns:
+            httpx.Response object
+
+        Raises:
+            Exception: After max retries exceeded
+        """
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    response = await client.request(method, url, **kwargs)
+                    if response.status_code < 500:
+                        return response
+                    logger.warning(f"Zoom 5xx (attempt {attempt+1}/{max_retries}): {response.status_code}")
+            except httpx.TimeoutException as e:
+                if attempt == max_retries - 1:
+                    raise
+                logger.warning(f"Zoom timeout (attempt {attempt+1}/{max_retries}): {e}")
+            except Exception as e:
+                if attempt == max_retries - 1:
+                    raise
+                logger.error(f"Zoom error (attempt {attempt+1}/{max_retries}): {e}")
+
+            # Exponential backoff with jitter
+            delay = (2 ** attempt) + random.uniform(0, 1)
+            await asyncio.sleep(delay)
+
+        raise Exception(f"Zoom API failed after {max_retries} retries: {url}")
+
     async def get_access_token(self) -> str:
         """
         Get access token using Server-to-Server OAuth.
@@ -91,28 +139,28 @@ class ZoomClient:
             token = await self.get_access_token()
             if not token:
                 return None
-            
+
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json"
             }
-            
+
             url = f"{self.base_url}/meetings/{meeting_id}/recordings"
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers)
-                
-                if response.status_code == 200:
-                    recording_data = response.json()
-                    logger.info(f"Successfully fetched recording for meeting {meeting_id}")
-                    return recording_data
-                elif response.status_code == 404:
-                    logger.info(f"No recording found for meeting {meeting_id}")
-                    return None
-                else:
-                    logger.error(f"Failed to fetch recording: {response.status_code} - {response.text}")
-                    return None
-                    
+
+            # CRITICAL FIX: Use retry helper instead of direct AsyncClient
+            response = await self._request_with_retry("GET", url, headers=headers)
+
+            if response.status_code == 200:
+                recording_data = response.json()
+                logger.info(f"Successfully fetched recording for meeting {meeting_id}")
+                return recording_data
+            elif response.status_code == 404:
+                logger.info(f"No recording found for meeting {meeting_id}")
+                return None
+            else:
+                logger.error(f"Failed to fetch recording: {response.status_code} - {response.text}")
+                return None
+
         except Exception as e:
             logger.error(f"Error fetching recording for meeting {meeting_id}: {e}")
             return None
@@ -127,24 +175,25 @@ class ZoomClient:
                 access_token = await self.get_access_token()
                 if not access_token:
                     return None
-            
+
             headers = {
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json"
             }
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(download_url, headers=headers, follow_redirects=True)
-                
-                if response.status_code == 200:
-                    # Zoom transcripts are typically in VTT format
-                    transcript_content = response.text
-                    logger.info(f"Successfully downloaded transcript")
-                    return transcript_content
-                else:
-                    logger.error(f"Failed to download transcript: {response.status_code}")
-                    return None
-                    
+
+            # CRITICAL FIX: Use retry helper instead of direct AsyncClient
+            # Note: httpx follow_redirects handled internally by request method
+            response = await self._request_with_retry("GET", download_url, headers=headers, follow_redirects=True)
+
+            if response.status_code == 200:
+                # Zoom transcripts are typically in VTT format
+                transcript_content = response.text
+                logger.info(f"Successfully downloaded transcript")
+                return transcript_content
+            else:
+                logger.error(f"Failed to download transcript: {response.status_code}")
+                return None
+
         except Exception as e:
             logger.error(f"Error downloading transcript: {e}")
             return None
@@ -283,48 +332,185 @@ class ZoomClient:
         # If no pattern matched, return the input as-is (might be a direct ID)
         return meeting_input
     
-    async def list_recordings(self, from_date: str, to_date: str, page_size: int = 30) -> List[Dict[str, Any]]:
+    async def list_recordings(
+        self,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page_size: int = 30
+    ) -> List[Dict[str, Any]]:
         """
         List all cloud recordings for the account within a date range.
-        
+
         Args:
-            from_date: Start date in YYYY-MM-DD format
-            to_date: End date in YYYY-MM-DD format  
+            from_date: Start date in YYYY-MM-DD format (defaults to 30 days ago)
+            to_date: End date in YYYY-MM-DD format (defaults to today)
             page_size: Number of records per page (max 300)
-        
+
         Returns:
             List of recording metadata
         """
         try:
+            # CRITICAL FIX: Default to last 30 days if None
+            if not from_date:
+                from_date = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%d")
+            if not to_date:
+                to_date = datetime.now().strftime("%Y-%m-%d")
+
             token = await self.get_access_token()
             if not token:
                 return []
-            
+
             headers = {
                 "Authorization": f"Bearer {token}",
                 "Content-Type": "application/json"
             }
-            
+
             params = {
                 "from": from_date,
                 "to": to_date,
                 "page_size": min(page_size, 300)
             }
-            
+
             url = f"{self.base_url}/accounts/{self.account_id}/recordings"
-            
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url, headers=headers, params=params)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    meetings = data.get("meetings", [])
-                    logger.info(f"Found {len(meetings)} recordings from {from_date} to {to_date}")
-                    return meetings
-                else:
-                    logger.error(f"Failed to list recordings: {response.status_code} - {response.text}")
-                    return []
-                    
+
+            # Use retry helper
+            response = await self._request_with_retry("GET", url, headers=headers, params=params)
+
+            if response.status_code == 200:
+                data = response.json()
+                meetings = data.get("meetings", [])
+                logger.info(f"Found {len(meetings)} recordings from {from_date} to {to_date}")
+                return meetings
+            else:
+                logger.error(f"Failed to list recordings: {response.status_code} - {response.text}")
+                return []
+
         except Exception as e:
             logger.error(f"Error listing recordings: {e}")
             return []
+
+    async def search_recordings_by_participant(
+        self,
+        participant_name: str,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page_size: int = 30
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for recordings by participant name.
+
+        Args:
+            participant_name: Name to search for (case-insensitive)
+            from_date: Start date (YYYY-MM-DD), defaults to 30 days ago
+            to_date: End date (YYYY-MM-DD), defaults to today
+            page_size: Number of results per page (max 300)
+
+        Returns:
+            List of recording metadata dictionaries matching participant
+        """
+        try:
+            # Get all recordings in date range
+            all_recordings = await self.list_recordings(from_date, to_date, page_size)
+
+            # Filter by participant name (case-insensitive)
+            search_lower = participant_name.lower()
+            matching_recordings = []
+
+            for meeting in all_recordings:
+                # Check topic/host name
+                topic = meeting.get("topic", "").lower()
+                host_name = meeting.get("host_email", "").lower()
+
+                # Also check participant list if available
+                participants = meeting.get("participant_list", [])
+                participant_names = [p.get("name", "").lower() for p in participants]
+
+                if (search_lower in topic or
+                    search_lower in host_name or
+                    any(search_lower in name for name in participant_names)):
+                    matching_recordings.append(meeting)
+
+            logger.info(f"Found {len(matching_recordings)} recordings matching participant: {participant_name}")
+            return matching_recordings
+
+        except Exception as e:
+            logger.error(f"Error searching recordings by participant: {e}")
+            return []
+
+    async def search_recordings_by_topic(
+        self,
+        topic_keywords: str,
+        from_date: Optional[str] = None,
+        to_date: Optional[str] = None,
+        page_size: int = 30
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for recordings by topic keywords.
+
+        Args:
+            topic_keywords: Keywords to search for in meeting topic
+            from_date: Start date (YYYY-MM-DD), defaults to 30 days ago
+            to_date: End date (YYYY-MM-DD), defaults to today
+            page_size: Number of results per page (max 300)
+
+        Returns:
+            List of recording metadata dictionaries matching keywords
+        """
+        try:
+            # Get all recordings in date range
+            all_recordings = await self.list_recordings(from_date, to_date, page_size)
+
+            # Filter by keywords (case-insensitive)
+            keywords_lower = topic_keywords.lower().split()
+            matching_recordings = []
+
+            for meeting in all_recordings:
+                topic = meeting.get("topic", "").lower()
+
+                # Check if any keyword matches
+                if any(keyword in topic for keyword in keywords_lower):
+                    matching_recordings.append(meeting)
+
+            logger.info(f"Found {len(matching_recordings)} recordings matching topic: {topic_keywords}")
+            return matching_recordings
+
+        except Exception as e:
+            logger.error(f"Error searching recordings by topic: {e}")
+            return []
+
+    async def get_recording_with_transcript(
+        self,
+        meeting_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get recording metadata and transcript content for a meeting.
+
+        Args:
+            meeting_id: Zoom meeting ID
+
+        Returns:
+            Dictionary with recording metadata and transcript text, or None if not found
+        """
+        try:
+            # Fetch recording metadata
+            recording = await self.fetch_meeting_recording(meeting_id)
+            if not recording:
+                return None
+
+            # Fetch transcript
+            transcript_text = await self.fetch_zoom_transcript_for_meeting(meeting_id)
+
+            return {
+                "meeting_id": meeting_id,
+                "topic": recording.get("topic"),
+                "start_time": recording.get("start_time"),
+                "duration": recording.get("duration"),
+                "host_email": recording.get("host_email"),
+                "recording_count": recording.get("recording_count", 0),
+                "transcript_text": transcript_text,
+                "recording_files": recording.get("recording_files", [])
+            }
+
+        except Exception as e:
+            logger.error(f"Error getting recording with transcript: {e}")
+            return None

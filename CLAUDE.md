@@ -6,6 +6,57 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Well Intake API** - An intelligent email processing system that automates CRM record creation in Zoho from recruitment emails. Uses LangGraph with GPT-5 for structured data extraction through a three-node workflow (Extract → Research → Validate). Deployed on Azure Container Apps with PostgreSQL for deduplication.
 
+## Quick Start
+
+### First Time Setup
+```bash
+# Clone and setup environment
+git clone <repo-url>
+cd outlook
+python3 -m venv zoho
+source zoho/bin/activate  # Linux/Mac (Windows: zoho\Scripts\activate)
+pip install -r requirements.txt
+pip install -r requirements-dev.txt
+
+# Setup environment variables
+cp .env.example .env.local
+# Edit .env.local with your credentials (see Environment Variables section)
+
+# Initialize database
+alembic upgrade head
+
+# Run development server
+uvicorn app.main:app --reload --port 8000
+```
+
+### Running a Single Test
+```bash
+# Run a specific test file
+pytest tests/test_specific_file.py -v
+
+# Run a specific test function
+pytest tests/test_specific_file.py::test_function_name -v
+
+# Run tests matching a pattern
+pytest -k "test_pattern" -v
+
+# Run with coverage for specific module
+pytest tests/test_file.py --cov=app.module --cov-report=term-missing
+```
+
+### Shared Library Development
+The `well_shared/` package is used across all services. To modify:
+```bash
+# After editing well_shared/well_shared/<module>.py
+cd well_shared
+pip install -e .  # Install in editable mode
+
+# Changes are immediately available to:
+# - Main API (app/)
+# - Teams Bot (teams_bot/)
+# - Vault Agent (future)
+```
+
 ## Architecture
 
 ### Service Architecture (Phase 1)
@@ -426,6 +477,49 @@ python -m app.jobs.talentwell_curator --audience steve_perry --days 7
 python -c "from app.zoom_client import ZoomClient; import asyncio; client = ZoomClient(); asyncio.run(client.fetch_meeting_recording('MEETING_ID'))"
 ```
 
+### Debugging
+
+```bash
+# Debug with breakpoints
+python -m pdb app/main.py
+
+# Debug specific test with breakpoint on failure
+pytest tests/test_file.py -v -s --pdb
+
+# Debug with print statements (use -s to see output)
+pytest tests/test_file.py -v -s
+
+# Check logs in real-time (Main API)
+az containerapp logs show --name well-intake-api \
+  --resource-group TheWell-Infra-East --follow --tail 100
+
+# Check Teams Bot logs
+az containerapp logs show --name teams-bot \
+  --resource-group TheWell-Infra-East --follow --tail 100
+
+# Filter logs by severity
+az containerapp logs show --name well-intake-api \
+  --resource-group TheWell-Infra-East --follow | grep ERROR
+
+# Check Application Insights live metrics
+az monitor app-insights metrics show \
+  --app wellintakeinsights0903 \
+  --resource-group TheWell-Infra-East \
+  --metric requests/count
+
+# Debug Redis cache
+redis-cli -h <redis-host> -p 6380 -a <password> --tls
+> KEYS *manifest*
+> GET <key>
+> TTL <key>
+
+# Debug PostgreSQL queries
+PGPASSWORD='<password>' psql -h <host> -U <user> -d well_intake_db
+\dt  -- List tables
+\d+ deals  -- Describe table
+SELECT * FROM deals ORDER BY created_at DESC LIMIT 5;
+```
+
 ## Authentication & OAuth Architecture
 
 ### OAuth Proxy Service
@@ -668,6 +762,104 @@ The **TalentWell Curator** generates weekly candidate digests for financial advi
 - **📍** for availability and compensation
 - **3-5 bullet points** extracted from transcripts, resumes, CRM data
 - **No fake data**: Only extract bullets from verifiable sources
+
+## Common Development Patterns
+
+### Adding a New Endpoint
+```bash
+# 1. Define route in app/main.py or appropriate router
+# Example: app/api/teams/routes.py for Teams Bot endpoints
+
+# 2. Add business logic
+# Create or update: app/<feature>.py
+
+# 3. Update data models if needed
+# Edit: app/models.py (Pydantic models)
+
+# 4. Add tests
+# Create: tests/test_<feature>.py
+pytest tests/test_<feature>.py -v
+
+# 5. Update API documentation (automatic with FastAPI)
+# Visit: http://localhost:8000/docs
+```
+
+### Adding a New Feature Flag
+```bash
+# 1. Add flag definition
+# Edit: app/config/feature_flags.py
+
+# 2. Add environment variable
+# Edit: CLAUDE.md (Environment Variables section)
+# Add to: .env.local
+
+# 3. Implement feature with conditional logic
+# Example:
+from app.config.feature_flags import FEATURE_FLAGS
+if FEATURE_FLAGS.get("FEATURE_NAME"):
+    # New feature code
+    pass
+
+# 4. Add tests for both states
+pytest tests/test_feature.py::test_with_flag_enabled -v
+pytest tests/test_feature.py::test_with_flag_disabled -v
+```
+
+### Adding a New Migration
+```bash
+# 1. Create migration file
+alembic revision -m "descriptive_name"
+
+# 2. Edit generated file in migrations/versions/
+# Add upgrade() and downgrade() logic
+
+# 3. Test migration locally
+alembic upgrade head
+alembic downgrade -1  # Test rollback
+alembic upgrade head  # Re-apply
+
+# 4. Deploy to production via API
+curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/teams/admin/run-migration?migration_name=XXX_descriptive_name.sql" \
+  -H "X-API-Key: your-api-key"
+```
+
+### Adding a New Teams Bot Command
+```bash
+# 1. Update command handler
+# Edit: app/api/teams/routes.py (handle_message_activity function)
+
+# 2. Add Adaptive Card if needed
+# Edit: app/api/teams/adaptive_cards.py
+
+# 3. Update help text
+# Edit: app/api/teams/adaptive_cards.py (create_help_card function)
+
+# 4. Test locally with Bot Framework Emulator
+# Or use Teams Developer Portal for testing
+
+# 5. Deploy and test in Teams
+./scripts/deploy_teams_bot.sh
+```
+
+### Modifying Shared Library
+```bash
+# 1. Edit shared code
+# Edit: well_shared/well_shared/<module>.py
+
+# 2. Install in editable mode
+cd well_shared
+pip install -e .
+
+# 3. Test changes in dependent services
+# Main API: uvicorn app.main:app --reload
+# Teams Bot: uvicorn teams_bot.app.main:app --reload --port 8001
+
+# 4. Run tests
+pytest tests/ -k "shared" -v
+
+# 5. Update version if needed
+# Edit: well_shared/setup.py
+```
 
 ## Production URLs
 

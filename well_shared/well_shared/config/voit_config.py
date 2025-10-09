@@ -62,9 +62,9 @@ class VoITConfig:
 
     # Default model fallbacks
     MODEL_DEFAULTS = {
-        "gpt-5-nano": "gpt-3.5-turbo",
-        "gpt-5-mini": "gpt-4o-mini",
-        "gpt-5": "gpt-4o"
+        "gpt-5-nano": "gpt-5-nano",
+        "gpt-5-mini": "gpt-5-mini",
+        "gpt-5": "gpt-5"
     }
 
     @classmethod

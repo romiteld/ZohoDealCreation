@@ -24,10 +24,13 @@ graph TB
         Analyst["📊 Data Analyst<br/>Reviews metrics & insights"]
         TeamsMember["👥 Teams User<br/>Requests candidate digests"]
     end
-    
-    subgraph WellIntake["🚀 Well Intake System"]
-        API["Well Intake API<br/>FastAPI + LangGraph<br/>C³ Cache + VoIT Orchestration"]
+
+    subgraph WellIntake["🚀 Well Intake Platform (Microservices)"]
+        MainAPI["Main API Service<br/>:8000<br/>Email Processing + LangGraph<br/>C³ Cache + VoIT Orchestration"]
+        TeamsBot["Teams Bot Service<br/>:8001<br/>Microsoft Teams Integration<br/>Adaptive Cards + Query Engine"]
+        VaultAgent["Vault Agent Service<br/>:8002<br/>Weekly Digest Scheduler<br/>TalentWell Curator (Phase 2)"]
         OAuth["OAuth Proxy Service<br/>well-zoho-oauth-v2<br/>Flask App Service"]
+        SharedLib["well_shared Library<br/>Database + Cache + Mail<br/>Evidence + VoIT Config"]
     end
     
     subgraph ExternalSystems["🌐 External Systems"]
@@ -53,28 +56,39 @@ graph TB
     end
     
     Recruiter -->|"Sends emails"| Outlook
-    Admin -->|"Configures & monitors"| API
-    Analyst -->|"Views analytics"| API
+    Admin -->|"Configures & monitors"| MainAPI
+    Analyst -->|"Views analytics"| MainAPI
     TeamsMember -->|"Requests digests"| Teams
 
-    Outlook -->|"REST/WebSocket"| API
-    Teams -->|"Bot Framework Webhook"| API
-    API -->|"OAuth/API v8"| OAuth
+    Outlook -->|"REST/WebSocket"| MainAPI
+    Teams -->|"Bot Framework Webhook"| TeamsBot
+    MainAPI -->|"OAuth/API v8"| OAuth
+    TeamsBot -->|"OAuth/API v8"| OAuth
     OAuth -->|"API v8"| Zoho
-    API -->|"GPT-5 API"| OpenAI
-    API -->|"Research API"| Firecrawl
-    API -->|"Adaptive Cards"| Teams
-    
-    API --> Storage
-    API --> Postgres
-    API --> Redis
-    API --> ServiceBus
-    API --> SignalR
-    API --> Search
-    FrontDoor --> API
-    API --> AppInsights
-    
-    style API fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
+    MainAPI -->|"GPT-5 API"| OpenAI
+    TeamsBot -->|"GPT-5 API"| OpenAI
+    MainAPI -->|"Research API"| Firecrawl
+    TeamsBot -->|"Adaptive Cards"| Teams
+    VaultAgent -->|"Email delivery"| Communication
+
+    MainAPI --> SharedLib
+    TeamsBot --> SharedLib
+    VaultAgent --> SharedLib
+    SharedLib --> Postgres
+    SharedLib --> Redis
+    MainAPI --> Storage
+    MainAPI --> ServiceBus
+    MainAPI --> Search
+    FrontDoor --> MainAPI
+    FrontDoor --> TeamsBot
+    MainAPI --> AppInsights
+    TeamsBot --> AppInsights
+    VaultAgent --> AppInsights
+
+    style MainAPI fill:#4A90E2,stroke:#2E5C8A,stroke-width:3px,color:#fff
+    style TeamsBot fill:#34A853,stroke:#2E8B47,stroke-width:3px,color:#fff
+    style VaultAgent fill:#FBBC04,stroke:#E8A600,stroke-width:2px,color:#000
+    style SharedLib fill:#9B59B6,stroke:#7D3C98,stroke-width:2px,color:#fff
     style OAuth fill:#7B68EE,stroke:#5A4FCF,stroke-width:2px,color:#fff
     style Postgres fill:#336791,stroke:#234A6F,stroke-width:2px,color:#fff
     style Redis fill:#DC382D,stroke:#B02920,stroke-width:2px,color:#fff

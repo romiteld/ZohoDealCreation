@@ -15,8 +15,7 @@ import asyncpg
 
 # Microsoft Bot Framework imports
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext, MessageFactory, CardFactory
-from botbuilder.schema import Activity, ActivityTypes
-from botbuilder.schema.teams import InvokeResponse
+from botbuilder.schema import Activity, ActivityTypes, InvokeResponse
 from botframework.connector.auth import MicrosoftAppCredentials
 
 from app.api.teams.adaptive_cards import (
@@ -24,11 +23,16 @@ from app.api.teams.adaptive_cards import (
     create_help_card,
     create_digest_preview_card,
     create_error_card,
-    create_preferences_card
+    create_preferences_card,
+    create_clarification_card,
+    create_suggestion_card
 )
 from app.jobs.talentwell_curator import TalentWellCurator
 from well_shared.database.connection import get_database_connection
 from app.api.teams.query_engine import process_natural_language_query
+from app.api.teams.conversation_memory import get_memory_manager
+from app.api.teams.clarification_engine import get_clarification_engine, RateLimitExceeded
+from app.api.teams.conversation_state import CONFIDENCE_THRESHOLD_LOW, CONFIDENCE_THRESHOLD_MED
 
 logger = logging.getLogger(__name__)
 
@@ -437,50 +441,184 @@ async def handle_message_activity(
         return await show_analytics(user_id, user_email, db)
 
     # ========================================
-    # STEP 2: If NOT a command → Process as natural language query
+    # STEP 2: If NOT a command → Process as natural language query with conversation memory
     # ========================================
     else:
-        # Access control: Executive users get full access, regular users get owner-filtered access
-        EXECUTIVE_USERS = [
-            "steve@emailthewell.com",
-            "brandon@emailthewell.com",
-            "daniel.romitelli@emailthewell.com"
-        ]
+        # All users have full access to data
+        logger.info(f"Natural language query from {user_email}: {cleaned_text}")
 
-        is_executive = user_email in EXECUTIVE_USERS
+        # Initialize conversation memory and clarification engine
+        memory_manager = await get_memory_manager()
+        clarification_engine = await get_clarification_engine()
 
-        # Log query attempt
-        logger.info(f"Natural language query from {user_email} (executive: {is_executive}): {cleaned_text}")
-
-        # Process query using query engine
+        # Process query with multi-turn dialogue
         try:
-            result = await process_natural_language_query(
-                query=cleaned_text,
-                user_email=user_email,
+            # Get conversation history for context
+            conversation_context = await memory_manager.get_context_for_query(
+                user_id=user_id,
+                current_query=cleaned_text,
                 db=db
             )
 
-            # Update conversation with response
-            await db.execute("""
-                UPDATE teams_conversations
-                SET bot_response = $1
-                WHERE conversation_id = $2 AND activity_id = $3
-            """, "natural_language_query", conversation_id, activity.id)
+            # Execute query ONCE before branching (CRITICAL: no double query)
+            result = await process_natural_language_query(
+                query=cleaned_text,
+                user_email=user_email,
+                db=db,
+                conversation_context=conversation_context
+            )
 
-            # Return response
-            if result.get("card"):
-                # If we have a card, attach it
-                attachment = CardFactory.adaptive_card(result["card"]["content"])
-                response = MessageFactory.attachment(attachment)
-                if result.get("text"):
-                    response.text = result["text"]
-                return response
-            else:
-                # Text-only response
-                return {
-                    "type": "message",
-                    "text": result.get("text", "I couldn't process that query.")
-                }
+            # Extract confidence score
+            confidence = result.get("confidence_score", 0.8)
+            logger.info(f"Query classified with confidence: {confidence:.2f}")
+
+            # THREE-WAY BRANCH based on confidence
+            if confidence < CONFIDENCE_THRESHOLD_LOW:  # <0.5
+                # Low confidence: Clarification flow
+                logger.info(f"Low confidence ({confidence:.2f}) - triggering clarification")
+
+                try:
+                    # Generate clarification question
+                    clarification_question = await clarification_engine.generate_clarification_question(
+                        query=cleaned_text,
+                        intent={"intent_type": "search", "entities": {}},  # Placeholder intent
+                        ambiguity_type="vague_search"
+                    )
+
+                    # Get clarification options
+                    options = clarification_engine.get_clarification_options("vague_search")
+
+                    # Create clarification session (may raise RateLimitExceeded)
+                    session = await clarification_engine.create_clarification_session(
+                        user_id=user_id,
+                        query=cleaned_text,
+                        intent={"intent_type": "search", "entities": {}},
+                        ambiguity_type="vague_search",
+                        suggested_options=options
+                    )
+
+                    # Store user query in memory
+                    await memory_manager.add_message(
+                        user_id=user_id,
+                        role="user",
+                        content=cleaned_text,
+                        confidence_score=confidence,
+                        db=db
+                    )
+
+                    # Store clarification question in memory
+                    await memory_manager.add_message(
+                        user_id=user_id,
+                        role="assistant",
+                        content=clarification_question,
+                        intent_type="clarification",
+                        db=db
+                    )
+
+                    # Create and return clarification card
+                    card = create_clarification_card(
+                        question=clarification_question,
+                        options=options,
+                        session_id=session["session_id"],
+                        original_query=cleaned_text
+                    )
+
+                    attachment = CardFactory.adaptive_card(card["content"])
+                    return MessageFactory.attachment(attachment)
+
+                except RateLimitExceeded as e:
+                    # CRITICAL FIX: create_error_card takes SINGLE string parameter
+                    logger.warning(f"Rate limit exceeded for {user_id}: {e}")
+                    error_card = create_error_card(
+                        "⏱️ **Too Many Requests**\n\n"
+                        "You've asked for clarification too frequently. "
+                        "Please wait a few minutes.\n\n_Limit: 3 per 5 min_"
+                    )
+                    return MessageFactory.attachment(CardFactory.adaptive_card(error_card["content"]))
+
+            elif confidence < CONFIDENCE_THRESHOLD_MED:  # 0.5-0.8
+                # Medium confidence: Return result + suggestion (REUSE result from above)
+                logger.info(f"Medium confidence ({confidence:.2f}) - showing suggestion")
+
+                # Store user message and assistant response in memory
+                await memory_manager.add_message(
+                    user_id=user_id,
+                    role="user",
+                    content=cleaned_text,
+                    confidence_score=confidence,
+                    db=db
+                )
+
+                response_text = result.get("text", "I couldn't process that query.")
+                await memory_manager.add_message(
+                    user_id=user_id,
+                    role="assistant",
+                    content=response_text,
+                    db=db
+                )
+
+                # Update conversation with response
+                await db.execute("""
+                    UPDATE teams_conversations
+                    SET bot_response = $1
+                    WHERE conversation_id = $2 AND activity_id = $3
+                """, "medium_confidence_query", conversation_id, activity.id)
+
+                # Create suggestion card with inline refinement option
+                suggestion_card = create_suggestion_card(
+                    result=result,
+                    confidence=confidence,
+                    user_query=cleaned_text
+                )
+
+                attachment = CardFactory.adaptive_card(suggestion_card["content"])
+                message = MessageFactory.attachment(attachment)
+                message.text = response_text
+                return message
+
+            else:  # >=0.8
+                # High confidence: Direct execution (REUSE result from above)
+                logger.info(f"High confidence ({confidence:.2f}) - executing directly")
+
+                # Store user message in conversation memory
+                await memory_manager.add_message(
+                    user_id=user_id,
+                    role="user",
+                    content=cleaned_text,
+                    confidence_score=confidence,
+                    db=db
+                )
+
+                # Store assistant response in conversation memory
+                response_text = result.get("text", "I couldn't process that query.")
+                await memory_manager.add_message(
+                    user_id=user_id,
+                    role="assistant",
+                    content=response_text,
+                    db=db
+                )
+
+                # Update conversation with response
+                await db.execute("""
+                    UPDATE teams_conversations
+                    SET bot_response = $1
+                    WHERE conversation_id = $2 AND activity_id = $3
+                """, "natural_language_query", conversation_id, activity.id)
+
+                # Return response
+                if result.get("card"):
+                    # If we have a card, attach it
+                    attachment = CardFactory.adaptive_card(result["card"]["content"])
+                    response = MessageFactory.attachment(attachment)
+                    if result.get("text"):
+                        response.text = result["text"]
+                    return response
+                else:
+                    # Text-only response
+                    return {
+                        "type": "message",
+                        "text": response_text
+                    }
 
         except Exception as e:
             logger.error(f"Error processing natural language query: {e}", exc_info=True)
@@ -556,6 +694,53 @@ async def handle_invoke_activity(
                 db=db
             )
 
+        elif action == "refine_query":
+            # Handle refinement request from medium-confidence suggestion card
+            # CRITICAL FIX: Create REAL clarification session (not fake UUID)
+            original_query = action_data.get("original_query")
+            confidence = action_data.get("confidence", 0.0)
+
+            clarification_engine = await get_clarification_engine()
+            memory_manager = await get_memory_manager()
+
+            refinement_options = [
+                {"title": "Add timeframe", "value": "add_timeframe"},
+                {"title": "Specify person/company", "value": "add_entity"},
+                {"title": "Filter by stage", "value": "add_stage"},
+                {"title": "Start over", "value": "start_over"}
+            ]
+
+            try:
+                # Create REAL session using create_clarification_session
+                session = await clarification_engine.create_clarification_session(
+                    user_id=user_id,
+                    query=original_query,
+                    intent={"intent_type": "refine", "entities": {}},
+                    ambiguity_type="vague_search",
+                    suggested_options=refinement_options
+                )
+
+                # Create refinement card
+                refinement_card = create_clarification_card(
+                    question=f"How would you like to refine: \"{original_query}\"?",
+                    options=refinement_options,
+                    session_id=session["session_id"],  # Real session ID
+                    original_query=original_query
+                )
+
+                attachment = CardFactory.adaptive_card(refinement_card["content"])
+                response = MessageFactory.attachment(attachment)
+
+            except RateLimitExceeded as e:
+                # Handle rate limit in refine flow too
+                logger.warning(f"Rate limit in refine_query for {user_id}: {e}")
+                error_card = create_error_card(
+                    "⏱️ **Too Many Requests**\n\n"
+                    "You've asked for clarification too frequently. "
+                    "Please wait a few minutes.\n\n_Limit: 3 per 5 min_"
+                )
+                response = MessageFactory.attachment(CardFactory.adaptive_card(error_card["content"]))
+
         elif action == "apply_filters":
             # Apply filters and regenerate digest
             filters = {
@@ -587,6 +772,31 @@ async def handle_invoke_activity(
                 preferences=action_data,
                 db=db
             )
+
+        elif action == "submit_clarification":
+            # CRITICAL FIX: Preserve original payload BEFORE unwrapping
+            original_payload = dict(action_data)
+
+            # Unwrap msteams.value for action metadata
+            if "msteams" in action_data and "value" in action_data["msteams"]:
+                action_data = action_data["msteams"]["value"]
+
+            # Extract from BOTH locations with null guards
+            session_id = action_data.get("session_id")
+            clarification_response = original_payload.get("clarification_response")
+
+            # Guard for missing fields
+            if not session_id or not clarification_response:
+                logger.warning(f"Missing data: session={session_id}, response={clarification_response}")
+                response = MessageFactory.text("❌ Invalid submission. Please try again.")
+            else:
+                response = await handle_clarification_response(
+                    user_id=user_id,
+                    user_email=user_email,
+                    session_id=session_id,
+                    clarification_response=clarification_response,
+                    db=db
+                )
 
         else:
             logger.warning(f"Unknown invoke action: {action}")
@@ -1303,3 +1513,107 @@ async def test_digest_delivery(
     except Exception as e:
         logger.error(f"Test delivery error: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Test delivery failed: {str(e)}")
+
+
+async def handle_clarification_response(
+    user_id: str,
+    user_email: str,
+    session_id: str,
+    clarification_response: str,
+    db: asyncpg.Connection
+) -> Dict[str, Any]:
+    """
+    Handle user's response to clarification question and execute refined query.
+
+    Args:
+        user_id: Teams user ID
+        user_email: User's email
+        session_id: Clarification session ID
+        clarification_response: User's clarification answer
+        db: Database connection
+
+    Returns:
+        Response with query results
+    """
+    logger.info(f"Handling clarification response from {user_email}: session={session_id}, response={clarification_response}")
+
+    try:
+        # Get clarification engine and memory manager
+        clarification_engine = await get_clarification_engine()
+        memory_manager = await get_memory_manager()
+
+        # Retrieve clarification session
+        session = clarification_engine.get_clarification_session(session_id)
+        if not session:
+            return {
+                "type": "message",
+                "text": "⏱️ That clarification session has expired. Please ask your question again."
+            }
+
+        # Store user's clarification response in memory
+        await memory_manager.add_message(
+            user_id=user_id,
+            role="user",
+            content=clarification_response,
+            db=db
+        )
+
+        # Merge clarification response with partial intent
+        merged_intent = clarification_engine.merge_clarification_response(
+            session=session,
+            user_response=clarification_response
+        )
+
+        # Build refined query by combining original query with clarification
+        original_query = session["original_query"]
+        refined_query = f"{original_query} {clarification_response}"
+
+        logger.info(f"Refined query: '{refined_query}' with merged intent: {merged_intent}")
+
+        # Get conversation context
+        conversation_context = await memory_manager.get_context_for_query(
+            user_id=user_id,
+            current_query=refined_query,
+            db=db
+        )
+
+        # Execute refined query with merged intent (skip classification)
+        result = await process_natural_language_query(
+            query=refined_query,
+            user_email=user_email,
+            db=db,
+            conversation_context=conversation_context,
+            override_intent=merged_intent  # NEW: Skip classification
+        )
+
+        # Store assistant response in memory
+        response_text = result.get("text", "I couldn't process that query.")
+        await memory_manager.add_message(
+            user_id=user_id,
+            role="assistant",
+            content=response_text,
+            db=db
+        )
+
+        # Clear clarification session
+        clarification_engine.clear_clarification_session(session_id)
+
+        # Return response
+        if result.get("card"):
+            attachment = CardFactory.adaptive_card(result["card"]["content"])
+            response = MessageFactory.attachment(attachment)
+            if result.get("text"):
+                response.text = result["text"]
+            return response
+        else:
+            return {
+                "type": "message",
+                "text": response_text
+            }
+
+    except Exception as e:
+        logger.error(f"Error handling clarification response: {e}", exc_info=True)
+        return {
+            "type": "message",
+            "text": f"❌ Error processing your clarification: {str(e)}\n\nPlease try asking your question again."
+        }

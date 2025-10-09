@@ -698,3 +698,162 @@ def create_preferences_card(
             ]
         }
     }
+
+
+def create_clarification_card(
+    question: str,
+    options: List[Dict[str, str]],
+    session_id: str,
+    original_query: str
+) -> Dict[str, Any]:
+    """
+    Create Adaptive Card for clarification dialogue with interactive options.
+
+    Args:
+        question: Clarification question text
+        options: List of {"title": str, "value": str} options
+        session_id: Clarification session ID
+        original_query: Original user query for context
+
+    Returns:
+        Adaptive Card JSON
+    """
+    body_elements = [
+        {
+            "type": "TextBlock",
+            "text": "🤔 Need Clarification",
+            "weight": "Bolder",
+            "size": "Large",
+            "wrap": True
+        },
+        {
+            "type": "TextBlock",
+            "text": question,
+            "wrap": True,
+            "spacing": "Medium"
+        }
+    ]
+
+    # Add original query context
+    if original_query:
+        body_elements.append({
+            "type": "TextBlock",
+            "text": f"Your question: \"{original_query}\"",
+            "wrap": True,
+            "isSubtle": True,
+            "size": "Small",
+            "spacing": "Small"
+        })
+
+    # Add options as Input.ChoiceSet if available
+    if options:
+        choices = [
+            {"title": opt["title"], "value": opt["value"]}
+            for opt in options
+        ]
+        body_elements.append({
+            "type": "Input.ChoiceSet",
+            "id": "clarification_response",
+            "choices": choices,
+            "style": "expanded",
+            "spacing": "Medium"
+        })
+    else:
+        # Fallback to text input
+        body_elements.append({
+            "type": "Input.Text",
+            "id": "clarification_response",
+            "placeholder": "Type your answer here...",
+            "isMultiline": False,
+            "spacing": "Medium"
+        })
+
+    return {
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.5",
+            "body": body_elements,
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": "✅ Submit",
+                    "data": {
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "submit_clarification",
+                                "session_id": session_id
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }
+
+
+def create_suggestion_card(
+    result: Dict[str, Any],
+    confidence: float,
+    user_query: str
+) -> Dict[str, Any]:
+    """
+    Inline suggestion card for medium-confidence results (0.5-0.8).
+    Shows result with refinement option.
+
+    Args:
+        result: Query result dict with text
+        confidence: Confidence score (0.0-1.0)
+        user_query: Original user query
+
+    Returns:
+        Adaptive Card dict for Teams
+    """
+    return {
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.5",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "text": result.get("text", ""),
+                    "wrap": True,
+                    "size": "Medium"
+                },
+                {
+                    "type": "Container",
+                    "separator": True,
+                    "spacing": "Medium",
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": f"💡 I'm {int(confidence*100)}% confident. Need to refine?",
+                            "isSubtle": True,
+                            "size": "Small",
+                            "wrap": True
+                        }
+                    ]
+                }
+            ],
+            "actions": [
+                {
+                    "type": "Action.Submit",
+                    "title": "🔍 Refine Search",
+                    "data": {
+                        "msteams": {
+                            "type": "invoke",
+                            "value": {
+                                "action": "refine_query",
+                                "original_query": user_query,
+                                "confidence": confidence
+                            }
+                        }
+                    }
+                }
+            ]
+        }
+    }

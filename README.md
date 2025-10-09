@@ -38,7 +38,41 @@
 
 ## Overview
 
-**Well Intake** is an enterprise-grade AI-powered recruiting automation platform that transforms Outlook emails into enriched Zoho CRM records in under 3 seconds. Built on Azure Container Apps with intelligent cost optimization through the Candidate Vault Agent (VoIT + C³), the system combines:
+**Well Intake** is an enterprise-grade AI-powered recruiting automation platform that transforms Outlook emails into enriched Zoho CRM records in under 3 seconds. Built as a **microservices architecture** on Azure Container Apps with intelligent cost optimization through VoIT + C³, the platform consists of:
+
+### Microservices Architecture (Phase 1)
+
+1. **Main API Service** (`app/`) - Port 8000
+   - Email processing with LangGraph workflow (Extract → Research → Validate)
+   - Zoho CRM integration via OAuth proxy
+   - Firecrawl v2 + Apollo.io enrichment
+   - Redis caching with C³ probabilistic reuse
+   - Azure Service Bus batch processing
+
+2. **Teams Bot Service** (`teams_bot/`) - Port 8001
+   - Microsoft Teams integration with Bot Framework SDK
+   - Adaptive Cards for interactive UI
+   - Natural language query engine with GPT-5
+   - TalentWell candidate digest generation
+   - User preferences and analytics tracking
+
+3. **Vault Agent Service** (Phase 2 - Planned) - Port 8002
+   - Weekly digest scheduler (hourly background job)
+   - Automated email delivery via Azure Communication Services
+   - Subscription management and delivery tracking
+
+4. **Shared Library** (`well_shared/`)
+   - Common utilities used across all services
+   - Database connection management (PostgreSQL)
+   - Redis cache manager with intelligent TTL
+   - Email delivery (Azure Communication Services)
+   - Evidence extraction and VoIT configuration
+
+**Benefits of Microservices:**
+- Independent deployment and scaling per service
+- Isolated failure domains (Teams Bot doesn't affect email processing)
+- Technology flexibility (different frameworks per service)
+- Easier testing and development (run services independently)
 
 ### Executive Summary
 - **50+ REST API endpoints** serving Outlook add-ins, Teams bot, webhooks, and admin consoles
@@ -123,16 +157,49 @@
 
 ## Quick Start
 
+### Local Development Setup
+
 | Step | Command | Notes |
 |------|---------|-------|
-| 1 | `python -m venv .venv && source .venv/bin/activate` | Use Python 3.11 |
-| 2 | `pip install -r requirements-dev.txt` | Installs FastAPI, LangGraph, tooling |
-| 3 | `npm install --prefix addin` | Installs Outlook add-in dependencies |
-| 4 | `cp app/.env.local.example app/.env.local` | Fill in secrets & API keys |
-| 5 | `uvicorn app.main:app --reload` | Starts API locally |
-| 6 | `npm run dev --prefix addin` | Runs add-in dev server |
+| 1 | `python -m venv zoho && source zoho/bin/activate` | Use Python 3.11 (Windows: `zoho\Scripts\activate`) |
+| 2 | `pip install -r requirements.txt` | Installs core dependencies |
+| 3 | `pip install -r requirements-dev.txt` | Installs development tools |
+| 4 | `npm install --prefix addin` | Installs Outlook add-in dependencies |
+| 5 | `cp .env.example .env.local` | Fill in secrets & API keys |
+| 6 | `alembic upgrade head` | Initialize database schema |
 
-Make sure Redis and PostgreSQL are available (see [Development Guide](#development-guide) for container helpers).
+### Running Services Locally
+
+**Main API Service** (Email Processing)
+```bash
+uvicorn app.main:app --reload --port 8000
+# Visit: http://localhost:8000/docs
+```
+
+**Teams Bot Service** (Microsoft Teams Integration)
+```bash
+uvicorn teams_bot.app.main:app --reload --port 8001
+# Visit: http://localhost:8001/health
+```
+
+**Outlook Add-in** (Frontend)
+```bash
+npm run serve --prefix addin
+# Visit: http://localhost:8080
+```
+
+**Shared Library** (Development Mode)
+```bash
+cd well_shared
+pip install -e .  # Editable mode for live updates
+```
+
+### Prerequisites
+- **Redis**: Azure Cache for Redis (or local `redis-server` on port 6379)
+- **PostgreSQL**: Azure PostgreSQL Flexible Server (or local `postgres` on port 5432)
+- **Environment Variables**: See [CLAUDE.md](CLAUDE.md#environment-variables) for required config
+
+See [Development Guide](#development-guide) for Docker container helpers and detailed setup instructions.
 
 
 ## Key Capabilities
@@ -262,6 +329,8 @@ This system introduces **two groundbreaking algorithms** that optimize AI conten
 
 ## Architecture
 
+- **Microservices architecture** with three independent services: Main API (email processing), Teams Bot (Microsoft Teams integration), and Vault Agent (digest scheduler).
+- **Shared library** (`well_shared/`) provides common utilities for database, cache, mail, and VoIT configuration across all services.
 - FastAPI orchestrates LangGraph pipelines within Azure Container Apps, while the Outlook add-in and Teams Bot provide human-in-the-loop control surfaces.
 - **VoIT and C³ algorithms** operate as cross-cutting optimization layers across ALL processing paths - from email intake to candidate vault publishing.
 - Redis and PostgreSQL back persistent enrichment results; Azure Blob storage captures attachments and static assets.
@@ -269,6 +338,7 @@ This system introduces **two groundbreaking algorithms** that optimize AI conten
 - GitHub Actions delivers container builds and warm cache scripts to keep endpoints responsive.
 - The **Candidate Vault Agent** aggregates CRM data and produces formatted digest cards, leveraging the VoIT/C³ optimization layer.
 - The **Teams Bot** provides natural language query interface and weekly digest subscriptions, with Azure Communication Services handling email delivery.
+- Each service can be deployed, scaled, and monitored independently while sharing common infrastructure and libraries.
 
 > **Diagram legend** - blue: operators, dark gray: platform services, amber: data stores, violet: third-party integrations, green: observability & ops, **coral: revolutionary VoIT/C³ optimization algorithms** (novel contribution).
 

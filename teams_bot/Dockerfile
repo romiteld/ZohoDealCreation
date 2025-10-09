@@ -32,6 +32,7 @@ COPY app/config/ ./app/config/
 COPY app/integrations.py ./app/
 COPY app/business_rules.py ./app/
 COPY app/powerbi_integration.py ./app/
+COPY app/monitoring.py ./app/
 
 # Expose port
 EXPOSE 8001
