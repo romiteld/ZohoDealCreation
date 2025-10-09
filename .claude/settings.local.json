@@ -44,7 +44,9 @@
       "Bash(chmod:*)",
       "Bash(az containerapp list:*)",
       "Bash(PGPASSWORD='W3llDB2025Pass' psql:*)",
-      "Bash(timeout 30 az containerapp logs show:*)"
+      "Bash(timeout 30 az containerapp logs show:*)",
+      "Bash(source:*)",
+      "Bash(pkill:*)"
     ],
     "deny": [],
     "ask": [],

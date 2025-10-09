@@ -2101,3 +2101,46 @@ class ZohoApiClient(ZohoClient):
         except Exception as e:
             logger.error(f"Error querying candidates from Zoho: {e}")
             return []
+
+    async def get_candidates(self,
+                            cvid: str,
+                            fields: List[str],
+                            page: int = 1,
+                            per_page: int = 200) -> Dict[str, Any]:
+        """
+        Fetch candidates from Zoho API using custom view ID.
+
+        Args:
+            cvid: Custom view ID (e.g., "_Vault Candidates" view)
+            fields: List of field names to fetch
+            page: Page number (default: 1)
+            per_page: Records per page (max: 200)
+
+        Returns:
+            Dict with 'data' (list of records), 'info' (pagination), 'headers' (rate limits)
+        """
+        try:
+            # Build query parameters
+            params = {
+                'cvid': cvid,
+                'fields': ','.join(fields),
+                'page': page,
+                'per_page': per_page
+            }
+
+            # Make request (using synchronous _make_request)
+            response = self._make_request("GET", "Leads", params=params)
+
+            # Extract rate limit headers (if available)
+            # Note: _make_request doesn't return headers, so we'll return empty dict
+            headers = {}
+
+            return {
+                'data': response.get('data', []),
+                'info': response.get('info', {}),
+                'headers': headers
+            }
+
+        except Exception as e:
+            logger.error(f"Error fetching candidates from Zoho API: {e}")
+            raise
