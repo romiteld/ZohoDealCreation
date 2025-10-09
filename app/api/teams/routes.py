@@ -645,13 +645,23 @@ async def handle_invoke_activity(
     try:
         activity = turn_context.activity
         # Extract action data
-        action_data = activity.value or {}
+        raw_action_data = activity.value or {}
 
-        # Check if data is wrapped in msteams.value (new pattern from adaptive cards)
-        if "msteams" in action_data:
-            msteams_data = action_data.get("msteams", {})
-            if "value" in msteams_data:
-                action_data = msteams_data["value"]
+        # Preserve submitted input fields (e.g., adaptive card form values)
+        submitted_inputs = {
+            key: value
+            for key, value in raw_action_data.items()
+            if key != "msteams"
+        }
+
+        # Extract action metadata from msteams.value without losing input fields
+        action_metadata: Dict[str, Any] = {}
+        if "msteams" in raw_action_data:
+            msteams_data = raw_action_data.get("msteams", {}) or {}
+            action_metadata = msteams_data.get("value") or {}
+
+        # Merge so that action metadata (action, request_id, etc.) wins on conflicts
+        action_data: Dict[str, Any] = {**submitted_inputs, **action_metadata}
 
         action = action_data.get("action", "")
 
