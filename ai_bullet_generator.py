@@ -9,9 +9,12 @@ import os
 from typing import List, Dict
 import json
 
-def generate_rich_bullets_with_ai(candidate: Dict) -> List[str]:
+# Import shared tone utilities
+from tone_utils import apply_tone_guardrails
+
+async def generate_rich_bullets_with_ai(candidate: Dict) -> List[str]:
     """
-    Use GPT-5-mini to generate 5-6 rich marketing bullets matching screenshot format.
+    Use GPT-5 to generate 5-6 rich marketing bullets matching screenshot format.
 
     Args:
         candidate: Dictionary with interviewer_notes, top_performance, licenses, etc.
@@ -19,6 +22,20 @@ def generate_rich_bullets_with_ai(candidate: Dict) -> List[str]:
     Returns:
         List of 5-6 HTML-formatted bullets with <b> tags around key terms
     """
+    import hashlib
+    from well_shared.cache.redis_manager import get_cache_manager
+
+    # Check Redis cache first
+    try:
+        cache_mgr = await get_cache_manager()
+        if cache_mgr and candidate.get('Reference ID'):
+            cache_key = f"gpt5_bullets:{candidate['Reference ID']}"
+            cached_data = await cache_mgr.get(cache_key)
+            if cached_data:
+                print(f"✓ Using cached bullets for {candidate.get('Reference ID')}")
+                return json.loads(cached_data)
+    except Exception as e:
+        print(f"⚠️  Redis cache read failed: {e}")
 
     # Build comprehensive biographical context
     context_parts = []
@@ -78,9 +95,9 @@ Return ONLY a JSON array of strings, no other text:
         client = openai.OpenAI(api_key=os.getenv('OPENAI_API_KEY'))
 
         response = client.chat.completions.create(
-            model="gpt-5-mini",
+            model="gpt-5",  # Using full gpt-5 for quality - user confirmed to use this
             messages=[
-                {"role": "system", "content": "You are an expert at writing compelling financial advisor marketing materials."},
+                {"role": "system", "content": "You are an expert at writing financial advisor marketing materials with calm authority and credible tone. Focus on measurable achievements and proven value. NEVER use hype adjectives like 'rare', 'exceptional', 'standout', 'phenomenal', 'extraordinary'."},
                 {"role": "user", "content": prompt}
             ],
             temperature=1,  # Required per CLAUDE.md
@@ -105,6 +122,9 @@ Return ONLY a JSON array of strings, no other text:
 
         # CRITICAL: Verify all facts against source data (prevent hallucinations)
         bullets = verify_bullet_facts(bullets, biographical_data, candidate)
+
+        # CRITICAL: Apply tone guardrails to AI output
+        bullets = [apply_tone_guardrails(b) for b in bullets]
 
         # Add availability + compensation as final bullet if not already included
         practical_parts = []
@@ -132,7 +152,19 @@ Return ONLY a JSON array of strings, no other text:
                 # Append practical bullet
                 bullets.append('; '.join(practical_parts))
 
-        return bullets[:6]  # Max 6 bullets
+        final_bullets = bullets[:6]  # Max 6 bullets
+
+        # Cache result in Redis (24 hour TTL)
+        try:
+            cache_mgr = await get_cache_manager()
+            if cache_mgr and candidate.get('Reference ID'):
+                cache_key = f"gpt5_bullets:{candidate['Reference ID']}"
+                await cache_mgr.set(cache_key, json.dumps(final_bullets), ttl=86400)
+                print(f"✓ Cached bullets for {candidate.get('Reference ID')}")
+        except Exception as e:
+            print(f"⚠️  Redis cache write failed: {e}")
+
+        return final_bullets
 
     except Exception as e:
         print(f"AI bullet generation failed: {e}")

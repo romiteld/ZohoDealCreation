@@ -3244,6 +3244,10 @@ app.include_router(apollo_router)
 # Include Teams bot router
 app.include_router(teams_router)
 
+# Include Real-time Monitoring router for Outlook Add-in analytics
+from app.api.monitoring_routes import router as monitoring_router
+app.include_router(monitoring_router)
+
 @app.get("/cache/status", dependencies=[Depends(verify_api_key)])
 async def get_cache_status():
     """Get comprehensive Redis cache performance metrics, health status, and optimization recommendations"""
