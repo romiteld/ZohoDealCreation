@@ -15,6 +15,13 @@ import sys
 from typing import TypedDict, List, Dict, Optional
 from langgraph.graph import StateGraph, END
 
+from app.config.candidate_keywords import (
+    VAULT_ADVISOR_KEYWORDS,
+    VAULT_EXECUTIVE_KEYWORDS,
+    is_advisor_title,
+    is_executive_title,
+)
+
 # Load environment
 load_dotenv('.env.local')
 
@@ -44,33 +51,17 @@ class VaultAlertsState(TypedDict):
     executive_html: Optional[str]
     errors: List[str]
 
-# Advisor keywords
-ADVISOR_KEYWORDS = [
-    'financial advisor', 'wealth advisor', 'investment advisor', 'wealth management',
-    'financial adviser', 'private wealth', 'advisor', 'adviser', 'financial consultant',
-    'relationship manager', 'portfolio manager', 'client advisor', 'senior advisor',
-    'lead advisor', 'associate advisor', 'vice president', 'vp', 'director'
-]
+# Advisor/Executive keyword helpers shared with Teams query engine
+ADVISOR_KEYWORDS = VAULT_ADVISOR_KEYWORDS
+EXECUTIVE_KEYWORDS = VAULT_EXECUTIVE_KEYWORDS
 
-# Executive keywords
-EXECUTIVE_KEYWORDS = [
-    'ceo', 'chief executive', 'cfo', 'chief financial', 'coo', 'chief operating',
-    'cto', 'chief technology', 'cio', 'chief investment', 'president', 'managing director',
-    'managing partner', 'partner', 'founder', 'co-founder', 'owner', 'principal',
-    'head of', 'cbdo', 'cgo', 'ccdo', 'cgrowth', 'chief growth', 'chief business'
-]
 
 def is_advisor(title: str) -> bool:
-    if not title:
-        return False
-    title_lower = title.lower()
-    return any(keyword in title_lower for keyword in ADVISOR_KEYWORDS)
+    return is_advisor_title(title)
+
 
 def is_executive(title: str) -> bool:
-    if not title:
-        return False
-    title_lower = title.lower()
-    return any(keyword in title_lower for keyword in EXECUTIVE_KEYWORDS)
+    return is_executive_title(title)
 
 def get_alert_type(title: str) -> str:
     """Determine alert type for header."""

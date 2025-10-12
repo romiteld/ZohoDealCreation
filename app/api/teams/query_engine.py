@@ -9,9 +9,12 @@ import logging
 import json
 import os
 from typing import Dict, Any, Optional, List, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import asyncpg
 from openai import AsyncOpenAI
+
+from app.config.candidate_keywords import normalize_candidate_type
+from app.integrations import ZohoApiClient
 
 logger = logging.getLogger(__name__)
 
@@ -69,6 +72,14 @@ class QueryEngine:
 
             # Step 4: Build and execute Zoho query
             results, _ = await self._build_query(intent)
+            if intent.get("validation_error"):
+                logger.info("Validation error detected during query build; returning user message")
+                return {
+                    "text": intent["validation_error"],
+                    "card": None,
+                    "data": None,
+                    "confidence_score": confidence,
+                }
             logger.info(f"Querying Zoho CRM with intent: {intent}")
 
             # Step 5: CRITICAL - Preserve async format flow (user's final correction)
@@ -210,8 +221,6 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
         Returns:
             Tuple of (results_list, empty_params_list)
         """
-        from app.integrations import ZohoApiClient
-
         intent_type = intent.get("intent_type", "list")
         filters = intent.get("filters", {})
         owner_filter = intent.get("owner_filter")
@@ -284,6 +293,9 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             # Remove None values
             deal_filters = {k: v for k, v in deal_filters.items() if v is not None}
 
+            if self._validate_date_range(deal_filters, intent, "deals"):
+                return [], []
+
             logger.info(f"Querying Zoho deals with filters: {deal_filters}")
 
             try:
@@ -354,6 +366,9 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
             # Remove None values
             meeting_filters = {k: v for k, v in meeting_filters.items() if v is not None}
+
+            if self._validate_date_range(meeting_filters, intent, "meetings"):
+                return [], []
 
             logger.info(f"Querying Zoho meetings with filters: {meeting_filters}")
 
@@ -435,9 +450,25 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             if "created_before" in filters:
                 zoho_filters["to_date"] = filters["created_before"]
 
-            # Candidate type filter (advisors, c_suite, global)
-            if "candidate_type" in entities:
-                zoho_filters["candidate_type"] = entities["candidate_type"]
+            # Candidate type filter (advisors, executives, global)
+            raw_candidate_type = entities.get("candidate_type")
+            if isinstance(raw_candidate_type, list):
+                raw_candidate_type = raw_candidate_type[0] if raw_candidate_type else None
+
+            normalized_candidate_type = normalize_candidate_type(raw_candidate_type)
+            if normalized_candidate_type:
+                if raw_candidate_type and raw_candidate_type != normalized_candidate_type:
+                    logger.info(
+                        "Normalized candidate_type '%s' to '%s' for Zoho vault query",
+                        raw_candidate_type,
+                        normalized_candidate_type,
+                    )
+                zoho_filters["candidate_type"] = normalized_candidate_type
+            elif raw_candidate_type:
+                logger.warning(
+                    "Ignoring unrecognized candidate_type '%s'; returning all vault candidates",
+                    raw_candidate_type,
+                )
 
             # Candidate Locator ID filter (exact match, highest priority)
             if "candidate_locator" in entities and entities["candidate_locator"]:
@@ -609,6 +640,50 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
                 "data": results if isinstance(results, list) else [dict(row) for row in results]
             }
 
+    def _validate_date_range(
+        self,
+        filters: Dict[str, Any],
+        intent: Dict[str, Any],
+        table_name: str,
+    ) -> bool:
+        """Validate date bounds and set a user-friendly error when inverted.
+
+        Returns True if validation fails so the caller can short-circuit before hitting Zoho.
+        """
+        from_date = self._ensure_datetime(filters.get("from_date"))
+        to_date = self._ensure_datetime(filters.get("to_date"))
+
+        if from_date and to_date and from_date > to_date:
+            intent["validation_error"] = (
+                "It looks like the start date comes after the end date. Please swap the dates and try again."
+            )
+            logger.info(
+                "Skipping Zoho %s query due to invalid date range: %s > %s",
+                table_name,
+                from_date,
+                to_date,
+            )
+            return True
+
+        return False
+
+    @staticmethod
+    def _ensure_datetime(value: Any) -> Optional[datetime]:
+        """Convert supported date representations to datetime objects for validation."""
+        if isinstance(value, datetime):
+            if value.tzinfo is None:
+                return value.replace(tzinfo=timezone.utc)
+            return value.astimezone(timezone.utc)
+        if isinstance(value, str) and value:
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                return parsed.replace(tzinfo=timezone.utc)
+            return parsed.astimezone(timezone.utc)
+        return None
+
     async def _handle_transcript_summary(
         self,
         intent: Dict[str, Any]
@@ -623,8 +698,6 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             Response dict with summary text
         """
         from app.zoom_client import ZoomClient
-        from app.integrations import ZohoApiClient
-
         entities = intent.get("entities", {})
         candidate_name = entities.get("candidate_name")
         meeting_id = entities.get("meeting_id")

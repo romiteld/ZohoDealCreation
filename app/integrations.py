@@ -17,6 +17,12 @@ from azure.storage.blob import BlobServiceClient
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from datetime import datetime, timezone
 
+from app.config.candidate_keywords import (
+    is_advisor_title,
+    is_executive_title,
+    normalize_candidate_type,
+)
+
 # Import feature flags
 try:
     from app.config import FEATURE_ASYNC_ZOHO
@@ -1895,6 +1901,21 @@ class ZohoApiClient(ZohoClient):
             candidate_type: Filter by "advisors" or "c_suite". None = all candidates.
         """
         try:
+            original_candidate_type = candidate_type
+            normalized_candidate_type = normalize_candidate_type(candidate_type)
+            if original_candidate_type and not normalized_candidate_type:
+                logger.warning(
+                    "Unknown candidate_type '%s'; defaulting to all vault candidates",
+                    original_candidate_type,
+                )
+            elif normalized_candidate_type and original_candidate_type != normalized_candidate_type:
+                logger.info(
+                    "Normalized candidate_type '%s' to '%s' for vault filtering",
+                    original_candidate_type,
+                    normalized_candidate_type,
+                )
+            candidate_type = normalized_candidate_type
+
             # Build search criteria - simplified since Candidate_Status is not searchable
             criteria_parts = []
 
@@ -2034,18 +2055,13 @@ class ZohoApiClient(ZohoClient):
 
                     # Filter by candidate type based on job title keywords
                     if candidate_type:
-                        job_title = (candidate.get("Designation") or candidate.get("Title") or "").lower()
+                        job_title = candidate.get("Designation") or candidate.get("Title")
 
                         if candidate_type == "advisors":
-                            # Advisor keywords
-                            advisor_keywords = ["advisor", "financial advisor", "wealth advisor", "investment advisor", "wealth management"]
-                            if not any(keyword in job_title for keyword in advisor_keywords):
+                            if not is_advisor_title(job_title):
                                 continue
                         elif candidate_type == "c_suite":
-                            # C-Suite/Executive keywords
-                            exec_keywords = ["ceo", "cfo", "coo", "cto", "president", "vp", "vice president",
-                                           "chief", "director", "managing director", "executive", "head of"]
-                            if not any(keyword in job_title for keyword in exec_keywords):
+                            if not is_executive_title(job_title):
                                 continue
 
                     processed = {

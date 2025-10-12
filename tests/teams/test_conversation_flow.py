@@ -4,7 +4,6 @@ Tests critical fixes for production deployment.
 """
 import pytest
 from unittest.mock import AsyncMock, patch, MagicMock
-from datetime import datetime, timezone
 
 # Test fixtures
 @pytest.fixture
@@ -139,7 +138,42 @@ async def test_override_intent_skips_classification(mock_db):
         assert result["confidence_score"] == 1.0
 
 
-# Test 4: Adaptive card data extraction with guards
+# Test 4: Invalid date ranges return friendly validation error
+@pytest.mark.asyncio
+async def test_invalid_date_range_returns_message(mock_db):
+    """Queries with a start date after the end date should not hit Zoho and must return a helpful message."""
+    from app.api.teams.query_engine import QueryEngine
+
+    with patch("app.api.teams.query_engine.ZohoApiClient") as mock_zoho, \
+         patch.object(QueryEngine, '_format_response') as mock_format:
+
+        # Prepare override intent with reversed dates
+        override_intent = {
+            "intent_type": "count",
+            "table": "deals",
+            "filters": {
+                "created_after": "2025-11-01T00:00:00",
+                "created_before": "2025-10-01T00:00:00",
+            },
+        }
+
+        engine = QueryEngine()
+        result = await engine.process_query(
+            query="how many deals",
+            user_email="test@example.com",
+            db=mock_db,
+            conversation_context=None,
+            override_intent=override_intent,
+        )
+
+        # Should return validation error message without calling Zoho or formatting layer
+        mock_zoho.return_value.query_deals.assert_not_called()
+        assert mock_format.call_count == 0
+        assert "start date" in result["text"].lower()
+        assert result["data"] is None
+
+
+# Test 5: Adaptive card data extraction with guards
 @pytest.mark.asyncio
 async def test_adaptive_card_missing_fields():
     """
@@ -151,7 +185,7 @@ async def test_adaptive_card_missing_fields():
     assert True, "Adaptive card null guards implemented in routes.py:687-689"
 
 
-# Test 5: Telemetry tracking
+# Test 6: Telemetry tracking
 @pytest.mark.asyncio
 async def test_telemetry_tracking():
     """
@@ -179,7 +213,7 @@ async def test_telemetry_tracking():
         })
 
 
-# Test 6: Zoom retry with exponential backoff
+# Test 7: Zoom retry with exponential backoff
 @pytest.mark.asyncio
 async def test_zoom_retry_helper():
     """
@@ -215,7 +249,7 @@ async def test_zoom_retry_helper():
         assert mock_client_instance.request.call_count == 3
 
 
-# Test 7: Confidence threshold configuration
+# Test 8: Confidence threshold configuration
 def test_confidence_thresholds():
     """
     Verify confidence thresholds are correctly configured (0.5/0.8 split).
