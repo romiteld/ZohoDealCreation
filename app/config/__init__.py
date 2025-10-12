@@ -3,7 +3,20 @@ Configuration modules for Well Intake API.
 Centralized configuration for VoIT, C³, and other system components.
 """
 # Import from well_shared after Phase 0 migration
-from well_shared.config.voit_config import VoITConfig, voit_config, FEATURE_C3, FEATURE_VOIT, C3_DELTA
+try:
+    from well_shared.config.voit_config import (
+        VoITConfig,
+        voit_config,
+        FEATURE_C3,
+        FEATURE_VOIT,
+        C3_DELTA,
+    )
+except ImportError:  # pragma: no cover - optional dependency for local tests
+    VoITConfig = None
+    voit_config = None
+    FEATURE_C3 = False
+    FEATURE_VOIT = False
+    C3_DELTA = 0
 from .feature_flags import (
     PRIVACY_MODE,
     FEATURE_ASYNC_ZOHO,
