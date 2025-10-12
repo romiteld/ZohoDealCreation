@@ -69,6 +69,14 @@ class QueryEngine:
 
             # Step 4: Build and execute Zoho query
             results, _ = await self._build_query(intent)
+            if intent.get("validation_error"):
+                logger.info("Validation error detected during query build; returning user message")
+                return {
+                    "text": intent["validation_error"],
+                    "card": None,
+                    "data": None,
+                    "confidence_score": confidence,
+                }
             logger.info(f"Querying Zoho CRM with intent: {intent}")
 
             # Step 5: CRITICAL - Preserve async format flow (user's final correction)
@@ -284,6 +292,20 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             # Remove None values
             deal_filters = {k: v for k, v in deal_filters.items() if v is not None}
 
+            # Validate date range if both bounds provided
+            from_date = self._ensure_datetime(deal_filters.get("from_date"))
+            to_date = self._ensure_datetime(deal_filters.get("to_date"))
+            if from_date and to_date and from_date > to_date:
+                intent["validation_error"] = (
+                    "It looks like the start date comes after the end date. Please swap the dates and try again."
+                )
+                logger.info(
+                    "Skipping Zoho deals query due to invalid date range: %s > %s",
+                    from_date,
+                    to_date,
+                )
+                return [], []
+
             logger.info(f"Querying Zoho deals with filters: {deal_filters}")
 
             try:
@@ -354,6 +376,20 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
             # Remove None values
             meeting_filters = {k: v for k, v in meeting_filters.items() if v is not None}
+
+            # Validate date range if both bounds provided
+            from_date = self._ensure_datetime(meeting_filters.get("from_date"))
+            to_date = self._ensure_datetime(meeting_filters.get("to_date"))
+            if from_date and to_date and from_date > to_date:
+                intent["validation_error"] = (
+                    "It looks like the start date comes after the end date. Please swap the dates and try again."
+                )
+                logger.info(
+                    "Skipping Zoho meetings query due to invalid date range: %s > %s",
+                    from_date,
+                    to_date,
+                )
+                return [], []
 
             logger.info(f"Querying Zoho meetings with filters: {meeting_filters}")
 
@@ -608,6 +644,18 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
                 "card": None,  # TODO: Implement Adaptive Card formatting
                 "data": results if isinstance(results, list) else [dict(row) for row in results]
             }
+
+    @staticmethod
+    def _ensure_datetime(value: Any) -> Optional[datetime]:
+        """Convert supported date representations to datetime objects for validation."""
+        if isinstance(value, datetime):
+            return value
+        if isinstance(value, str) and value:
+            try:
+                return datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+        return None
 
     async def _handle_transcript_summary(
         self,
