@@ -447,8 +447,8 @@ class VaultAlertsGenerator:
             # **ANONYMIZE ALL CANDIDATES** immediately after loading
             if PRIVACY_MODE:
                 logger.info("🔒 Applying anonymization to candidates")
-                for c in all_candidates:
-                    anonymize_candidate_data(c)  # MUTATES in place
+                # CRITICAL: anonymize_candidate_data returns NEW dict, must reassign
+                all_candidates = [anonymize_candidate_data(c) for c in all_candidates]
 
             # Compensation range filtering (post-query parsing)
             if min_comp is not None or max_comp is not None:

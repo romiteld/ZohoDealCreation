@@ -22,17 +22,25 @@ def test_parse_location():
 
 
 def test_zoho_field_mapping():
-    """Verify all 29 PostgreSQL columns are mapped."""
+    """Verify all 29 PostgreSQL columns are mapped.
+
+    CRITICAL: Uses CORRECT Zoho CRM API field names (verified from production):
+    - Candidate_Locator (NOT TWAV_Number)
+    - Employer (NOT Firm)
+    - Book_Size_AUM (NOT AUM)
+    - Production_L12Mo (NOT Production)
+    - Desired_Comp (NOT Compensation)
+    """
     zoho_data = {
-        'TWAV_Number': 'TWAV123456',
+        'Candidate_Locator': 'TWAV123456',  # FIXED: was TWAV_Number
         'Full_Name': 'John Doe',
         'Title': 'Financial Advisor',
         'Current_Location': 'Austin, TX',
         'Location_Detail': 'Downtown area',
-        'Firm': 'Merrill Lynch',
+        'Employer': 'Merrill Lynch',  # FIXED: was Firm
         'Years_of_Experience': '15',
-        'AUM': '$100M',
-        'Production': '$1.2M',
+        'Book_Size_AUM': '$100M',  # FIXED: was AUM
+        'Production_L12Mo': '$1.2M',  # FIXED: was Production
         'Book_Size_Clients': '150',
         'Transferable_Book': '80%',
         'Licenses': 'Series 7, 63, 65',
@@ -44,7 +52,7 @@ def test_zoho_field_mapping():
         'Background_Notes': 'MBA from UT Austin',
         'Other_Screening_Notes': 'Excellent communication',
         'Availability': 'Immediately',
-        'Compensation': '$450K',
+        'Desired_Comp': '$450K',  # FIXED: was Compensation
         'LinkedIn_Profile': 'https://linkedin.com/in/johndoe',
         'Zoom_Meeting_ID': '123456789',
         'Zoom_Meeting_URL': 'https://zoom.us/rec/123'
@@ -88,7 +96,7 @@ def test_zoho_field_mapping():
 def test_zoho_field_mapping_missing_fields():
     """Test mapping with missing fields."""
     zoho_data = {
-        'TWAV_Number': 'TWAV789',
+        'Candidate_Locator': 'TWAV789',  # FIXED: was TWAV_Number
         'Full_Name': 'Jane Smith',
         # Most fields missing
     }
@@ -110,7 +118,7 @@ def test_zoho_field_mapping_missing_fields():
 def test_zoho_field_mapping_no_location():
     """Test mapping with no location data."""
     zoho_data = {
-        'TWAV_Number': 'TWAV999',
+        'Candidate_Locator': 'TWAV999',  # FIXED: was TWAV_Number
         'Full_Name': 'Remote Worker',
         'Current_Location': '',
     }
@@ -221,9 +229,9 @@ async def test_data_source_parity():
 def test_zoho_field_type_conversions():
     """Test type conversions from Zoho string fields to proper types."""
     zoho_data = {
-        'TWAV_Number': 'TWAV123',
+        'Candidate_Locator': 'TWAV123',  # FIXED: was TWAV_Number
         'Years_of_Experience': '10.5',  # Should convert to float/int
-        'AUM': '$1.5B',  # Should stay string
+        'Book_Size_AUM': '$1.5B',  # FIXED: was AUM - Should stay string
         'Book_Size_Clients': '200',  # Should convert to int
         'Created_Time': '2025-01-15T10:30:00-05:00'  # Should parse to datetime
     }
@@ -411,7 +419,7 @@ async def test_audience_segmentation_parity():
 def test_raw_data_preservation():
     """Test that raw Zoho data is preserved in mapping."""
     zoho_data = {
-        'TWAV_Number': 'TWAV999',
+        'Candidate_Locator': 'TWAV999',  # FIXED: was TWAV_Number
         'Full_Name': 'Test User',
         'Custom_Field_1': 'Value1',  # Unknown field
         'Custom_Field_2': 'Value2',  # Unknown field
@@ -431,11 +439,11 @@ def test_null_handling_consistency():
     """Test that null/None values are handled consistently."""
     test_cases = [
         # Zoho might send null, empty string, or missing fields
-        {'TWAV_Number': 'TWAV1', 'AUM': None},
-        {'TWAV_Number': 'TWAV2', 'AUM': ''},
-        {'TWAV_Number': 'TWAV3'},  # Missing AUM
-        {'TWAV_Number': 'TWAV4', 'AUM': 'N/A'},
-        {'TWAV_Number': 'TWAV5', 'AUM': 'Not Disclosed'}
+        {'Candidate_Locator': 'TWAV1', 'Book_Size_AUM': None},  # FIXED
+        {'Candidate_Locator': 'TWAV2', 'Book_Size_AUM': ''},  # FIXED
+        {'Candidate_Locator': 'TWAV3'},  # Missing Book_Size_AUM - FIXED
+        {'Candidate_Locator': 'TWAV4', 'Book_Size_AUM': 'N/A'},  # FIXED
+        {'Candidate_Locator': 'TWAV5', 'Book_Size_AUM': 'Not Disclosed'}  # FIXED
     ]
 
     for zoho_data in test_cases:
@@ -452,9 +460,9 @@ def test_null_handling_consistency():
 def test_special_characters_in_fields():
     """Test handling of special characters in field values."""
     zoho_data = {
-        'TWAV_Number': 'TWAV123',
+        'Candidate_Locator': 'TWAV123',  # FIXED: was TWAV_Number
         'Full_Name': "O'Brien, Jr.",
-        'Firm': 'Smith & Associates, LLC',
+        'Employer': 'Smith & Associates, LLC',  # FIXED: was Firm
         'Headline': 'Top 1% producer—elite advisor',
         'Interviewer_Notes': 'Excellent résumé; très bien!',
         'Professional_Designations': 'CFP®, CFA®, ChFC®'

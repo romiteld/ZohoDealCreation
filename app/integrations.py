@@ -1231,21 +1231,29 @@ def parse_location(location: str) -> Tuple[str, str]:
     return parts[0].strip(), parts[1].strip()
 
 def map_to_vault_schema(zoho_candidate: Dict) -> Dict:
-    """Map Zoho API fields to PostgreSQL vault_candidates schema (29 columns)."""
+    """Map Zoho API fields to PostgreSQL vault_candidates schema (29 columns).
+
+    CRITICAL: Uses CORRECT Zoho CRM API field names (verified from production):
+    - Candidate_Locator (NOT TWAV_Number)
+    - Employer (NOT Firm)
+    - Book_Size_AUM (NOT AUM)
+    - Production_L12Mo (NOT Production)
+    - Desired_Comp (NOT Compensation)
+    """
     city, state = parse_location(zoho_candidate.get('Current_Location', ''))
 
     return {
-        'twav_number': zoho_candidate.get('TWAV_Number', ''),
+        'twav_number': zoho_candidate.get('Candidate_Locator', ''),  # FIXED: was TWAV_Number
         'candidate_name': zoho_candidate.get('Full_Name', ''),
         'title': zoho_candidate.get('Title', ''),
         'city': city,
         'state': state,
         'current_location': zoho_candidate.get('Current_Location', ''),
         'location_detail': zoho_candidate.get('Location_Detail', ''),
-        'firm': zoho_candidate.get('Firm', ''),
+        'firm': zoho_candidate.get('Employer', ''),  # FIXED: was Firm
         'years_experience': zoho_candidate.get('Years_of_Experience', ''),
-        'aum': zoho_candidate.get('AUM', ''),
-        'production': zoho_candidate.get('Production', ''),
+        'aum': zoho_candidate.get('Book_Size_AUM', ''),  # FIXED: was AUM
+        'production': zoho_candidate.get('Production_L12Mo', ''),  # FIXED: was Production
         'book_size_clients': zoho_candidate.get('Book_Size_Clients', ''),
         'transferable_book': zoho_candidate.get('Transferable_Book', ''),
         'licenses': zoho_candidate.get('Licenses', ''),
@@ -1257,7 +1265,7 @@ def map_to_vault_schema(zoho_candidate: Dict) -> Dict:
         'background_notes': zoho_candidate.get('Background_Notes', ''),
         'other_screening_notes': zoho_candidate.get('Other_Screening_Notes', ''),
         'availability': zoho_candidate.get('Availability', ''),
-        'compensation': zoho_candidate.get('Compensation', ''),
+        'compensation': zoho_candidate.get('Desired_Comp', ''),  # FIXED: was Compensation
         'linkedin_profile': zoho_candidate.get('LinkedIn_Profile', ''),
         'zoom_meeting_id': zoho_candidate.get('Zoom_Meeting_ID', ''),
         'zoom_meeting_url': zoho_candidate.get('Zoom_Meeting_URL', ''),
@@ -2058,7 +2066,8 @@ class ZohoApiClient(ZohoClient):
 
                 # Use Leads module (displayed as Candidates in Zoho)
                 module_name = os.getenv("ZCAND_MODULE", "Leads")
-                response = self._make_request("GET", f"{module_name}/search", data=None, params=params)
+                # FIXED: Use async client instead of blocking call
+                response = await self._make_request_async("GET", f"{module_name}/search", data=None, params=params)
                 candidates = response.get("data", [])
                 logger.info(f"Fetched {len(candidates)} candidates from search query")
             else:
@@ -2078,7 +2087,8 @@ class ZohoApiClient(ZohoClient):
                     "per_page": limit if limit <= 200 else 200
                 }
 
-                response = self._make_request("GET", module_name, data=None, params=params)
+                # FIXED: Use async client instead of blocking call
+                response = await self._make_request_async("GET", module_name, data=None, params=params)
                 candidates = response.get("data", [])
                 logger.info(f"Fetched {len(candidates)} candidates from Vault Candidates view (cvid={vault_view_id})")
 
@@ -2270,8 +2280,8 @@ class ZohoApiClient(ZohoClient):
                 'per_page': per_page
             }
 
-            # Make request (using synchronous _make_request)
-            response = self._make_request("GET", "Leads", params=params)
+            # Make request (FIXED: use async client instead of blocking)
+            response = await self._make_request_async("GET", "Leads", params=params)
 
             # Extract rate limit headers (if available)
             # Note: _make_request doesn't return headers, so we'll return empty dict

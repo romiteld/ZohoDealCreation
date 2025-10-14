@@ -88,7 +88,7 @@ class TelemetryHelper:
                 'success': str(success),
                 'duration_ms': duration_ms
             })
-            self.client.flush()
+            # FIXED: Removed flush() - let 15-second batch interval handle it
         except Exception as e:
             print(f"Warning: Telemetry tracking failed: {e}")
 
