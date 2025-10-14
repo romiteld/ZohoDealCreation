@@ -1615,6 +1615,143 @@ async def test_digest_delivery(
         raise HTTPException(status_code=500, detail=f"Test delivery failed: {str(e)}")
 
 
+@router.post("/admin/send_vault_alerts_to_bosses")
+async def send_vault_alerts_to_bosses(
+    from_date: Optional[str] = None,
+    date_range_days: int = 30,
+    api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
+    """
+    Send vault candidate alerts to executives for approval.
+
+    This endpoint generates advisor and executive vault alerts and sends them
+    via email to Steve, Brandon, and Daniel for review before broader distribution.
+
+    Args:
+        from_date: Optional start date (defaults to 30 days ago, format: YYYY-MM-DD)
+        date_range_days: Number of days of candidates to include (default: 30)
+        api_key: Required API key for authentication
+
+    Returns:
+        JSON with status, emails_sent count, execution_time_ms
+    """
+    import time
+
+    # Verify API key
+    expected_api_key = os.getenv("API_KEY")
+    if not expected_api_key or api_key != expected_api_key:
+        raise HTTPException(status_code=403, detail="Invalid API key")
+
+    start_time = time.time()
+
+    try:
+        # Calculate from_date if not provided
+        if not from_date:
+            from_date = (datetime.now() - timedelta(days=date_range_days)).strftime("%Y-%m-%d")
+
+        # Initialize generator
+        generator = VaultAlertsGenerator()
+        await generator.initialize()
+
+        try:
+            # Generate alerts for both audiences
+            logger.info(f"Generating vault alerts: from_date={from_date}, range={date_range_days} days")
+            results = await generator.generate_alerts(
+                custom_filters={'date_range_days': date_range_days},
+                save_files=False  # Don't save files for email delivery
+            )
+
+            # Extract HTML content
+            advisor_html = results.get('advisor_html', '')
+            executive_html = results.get('executive_html', '')
+
+            if not advisor_html or not executive_html:
+                raise ValueError("Failed to generate HTML content for vault alerts")
+
+            # Boss recipients
+            bosses = [
+                ('steve@emailthewell.com', 'Steve'),
+                ('brandon@emailthewell.com', 'Brandon'),
+                ('daniel.romitelli@emailthewell.com', 'Daniel')
+            ]
+
+            # Initialize email scheduler
+            from app.jobs.weekly_digest_scheduler import WeeklyDigestScheduler
+            scheduler = WeeklyDigestScheduler()
+            await scheduler.initialize()
+
+            emails_sent = 0
+
+            # Send emails to each boss
+            for email, name in bosses:
+                subject = f"Vault Alert Approval - {date_range_days} Days ({from_date})"
+
+                # Combine both HTML formats
+                full_html = f"""
+                <html>
+                <head>
+                    <style>
+                        body {{ font-family: Arial, sans-serif; }}
+                        .section {{ margin-bottom: 40px; }}
+                        .section h2 {{ color: #2c5282; border-bottom: 2px solid #2c5282; padding-bottom: 10px; }}
+                    </style>
+                </head>
+                <body>
+                    <h1>Vault Candidate Alerts - Awaiting Your Approval</h1>
+                    <p>Hi {name},</p>
+                    <p>Please review the vault candidate alerts below. Once approved, these will be sent to advisors and executives.</p>
+
+                    <div class="section">
+                        <h2>Advisor Format</h2>
+                        {advisor_html}
+                    </div>
+
+                    <div class="section">
+                        <h2>Executive Format</h2>
+                        {executive_html}
+                    </div>
+
+                    <p>Reply to this email with "Approved" to proceed with distribution.</p>
+                </body>
+                </html>
+                """
+
+                # Send email (SYNCHRONOUS - no await)
+                logger.info(f"Sending vault alerts email to {email}")
+                scheduler.send_email(
+                    to_email=email,
+                    subject=subject,
+                    html_body=full_html
+                )
+                emails_sent += 1
+
+            await scheduler.close()
+
+        finally:
+            await generator.close()
+
+        execution_time_ms = int((time.time() - start_time) * 1000)
+
+        metadata = results.get('metadata', {})
+
+        return {
+            "status": "success",
+            "emails_sent": emails_sent,
+            "recipients": [email for email, _ in bosses],
+            "from_date": from_date,
+            "date_range_days": date_range_days,
+            "advisor_count": metadata.get('advisor_count', 0),
+            "executive_count": metadata.get('executive_count', 0),
+            "total_candidates": metadata.get('total_candidates', 0),
+            "execution_time_ms": execution_time_ms,
+            "data_source": results.get('data_source', 'unknown')
+        }
+
+    except Exception as e:
+        logger.error(f"Boss email send failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 async def handle_clarification_response(
     user_id: str,
     user_email: str,
