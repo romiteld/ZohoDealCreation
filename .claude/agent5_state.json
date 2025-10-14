@@ -1,0 +1,103 @@
+{
+  "agent": "Agent 5: VaultAlertsGenerator Modernizer",
+  "branch": "feature/vault-alerts-dual-source",
+  "status": "COMPLETED",
+  "completion_time": "2025-10-14T00:00:00Z",
+  "duration_minutes": 45,
+  "dependencies": {
+    "agent2": "COMPLETED (telemetry + USE_ZOHO_API flag)",
+    "agent3": "COMPLETED (async Zoho client)"
+  },
+  "files_modified": [
+    "app/jobs/vault_alerts_generator.py",
+    "tests/test_data_source_parity.py"
+  ],
+  "changes_summary": {
+    "lifecycle_methods": {
+      "added": ["initialize()", "close()"],
+      "description": "Async client lifecycle management for Zoho API"
+    },
+    "feature_flag": {
+      "imported": "USE_ZOHO_API from app.config.feature_flags",
+      "stored_in": "self.use_zoho_api",
+      "default": false
+    },
+    "dual_source_logic": {
+      "location": "_agent_database_loader",
+      "zoho_api_path": {
+        "caching": "Redis with 24hr TTL",
+        "cache_key": "vault:zoho:v2:{date_range_days}",
+        "data_source_tag": "zoho_api or zoho_cache"
+      },
+      "postgresql_path": {
+        "preserved": "All existing behavior maintained",
+        "data_source_tag": "postgresql"
+      },
+      "common_processing": [
+        "Anonymization (if PRIVACY_MODE=true)",
+        "Compensation range filtering",
+        "Advisor/Executive categorization",
+        "Custom filters application"
+      ]
+    },
+    "helper_methods": {
+      "_fetch_from_zoho_api": {
+        "description": "Fetch candidates from Zoho API",
+        "operations": [
+          "Initialize Zoho client",
+          "Query vault candidates (limit=500)",
+          "Map to PostgreSQL schema via map_to_vault_schema()",
+          "Apply custom filters (locations, designations, availability, search_terms)"
+        ]
+      },
+      "_fetch_from_database_internal": {
+        "description": "Fetch candidates from PostgreSQL",
+        "operations": [
+          "Build parameterized SQL query",
+          "Apply custom filters via ILIKE clauses",
+          "Execute query with asyncpg",
+          "Return list of candidate dictionaries"
+        ]
+      }
+    }
+  },
+  "test_results": {
+    "test_file": "tests/test_data_source_parity.py",
+    "test_name": "test_data_source_parity",
+    "status": "PASSED",
+    "assertions": [
+      "Schema parity validated (29 columns)",
+      "No missing columns in Zoho data",
+      "No extra columns in Zoho data",
+      "PostgreSQL and Zoho keys match exactly"
+    ]
+  },
+  "success_criteria": {
+    "parity_test_passes": true,
+    "feature_flag_toggle_works": true,
+    "postgresql_path_preserved": true,
+    "zoho_api_path_uses_cache": true,
+    "both_paths_apply_anonymization": true
+  },
+  "commit": {
+    "sha": "21ad9f0",
+    "message": "Phase 4: Add dual data source support to VaultAlertsGenerator",
+    "files_changed": 2,
+    "lines_added": 331,
+    "lines_removed": 50
+  },
+  "next_agent": "Agent 8 (QA tests) depends on this completion",
+  "verified_dependencies": {
+    "USE_ZOHO_API": "app/config/feature_flags.py",
+    "ZohoApiClient": "app/integrations.py",
+    "map_to_vault_schema": "app/integrations.py",
+    "parse_location": "app/integrations.py",
+    "TelemetryHelper": "app/utils/telemetry.py"
+  },
+  "critical_constraints_followed": {
+    "temperature": "Always used temperature=1 for GPT-5",
+    "redis_disconnect": "Used disconnect() NOT close()",
+    "html_keys": "Used advisor_html, executive_html (NOT html_advisor)",
+    "langgraph_state": "MUTATED state (didn't return new dict)"
+  }
+}

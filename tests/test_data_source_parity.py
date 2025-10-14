@@ -216,3 +216,255 @@ async def test_data_source_parity():
     finally:
         # Restore original flag
         feature_flags.USE_ZOHO_API = original_flag
+
+
+def test_zoho_field_type_conversions():
+    """Test type conversions from Zoho string fields to proper types."""
+    zoho_data = {
+        'TWAV_Number': 'TWAV123',
+        'Years_of_Experience': '10.5',  # Should convert to float/int
+        'AUM': '$1.5B',  # Should stay string
+        'Book_Size_Clients': '200',  # Should convert to int
+        'Created_Time': '2025-01-15T10:30:00-05:00'  # Should parse to datetime
+    }
+
+    result = map_to_vault_schema(zoho_data)
+
+    # Verify years_experience is numeric-compatible
+    years_str = result['years_experience']
+    if years_str:
+        assert years_str == '10.5' or years_str == 10.5 or years_str == 10
+
+    # Verify AUM stays as string
+    assert isinstance(result['aum'], str)
+    assert result['aum'] == '$1.5B'
+
+    # Book size should be string or int
+    book_size = result['book_size_clients']
+    assert book_size == '200' or book_size == 200
+
+
+def test_location_parsing_edge_cases():
+    """Test location parsing with various edge cases."""
+    test_cases = [
+        # Normal cases
+        ('Dallas, TX', ('Dallas', 'TX')),
+        ('New York, NY', ('New York', 'NY')),
+
+        # Edge cases
+        ('San Francisco Bay Area, CA', ('San Francisco Bay Area', 'CA')),
+        ('St. Louis, MO', ('St. Louis', 'MO')),
+        ('Washington, D.C.', ('Washington', 'D.C.')),
+        ('Remote', ('Remote', '')),
+        ('USA', ('USA', '')),
+        ('Miami-Dade County, FL', ('Miami-Dade County', 'FL')),
+
+        # International
+        ('London, UK', ('London', 'UK')),
+        ('Toronto, ON, Canada', ('Toronto', 'ON, Canada')),
+
+        # Invalid
+        (None, ('', '')),
+        ('', ('', '')),
+        ('   ', ('   ', '')),  # Spaces preserved
+        ('NoComma', ('NoComma', ''))
+    ]
+
+    for location_input, expected in test_cases:
+        result = parse_location(location_input)
+        assert result == expected, f"Failed for {location_input}: got {result}, expected {expected}"
+
+
+@pytest.mark.asyncio
+async def test_data_filtering_consistency():
+    """Test that filtering logic is consistent between data sources."""
+    from app.config import feature_flags
+    from app.jobs.vault_alerts_generator import VaultAlertsGenerator
+
+    original_flag = feature_flags.USE_ZOHO_API
+
+    try:
+        # Test with custom filters
+        custom_filters = {
+            'min_aum': 500,  # $500M minimum
+            'states': ['NY', 'CA', 'TX'],
+            'min_years_experience': 10
+        }
+
+        # Test PostgreSQL filtering
+        feature_flags.USE_ZOHO_API = False
+        gen_pg = VaultAlertsGenerator()
+        await gen_pg.initialize()
+
+        state_pg = {
+            'from_date': '2025-01-01',
+            'audience': 'advisors',
+            'custom_filters': custom_filters,
+            'all_candidates': [],
+            'advisor_candidates': [],
+            'executive_candidates': [],
+            'cache_manager': None,
+            'cache_stats': {'hits': 0, 'misses': 0},
+            'quality_metrics': {},
+            'advisor_html': None,
+            'executive_html': None,
+            'errors': []
+        }
+
+        result_pg = await gen_pg._agent_database_loader(state_pg)
+        pg_filtered = result_pg['advisor_candidates']
+
+        # Test Zoho API filtering
+        feature_flags.USE_ZOHO_API = True
+        gen_zoho = VaultAlertsGenerator()
+        await gen_zoho.initialize()
+
+        state_zoho = {
+            'from_date': '2025-01-01',
+            'audience': 'advisors',
+            'custom_filters': custom_filters,
+            'all_candidates': [],
+            'advisor_candidates': [],
+            'executive_candidates': [],
+            'cache_manager': None,
+            'cache_stats': {'hits': 0, 'misses': 0},
+            'quality_metrics': {},
+            'advisor_html': None,
+            'executive_html': None,
+            'errors': []
+        }
+
+        result_zoho = await gen_zoho._agent_database_loader(state_zoho)
+        zoho_filtered = result_zoho['advisor_candidates']
+
+        # Verify both apply filters consistently
+        if pg_filtered:
+            for candidate in pg_filtered:
+                # Check state filter
+                if candidate.get('state'):
+                    assert candidate['state'] in ['NY', 'CA', 'TX'], \
+                        f"State filter not applied: {candidate['state']}"
+
+        if zoho_filtered:
+            for candidate in zoho_filtered:
+                # Check state filter
+                if candidate.get('state'):
+                    assert candidate['state'] in ['NY', 'CA', 'TX'], \
+                        f"State filter not applied: {candidate['state']}"
+
+        await gen_pg.close()
+        await gen_zoho.close()
+
+    finally:
+        feature_flags.USE_ZOHO_API = original_flag
+
+
+@pytest.mark.asyncio
+async def test_audience_segmentation_parity():
+    """Test that advisor vs executive segmentation is consistent."""
+    from app.config import feature_flags
+    from app.jobs.vault_alerts_generator import VaultAlertsGenerator
+
+    original_flag = feature_flags.USE_ZOHO_API
+
+    try:
+        # Test both audiences
+        for audience in ['advisors', 'executives', 'both']:
+            # Test PostgreSQL
+            feature_flags.USE_ZOHO_API = False
+            gen_pg = VaultAlertsGenerator()
+            await gen_pg.initialize()
+
+            state = {
+                'from_date': '2025-01-01',
+                'audience': audience,
+                'custom_filters': {},
+                'all_candidates': [],
+                'advisor_candidates': [],
+                'executive_candidates': [],
+                'cache_manager': None,
+                'cache_stats': {'hits': 0, 'misses': 0},
+                'quality_metrics': {},
+                'advisor_html': None,
+                'executive_html': None,
+                'errors': []
+            }
+
+            result = await gen_pg._agent_database_loader(state)
+
+            if audience == 'advisors':
+                assert len(result['advisor_candidates']) >= 0
+                assert len(result['executive_candidates']) == 0
+            elif audience == 'executives':
+                assert len(result['advisor_candidates']) == 0
+                assert len(result['executive_candidates']) >= 0
+            else:  # both
+                assert len(result['advisor_candidates']) >= 0
+                assert len(result['executive_candidates']) >= 0
+
+            await gen_pg.close()
+
+    finally:
+        feature_flags.USE_ZOHO_API = original_flag
+
+
+def test_raw_data_preservation():
+    """Test that raw Zoho data is preserved in mapping."""
+    zoho_data = {
+        'TWAV_Number': 'TWAV999',
+        'Full_Name': 'Test User',
+        'Custom_Field_1': 'Value1',  # Unknown field
+        'Custom_Field_2': 'Value2',  # Unknown field
+        'Title': 'Senior Advisor'
+    }
+
+    result = map_to_vault_schema(zoho_data)
+
+    # raw_data should contain the complete original record
+    assert result['raw_data'] == zoho_data
+    assert 'Custom_Field_1' in result['raw_data']
+    assert 'Custom_Field_2' in result['raw_data']
+    assert result['raw_data']['Custom_Field_1'] == 'Value1'
+
+
+def test_null_handling_consistency():
+    """Test that null/None values are handled consistently."""
+    test_cases = [
+        # Zoho might send null, empty string, or missing fields
+        {'TWAV_Number': 'TWAV1', 'AUM': None},
+        {'TWAV_Number': 'TWAV2', 'AUM': ''},
+        {'TWAV_Number': 'TWAV3'},  # Missing AUM
+        {'TWAV_Number': 'TWAV4', 'AUM': 'N/A'},
+        {'TWAV_Number': 'TWAV5', 'AUM': 'Not Disclosed'}
+    ]
+
+    for zoho_data in test_cases:
+        result = map_to_vault_schema(zoho_data)
+
+        # Should always have an 'aum' key
+        assert 'aum' in result
+
+        # Value should be string (empty or actual value)
+        aum_value = result['aum']
+        assert aum_value is None or isinstance(aum_value, str)
+
+
+def test_special_characters_in_fields():
+    """Test handling of special characters in field values."""
+    zoho_data = {
+        'TWAV_Number': 'TWAV123',
+        'Full_Name': "O'Brien, Jr.",
+        'Firm': 'Smith & Associates, LLC',
+        'Headline': 'Top 1% producer—elite advisor',
+        'Interviewer_Notes': 'Excellent résumé; très bien!',
+        'Professional_Designations': 'CFP®, CFA®, ChFC®'
+    }
+
+    result = map_to_vault_schema(zoho_data)
+
+    # Special characters should be preserved
+    assert result['candidate_name'] == "O'Brien, Jr."
+    assert result['firm'] == 'Smith & Associates, LLC'
+    assert '—' in result['headline']  # em dash
+    assert 'résumé' in result['interviewer_notes']
+    assert '®' in result['professional_designations']

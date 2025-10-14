@@ -85,7 +85,10 @@
       "Bash(echo:*)",
       "Bash(pip install:*)",
       "Bash(ls:*)",
-      "Bash(DATABASE_URL='postgresql://adminuser:W3llDB2025Pass@well-intake-db-0903.postgres.database.azure.com:5432/wellintake?sslmode=require' python3:*)"
+      "Bash(DATABASE_URL='postgresql://adminuser:W3llDB2025Pass@well-intake-db-0903.postgres.database.azure.com:5432/wellintake?sslmode=require' python3:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(pytest:*)"
     ],
     "deny": [],
     "ask": [],
