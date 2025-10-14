@@ -2,6 +2,7 @@
 Adaptive Cards for Microsoft Teams Bot
 Creates rich, interactive cards for TalentWell digest previews.
 """
+import json
 from typing import List, Dict, Any, Optional
 
 
@@ -855,5 +856,288 @@ def create_suggestion_card(
                     }
                 }
             ]
+        }
+    }
+
+
+def create_vault_alerts_builder_card(
+    current_settings: Dict[str, Any] = None
+) -> Dict[str, Any]:
+    """
+    Create vault alerts subscription builder card (executive-only feature).
+
+    Allows executives to customize vault candidate alerts with:
+    - Audience selection (advisors/executives/both)
+    - Frequency (weekly/biweekly/monthly)
+    - Delivery email
+    - Max candidates (1-200, unlimited for executives)
+    - Custom filters: locations, designations, availability, compensation, date range
+
+    Args:
+        current_settings: Existing vault_alerts_settings JSONB from database
+
+    Returns:
+        Adaptive Card JSON for vault alerts subscription builder
+    """
+    # Parse current settings from JSON if necessary
+    settings: Dict[str, Any] = current_settings or {}
+    if isinstance(settings, str):
+        try:
+            settings = json.loads(settings)
+        except (json.JSONDecodeError, TypeError):
+            settings = {}
+
+    audience = settings.get("audience", "advisors")
+    frequency = settings.get("frequency", "weekly")
+    delivery_email = settings.get("delivery_email") or ""
+
+    max_candidates = settings.get("max_candidates", 50)
+    try:
+        max_candidates = int(max_candidates)
+    except (TypeError, ValueError):
+        max_candidates = 50
+
+    custom_filters = settings.get('custom_filters') or {}
+    if isinstance(custom_filters, str):
+        try:
+            custom_filters = json.loads(custom_filters)
+        except (json.JSONDecodeError, TypeError):
+            custom_filters = {}
+
+    def _join(items: List[str]) -> str:
+        return ', '.join([item for item in items if item])
+
+    locations = _join(custom_filters.get('locations', []))
+    designations = _join(custom_filters.get('designations', []))
+    availability = custom_filters.get('availability') or ''
+
+    def _to_int(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+        if isinstance(value, int):
+            return value
+        try:
+            cleaned = str(value).strip()
+            return int(cleaned) if cleaned else None
+        except (TypeError, ValueError):
+            return None
+
+    compensation_min = _to_int(custom_filters.get('compensation_min'))
+    compensation_max = _to_int(custom_filters.get('compensation_max'))
+    date_range_days = _to_int(custom_filters.get('date_range_days'))
+    search_terms = _join(custom_filters.get('search_terms', []))
+
+    def _label(text: str) -> Dict[str, Any]:
+        return {
+            "type": "TextBlock",
+            "text": text,
+            "wrap": True,
+            "weight": "Bolder",
+            "spacing": "Small"
+        }
+
+    def _text_input(input_id: str, placeholder: str, value: str) -> Dict[str, Any]:
+        return {
+            "type": "Input.Text",
+            "id": input_id,
+            "placeholder": placeholder,
+            "value": value,
+            "spacing": "Small"
+        }
+
+    def _number_input(
+        input_id: str,
+        placeholder: str,
+        min_value: int,
+        max_value: Optional[int] = None,
+        value: Optional[int] = None
+    ) -> Dict[str, Any]:
+        element: Dict[str, Any] = {
+            "type": "Input.Number",
+            "id": input_id,
+            "placeholder": placeholder,
+            "min": min_value,
+            "spacing": "Small"
+        }
+        if max_value is not None:
+            element["max"] = max_value
+        if value is not None:
+            element["value"] = value
+        return element
+
+    body: List[Dict[str, Any]] = [
+        {
+            "type": "TextBlock",
+            "text": "🔔 Vault Alerts Subscription",
+            "size": "ExtraLarge",
+            "weight": "Bolder",
+            "color": "Accent"
+        },
+        {
+            "type": "TextBlock",
+            "text": "Configure automated weekly vault candidate alerts with custom filtering. You'll receive HTML reports matching your exact criteria via email.",
+            "wrap": True,
+            "size": "Small",
+            "isSubtle": True,
+            "spacing": "Small"
+        },
+        {
+            "type": "Container",
+            "spacing": "Medium",
+            "separator": True,
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": "**Basic Settings**",
+                    "weight": "Bolder",
+                    "color": "Accent",
+                    "size": "Medium"
+                }
+            ]
+        },
+        _label("Candidate Audience"),
+        {
+            "type": "Input.ChoiceSet",
+            "id": "audience",
+            "value": audience,
+            "choices": [
+                {"title": "Advisors Only", "value": "advisors"},
+                {"title": "Executives Only", "value": "executives"},
+                {"title": "Both (Advisors + Executives)", "value": "both"}
+            ],
+            "spacing": "Small"
+        },
+        _label("Delivery Frequency"),
+        {
+            "type": "Input.ChoiceSet",
+            "id": "frequency",
+            "value": frequency,
+            "choices": [
+                {"title": "Weekly (every Monday 9 AM)", "value": "weekly"},
+                {"title": "Bi-Weekly (every 2 weeks)", "value": "biweekly"},
+                {"title": "Monthly (1st of month)", "value": "monthly"}
+            ],
+            "spacing": "Small"
+        },
+        _label("📧 Delivery Email"),
+        _text_input("delivery_email", "recipient@emailthewell.com", delivery_email),
+        _label("Max Candidates Per Alert"),
+        _number_input("max_candidates", "50", 1, max_value=200, value=max_candidates),
+        {
+            "type": "Container",
+            "spacing": "Medium",
+            "separator": True,
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": "**Custom Filters** (Optional)",
+                    "weight": "Bolder",
+                    "color": "Accent",
+                    "size": "Medium"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": "Refine your alerts with custom filters. Leave blank to include all candidates.",
+                    "wrap": True,
+                    "size": "Small",
+                    "isSubtle": True,
+                    "spacing": "Small"
+                }
+            ]
+        },
+        _label("📍 Locations (comma-separated)"),
+        _text_input("locations", "New York NY, Chicago IL, Dallas TX", locations),
+        _label("🎓 Professional Designations (comma-separated)"),
+        _text_input("designations", "CFA, CFP, CIMA, CPA", designations),
+        _label("⏰ Availability"),
+        _text_input("availability", "Immediately, 2 weeks notice, 30 days", availability),
+        {
+            "type": "ColumnSet",
+            "columns": [
+                {
+                    "type": "Column",
+                    "width": "stretch",
+                    "items": [
+                        _label("💰 Compensation Min ($)"),
+                        _number_input("compensation_min", "150000", 0, value=compensation_min)
+                    ]
+                },
+                {
+                    "type": "Column",
+                    "width": "stretch",
+                    "items": [
+                        _label("💰 Compensation Max ($)"),
+                        _number_input("compensation_max", "250000", 0, value=compensation_max)
+                    ]
+                }
+            ],
+            "spacing": "Small"
+        },
+        _label("📅 Only Include Candidates Added in Last N Days"),
+        _number_input("date_range_days", "30", 1, max_value=365, value=date_range_days),
+        _label("🔍 Search Terms (comma-separated)"),
+        _text_input("search_terms", "portfolio manager, RIA, wealth management", search_terms),
+        {
+            "type": "Container",
+            "spacing": "Medium",
+            "separator": True,
+            "items": [
+                {
+                    "type": "TextBlock",
+                    "text": "💡 **Tips:**",
+                    "wrap": True,
+                    "weight": "Bolder",
+                    "size": "Small",
+                    "spacing": "Small"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": "• Filters are combined with AND logic (all must match)\n• Leave filters blank to include all candidates\n• Locations: Use full format like 'New York, NY'\n• Compensation: Enter dollar amounts without commas\n• Use Preview to test filters before saving",
+                    "wrap": True,
+                    "size": "Small",
+                    "isSubtle": True,
+                    "spacing": "Small"
+                }
+            ]
+        }
+    ]
+
+    actions = [
+        {
+            "type": "Action.Submit",
+            "title": "👁️ Preview Alert",
+            "data": {
+                "msteams": {
+                    "type": "invoke",
+                    "value": {
+                        "action": "preview_vault_alerts"
+                    }
+                }
+            },
+            "style": "default"
+        },
+        {
+            "type": "Action.Submit",
+            "title": "💾 Save & Subscribe",
+            "data": {
+                "msteams": {
+                    "type": "invoke",
+                    "value": {
+                        "action": "save_vault_alerts_subscription"
+                    }
+                }
+            },
+            "style": "positive"
+        }
+    ]
+
+    return {
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.2",
+            "body": body,
+            "actions": actions
         }
     }

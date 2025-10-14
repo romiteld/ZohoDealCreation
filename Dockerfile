@@ -16,10 +16,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxslt1.1 \
     && rm -rf /var/lib/apt/lists/*
 
+# Copy well_shared first for installation
+COPY well_shared/ ./well_shared/
+
 # Copy and install requirements
 COPY requirements.txt .
 RUN pip install --user --no-cache-dir --upgrade pip && \
-    pip install --user --no-cache-dir -r requirements.txt
+    pip install --user --no-cache-dir -r requirements.txt && \
+    pip install --user --no-cache-dir -e ./well_shared
 
 # Production stage
 FROM python:3.11-slim
@@ -52,6 +56,7 @@ COPY --chown=appuser:appuser app/ ./app/
 COPY --chown=appuser:appuser addin/ ./addin/
 COPY --chown=appuser:appuser scripts/ ./scripts/
 COPY --chown=appuser:appuser migrations/ ./migrations/
+COPY --chown=appuser:appuser well_shared/ ./well_shared/
 COPY --chown=appuser:appuser startup.sh ./startup.sh
 
 # Create static directory (may not exist in repo due to .gitignore)

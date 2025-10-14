@@ -1,0 +1,194 @@
+{
+  "plan_version": "v3_final_with_user_approval",
+  "started_at": "2025-10-14T00:00:00Z",
+  "current_phase": 0,
+  "total_phases": 9,
+  "estimated_hours": 9.25,
+
+  "phases": {
+    "1": {
+      "name": "Anonymizer Consolidation",
+      "status": "not_started",
+      "duration_min": 60,
+      "files_to_modify": [
+        "app/jobs/anonymizer.py (DELETE)",
+        "app/jobs/vault_alerts_generator.py (DELETE lines 1020-1069)",
+        "generate_boss_format_langgraph.py (DELETE lines 216-253)",
+        "tests/test_anonymizer.py (UPDATE imports)",
+        "ANONYMIZER_QUICKSTART.md (UPDATE examples)",
+        "ANONYMIZATION_TEST_SUMMARY.md (UPDATE examples)"
+      ],
+      "tests": ["pytest tests/test_anonymizer_consolidated.py -v"],
+      "critical_decisions": [
+        "Use app/utils/anonymizer.anonymize_candidate_data as canonical",
+        "Delete entire app/jobs/anonymizer.py file",
+        "Update ALL documentation to function-based API"
+      ]
+    },
+
+    "2": {
+      "name": "Feature Flag + Telemetry",
+      "status": "not_started",
+      "duration_min": 30,
+      "files_to_create": ["app/utils/telemetry.py"],
+      "files_to_modify": [
+        "app/config/feature_flags.py (add USE_ZOHO_API)",
+        ".env.local (add USE_ZOHO_API=false)"
+      ],
+      "tests": [],
+      "critical_decisions": [
+        "USE_ZOHO_API defaults to false for safety",
+        "TelemetryClient parses InstrumentationKey from connection string",
+        "Batch metrics every 15 seconds (not 1s)"
+      ]
+    },
+
+    "3": {
+      "name": "Async Zoho Client",
+      "status": "not_started",
+      "duration_min": 120,
+      "files_to_modify": ["app/integrations.py"],
+      "new_functions": [
+        "ZohoApiClient.initialize()",
+        "ZohoApiClient.close()",
+        "map_to_vault_schema()",
+        "parse_location()",
+        "_parse_compensation()",
+        "_apply_filters()",
+        "_sanitize_pii()"
+      ],
+      "tests": ["pytest tests/test_data_source_parity.py::test_zoho_field_mapping -v"],
+      "critical_decisions": [
+        "Import: from httpx import AsyncClient, Timeout, Limits, HTTPStatusError",
+        "Lifecycle: Must call await client.initialize() before requests",
+        "Error logging: Sanitize PII before logging response bodies",
+        "Schema: 29 fields MUST match PostgreSQL column names exactly"
+      ]
+    },
+
+    "4": {
+      "name": "VaultAlertsGenerator Dual Source",
+      "status": "not_started",
+      "duration_min": 75,
+      "files_to_modify": ["app/jobs/vault_alerts_generator.py"],
+      "new_methods": [
+        "VaultAlertsGenerator.initialize()",
+        "VaultAlertsGenerator.close()",
+        "Updated _agent_database_loader with USE_ZOHO_API toggle"
+      ],
+      "tests": ["pytest tests/test_data_source_parity.py::test_data_source_parity -v"],
+      "critical_decisions": [
+        "RedisCacheManager uses disconnect() NOT close()",
+        "LangGraph state MUTATION preserved (not new dict)",
+        "Cache key includes schema version: vault:zoho:v2:DATE",
+        "Always reset feature flags in test finally blocks"
+      ]
+    },
+
+    "5": {
+      "name": "QueryEngine Lazy Init",
+      "status": "not_started",
+      "duration_min": 30,
+      "files_to_modify": ["app/api/teams/query_engine.py"],
+      "new_methods": ["_ensure_initialized()"],
+      "tests": [],
+      "critical_decisions": [
+        "Lazy init pattern avoids breaking existing call sites",
+        "Use PUBLIC circuit breaker helpers: _is_circuit_breaker_open(), _record_circuit_breaker_failure()",
+        "Do NOT call record_success() - not exposed by RedisCacheManager"
+      ]
+    },
+
+    "6": {
+      "name": "Teams Bot Invoke Regression Test",
+      "status": "not_started",
+      "duration_min": 30,
+      "files_to_create": ["tests/test_teams_invoke.py"],
+      "tests": ["pytest tests/test_teams_invoke.py -v"],
+      "critical_decisions": [
+        "Test against TurnContext-based handler (routes.py:645-210)",
+        "Verify both nested (msteams.value) and direct payloads work",
+        "Existing handler already works - just add regression test"
+      ]
+    },
+
+    "7": {
+      "name": "Boss Email Handler",
+      "status": "not_started",
+      "duration_min": 45,
+      "files_to_modify": ["app/api/teams/routes.py"],
+      "new_endpoints": ["/api/teams/admin/send_vault_alerts_to_bosses"],
+      "tests": [],
+      "critical_decisions": [
+        "HTML keys: advisor_html and executive_html (NOT html_advisor)",
+        "WeeklyDigestScheduler.send_email is SYNCHRONOUS (no await)",
+        "Check actual signature first: grep 'def send_email' app/jobs/weekly_digest_scheduler.py",
+        "Email throughput: Single EmailClient per call (document for future optimization)"
+      ]
+    },
+
+    "8": {
+      "name": "Comprehensive Testing",
+      "status": "not_started",
+      "duration_min": 90,
+      "files_to_create": [
+        "tests/test_anonymizer_consolidated.py",
+        "tests/test_data_source_parity.py"
+      ],
+      "tests": [
+        "pytest tests/test_anonymizer_consolidated.py -v",
+        "pytest tests/test_data_source_parity.py -v",
+        "pytest tests/test_teams_invoke.py -v",
+        "pytest tests/ -k vault -v",
+        "pytest --cov=app --cov-report=term-missing"
+      ],
+      "critical_decisions": [
+        "6+ anonymization scenarios required",
+        "Parity test MUST reset USE_ZOHO_API in finally block",
+        "Coverage target: 85%+"
+      ]
+    },
+
+    "9": {
+      "name": "Documentation",
+      "status": "not_started",
+      "duration_min": 45,
+      "files_to_modify": [
+        "VAULT_ALERTS_GUIDE.md",
+        "ANONYMIZER_QUICKSTART.md",
+        "ANONYMIZATION_TEST_SUMMARY.md"
+      ],
+      "files_to_create": ["API_ENDPOINTS.md (boss email docs)"],
+      "tests": [],
+      "critical_decisions": [
+        "Document USE_ZOHO_API flag usage",
+        "Document /admin/send_vault_alerts_to_bosses endpoint",
+        "Update all anonymizer examples to function-based API"
+      ]
+    }
+  },
+
+  "schema_mapping_confirmed": {
+    "source": "load_vault_candidates_to_db.py:35-65",
+    "column_count": 29,
+    "verification": "PGPASSWORD='***' psql ... -c '\\d vault_candidates'",
+    "zoho_field_mappings": "zoho api modules field mappings.md:60-139"
+  },
+
+  "critical_never_change": {
+    "temperature": "Always use temperature=1 for GPT-5",
+    "redis_disconnect": "Use disconnect() NOT close() on RedisCacheManager",
+    "html_keys": "advisor_html and executive_html (not html_advisor)",
+    "sync_email": "WeeklyDigestScheduler.send_email is synchronous",
+    "state_mutation": "LangGraph expects state mutation, not new dict return",
+    "circuit_breaker": "Use PUBLIC helpers only: _is_circuit_breaker_open(), _record_circuit_breaker_failure()",
+    "imports": "from httpx import AsyncClient, Timeout, Limits, HTTPStatusError"
+  },
+
+  "recovery_commands": {
+    "show_state": "cat .claude/implementation_state.json",
+    "show_progress": "git diff main...HEAD --stat",
+    "show_phase": "cat .claude/phase{N}_complete.md",
+    "run_tests": "pytest tests/test_{phase_name}.py -v"
+  }
+}

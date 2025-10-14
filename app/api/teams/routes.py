@@ -25,9 +25,11 @@ from app.api.teams.adaptive_cards import (
     create_error_card,
     create_preferences_card,
     create_clarification_card,
-    create_suggestion_card
+    create_suggestion_card,
+    create_vault_alerts_builder_card
 )
 from app.jobs.talentwell_curator import TalentWellCurator
+from app.jobs.vault_alerts_generator import VaultAlertsGenerator
 from well_shared.database.connection import get_database_connection
 from app.api.teams.query_engine import process_natural_language_query
 from app.api.teams.conversation_memory import get_memory_manager
@@ -437,6 +439,10 @@ async def handle_message_activity(
     elif message_text.startswith("preferences"):
         return await show_user_preferences(user_id, user_email, user_name, db)
 
+    elif message_text.startswith("vault alerts"):
+        # Executive-only feature
+        return await show_vault_alerts_builder(user_id, user_email, user_name, db)
+
     elif message_text.startswith("analytics"):
         return await show_analytics(user_id, user_email, db)
 
@@ -640,26 +646,36 @@ async def handle_invoke_activity(
     turn_context: TurnContext,
     db: asyncpg.Connection
 ):
-    """Handle Adaptive Card button clicks (invoke actions)."""
+    """Handle Adaptive Card button clicks with robust data extraction."""
 
     try:
         activity = turn_context.activity
-        # Extract action data
-        action_data = activity.value or {}
 
-        # Check if data is wrapped in msteams.value (new pattern from adaptive cards)
-        if "msteams" in action_data:
-            msteams_data = action_data.get("msteams", {})
-            if "value" in msteams_data:
-                action_data = msteams_data["value"]
+        # Step 1: Extract raw payload (preserve ALL data)
+        raw_payload = activity.value or {}
 
-        action = action_data.get("action", "")
+        # Step 2: Unwrap action metadata from msteams.value
+        action_metadata = {}
+        if "msteams" in raw_payload and "value" in raw_payload["msteams"]:
+            action_metadata = raw_payload["msteams"]["value"]
+
+        # Step 3: Extract form data (root level, excluding msteams wrapper)
+        form_data = {k: v for k, v in raw_payload.items() if k != "msteams"}
+
+        # Step 4: Merge (form data overrides metadata if duplicate keys exist)
+        final_data = {**action_metadata, **form_data}
+
+        # Step 5: Get action name
+        action = final_data.get("action", "")
 
         # Enhanced logging for debugging button clicks
         logger.info(f"=== INVOKE ACTIVITY RECEIVED ===")
         logger.info(f"Action: {action}")
-        logger.info(f"Action Data: {json.dumps(action_data, indent=2)}")
-        print(f"=== INVOKE: action={action}, data={action_data}", flush=True)
+        logger.info(f"Raw Payload Keys: {list(raw_payload.keys())}")
+        logger.info(f"Action Metadata: {action_metadata}")
+        logger.info(f"Form Data: {form_data}")
+        logger.info(f"Final Merged Data: {json.dumps(final_data, indent=2)}")
+        print(f"=== INVOKE: action={action}, final_data={final_data}", flush=True)
 
         user_id = activity.from_property.id if activity.from_property else ""
         user_email = extract_user_email(activity)  # Use helper to get real email, not GUID
@@ -670,7 +686,7 @@ async def handle_invoke_activity(
         response = None
 
         if action == "generate_digest_preview":
-            audience = action_data.get("audience", "global")
+            audience = final_data.get("audience", "global")
             response = await generate_digest_preview(
                 user_id=user_id,
                 user_email=user_email,
@@ -681,9 +697,9 @@ async def handle_invoke_activity(
 
         elif action == "generate_digest":
             # Full digest generation
-            request_id = action_data.get("request_id")
-            audience = action_data.get("audience", "global")
-            dry_run = action_data.get("dry_run", False)
+            request_id = final_data.get("request_id")
+            audience = final_data.get("audience", "global")
+            dry_run = final_data.get("dry_run", False)
 
             response = await generate_full_digest(
                 user_id=user_id,
@@ -697,8 +713,8 @@ async def handle_invoke_activity(
         elif action == "refine_query":
             # Handle refinement request from medium-confidence suggestion card
             # CRITICAL FIX: Create REAL clarification session (not fake UUID)
-            original_query = action_data.get("original_query")
-            confidence = action_data.get("confidence", 0.0)
+            original_query = final_data.get("original_query")
+            confidence = final_data.get("confidence", 0.0)
 
             clarification_engine = await get_clarification_engine()
             memory_manager = await get_memory_manager()
@@ -744,11 +760,11 @@ async def handle_invoke_activity(
         elif action == "apply_filters":
             # Apply filters and regenerate digest
             filters = {
-                "audience": action_data.get("audience", "global"),
-                "from_date": action_data.get("from_date"),
-                "to_date": action_data.get("to_date"),
-                "owner": action_data.get("owner"),
-                "max_candidates": action_data.get("max_candidates", 6)
+                "audience": final_data.get("audience", "global"),
+                "from_date": final_data.get("from_date"),
+                "to_date": final_data.get("to_date"),
+                "owner": final_data.get("owner"),
+                "max_candidates": final_data.get("max_candidates", 6)
             }
 
             response = await generate_digest_preview(
@@ -769,25 +785,36 @@ async def handle_invoke_activity(
             response = await save_user_preferences(
                 user_id=user_id,
                 user_email=user_email,
-                preferences=action_data,
+                preferences=final_data,
+                db=db
+            )
+
+        elif action == "save_vault_alerts_subscription":
+            # Save vault alerts subscription (executive-only)
+            response = await save_vault_alerts_subscription(
+                user_id=user_id,
+                user_email=user_email,
+                settings=final_data,
+                db=db
+            )
+
+        elif action == "preview_vault_alerts":
+            # Generate preview of vault alerts with custom filters
+            response = await preview_vault_alerts(
+                user_email=user_email,
+                settings=final_data,
                 db=db
             )
 
         elif action == "submit_clarification":
-            # CRITICAL FIX: Preserve original payload BEFORE unwrapping
-            original_payload = dict(action_data)
-
-            # Unwrap msteams.value for action metadata
-            if "msteams" in action_data and "value" in action_data["msteams"]:
-                action_data = action_data["msteams"]["value"]
-
-            # Extract from BOTH locations with null guards
-            session_id = action_data.get("session_id")
-            clarification_response = original_payload.get("clarification_response")
+            # CRITICAL FIX: Both fields should be in final_data now (after merge)
+            session_id = final_data.get("session_id")
+            clarification_response = final_data.get("clarification_response")
 
             # Guard for missing fields
             if not session_id or not clarification_response:
-                logger.warning(f"Missing data: session={session_id}, response={clarification_response}")
+                logger.warning(f"Missing clarification data: session={session_id}, response={clarification_response}")
+                logger.warning(f"Available keys in final_data: {list(final_data.keys())}")
                 response = MessageFactory.text("❌ Invalid submission. Please try again.")
             else:
                 response = await handle_clarification_response(
@@ -1444,6 +1471,79 @@ async def get_analytics_data(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@router.get("/admin/ping")
+async def admin_ping():
+    """Simple ping endpoint to verify admin routes are working."""
+    return {
+        "status": "ok",
+        "message": "Admin routes are working",
+        "timestamp": datetime.now().isoformat()
+    }
+
+
+@router.post("/admin/test-query-engine")
+async def test_query_engine(
+    query: str = "count deals from last week",
+    user_email: str = "steve@emailthewell.com",
+    api_key: Optional[str] = Header(None, alias="X-API-Key")
+):
+    """
+    Test endpoint to verify query engine is working correctly in production.
+
+    Requires API key authentication.
+
+    Example:
+        POST /api/teams/admin/test-query-engine?query=show+TWAV115357&user_email=steve@emailthewell.com
+    """
+    # Verify API key
+    expected_api_key = os.getenv("API_KEY")
+    if not expected_api_key or api_key != expected_api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+    try:
+        from app.api.teams.query_engine import QueryEngine
+
+        logger.info(f"🧪 Testing query engine: query='{query}', user={user_email}")
+
+        # Create query engine instance
+        engine = QueryEngine()
+
+        # Get database connection
+        manager = await get_connection_manager()
+        async with manager.get_connection() as db:
+            # Check user role
+            role = await engine._check_user_role(user_email, db)
+
+            # Process query
+            result = await engine.process_query(
+                query=query,
+                user_email=user_email,
+                db=db
+            )
+
+            return {
+                "status": "success",
+                "test_info": {
+                    "query": query,
+                    "user_email": user_email,
+                    "user_role": role,
+                    "llm_available": engine.use_llm,
+                    "model": engine.model,
+                    "client_type": type(engine.client).__name__ if engine.client else None
+                },
+                "result": {
+                    "text": result.get("text"),
+                    "confidence_score": result.get("confidence_score"),
+                    "data_count": len(result.get("data", [])) if isinstance(result.get("data"), list) else result.get("data")
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+
+    except Exception as e:
+        logger.error(f"Query engine test failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Test failed: {str(e)}")
+
+
 @router.post("/admin/test-digest-delivery")
 async def test_digest_delivery(
     user_id: str = "test-user-daniel",
@@ -1616,4 +1716,334 @@ async def handle_clarification_response(
         return {
             "type": "message",
             "text": f"❌ Error processing your clarification: {str(e)}\n\nPlease try asking your question again."
+        }
+
+
+# ============================================
+# Vault Alerts Handlers (Executive-Only Feature)
+# ============================================
+
+async def show_vault_alerts_builder(
+    user_id: str,
+    user_email: str,
+    user_name: str,
+    db: asyncpg.Connection
+) -> Dict[str, Any]:
+    """
+    Show vault alerts subscription builder card (executive-only).
+
+    Args:
+        user_id: Teams user ID
+        user_email: User's email address
+        user_name: User's display name
+        db: Database connection
+
+    Returns:
+        Message with vault alerts builder adaptive card
+    """
+    logger.info(f"📧 Showing vault alerts builder for {user_email}")
+
+    # Check if user has vault alerts access (executive-only)
+    has_access = await db.fetchval(
+        "SELECT has_vault_alerts_access($1)",
+        user_email
+    )
+
+    if not has_access:
+        return {
+            "type": "message",
+            "text": "⚠️ Vault Alerts is an executive-only feature. Only Steve, Brandon, and Daniel have access to customize and subscribe to vault candidate alerts."
+        }
+
+    # Get current vault alerts settings
+    current_settings = await db.fetchval(
+        """
+        SELECT vault_alerts_settings
+        FROM teams_user_preferences
+        WHERE user_id = $1
+        """,
+        user_id
+    )
+
+    if isinstance(current_settings, str):
+        try:
+            current_settings = json.loads(current_settings)
+        except json.JSONDecodeError:
+            current_settings = {}
+
+    # Create and send vault alerts builder card
+    card = create_vault_alerts_builder_card(current_settings=current_settings)
+    attachment = CardFactory.adaptive_card(card["content"])
+    return MessageFactory.attachment(attachment)
+
+
+async def save_vault_alerts_subscription(
+    user_id: str,
+    user_email: str,
+    settings: Dict[str, Any],
+    db: asyncpg.Connection
+) -> Dict[str, Any]:
+    """
+    Save vault alerts subscription settings.
+
+    Args:
+        user_id: Teams user ID
+        user_email: User's email address
+        settings: Form data from adaptive card
+        db: Database connection
+
+    Returns:
+        Confirmation message
+    """
+    logger.info(f"💾 Saving vault alerts subscription for {user_email}")
+
+    # Check access
+    has_access = await db.fetchval(
+        "SELECT has_vault_alerts_access($1)",
+        user_email
+    )
+
+    if not has_access:
+        return {
+            "type": "message",
+            "text": "❌ You don't have permission to subscribe to vault alerts."
+        }
+
+    # Parse form data
+    audience = settings.get('audience', 'advisors')
+    frequency = settings.get('frequency', 'weekly')
+    delivery_email = settings.get('delivery_email', '').strip()
+    max_candidates_raw = settings.get('max_candidates', 50)
+    try:
+        max_candidates = int(max_candidates_raw)
+    except (TypeError, ValueError):
+        max_candidates = 50
+    max_candidates = max(1, min(max_candidates, 200))
+
+    # Parse custom filters
+    locations_str = settings.get('locations', '').strip()
+    locations = [loc.strip() for loc in locations_str.split(',') if loc.strip()] if locations_str else []
+
+    designations_str = settings.get('designations', '').strip()
+    designations = [des.strip() for des in designations_str.split(',') if des.strip()] if designations_str else []
+
+    availability = settings.get('availability', '').strip() or None
+
+    compensation_min_str = settings.get('compensation_min', '')
+    compensation_min = int(compensation_min_str) if compensation_min_str and str(compensation_min_str).strip() else None
+
+    compensation_max_str = settings.get('compensation_max', '')
+    compensation_max = int(compensation_max_str) if compensation_max_str and str(compensation_max_str).strip() else None
+
+    date_range_days_str = settings.get('date_range_days', '')
+    date_range_days = int(date_range_days_str) if date_range_days_str and str(date_range_days_str).strip() else None
+
+    search_terms_str = settings.get('search_terms', '').strip()
+    search_terms = [term.strip() for term in search_terms_str.split(',') if term.strip()] if search_terms_str else []
+
+    # Validate required fields
+    if not delivery_email:
+        return {
+            "type": "message",
+            "text": "❌ Delivery email is required. Please provide an email address."
+        }
+
+    # Build vault_alerts_settings JSONB
+    vault_settings = {
+        "audience": audience,
+        "frequency": frequency,
+        "delivery_email": delivery_email,
+        "max_candidates": max_candidates,
+        "custom_filters": {
+            "locations": locations,
+            "designations": designations,
+            "availability": availability,
+            "compensation_min": compensation_min,
+            "compensation_max": compensation_max,
+            "date_range_days": date_range_days,
+            "search_terms": search_terms
+        }
+    }
+
+    # Save to database
+    await db.execute(
+        """
+        UPDATE teams_user_preferences
+        SET vault_alerts_enabled = TRUE,
+            vault_alerts_settings = $2,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE user_id = $1
+        """,
+        user_id,
+        json.dumps(vault_settings)
+    )
+
+    logger.info(f"✅ Vault alerts subscription saved for {user_email}")
+
+    # Build confirmation message
+    filters_summary = []
+    if locations:
+        filters_summary.append(f"📍 Locations: {', '.join(locations[:3])}{'...' if len(locations) > 3 else ''}")
+    if designations:
+        filters_summary.append(f"🎓 Designations: {', '.join(designations)}")
+    if availability:
+        filters_summary.append(f"⏰ Availability: {availability}")
+    if compensation_min or compensation_max:
+        comp_range = f"${compensation_min:,}" if compensation_min else "Any"
+        comp_range += f" - ${compensation_max:,}" if compensation_max else " - Any"
+        filters_summary.append(f"💰 Compensation: {comp_range}")
+    if date_range_days:
+        filters_summary.append(f"📅 Last {date_range_days} days")
+    if search_terms:
+        filters_summary.append(f"🔍 Search: {', '.join(search_terms[:2])}{'...' if len(search_terms) > 2 else ''}")
+
+    filters_text = "\n".join(filters_summary) if filters_summary else "No custom filters (all candidates)"
+
+    confirmation = f"""✅ **Vault Alerts Subscription Saved**
+
+**Basic Settings:**
+• Audience: {audience.title()}
+• Frequency: {frequency.title()}
+• Delivery Email: {delivery_email}
+• Max Candidates: {max_candidates}
+
+**Custom Filters:**
+{filters_text}
+
+You'll receive your first vault alert on {frequency} schedule. You can update these settings anytime by typing `vault alerts`."""
+
+    return {
+        "type": "message",
+        "text": confirmation
+    }
+
+
+async def preview_vault_alerts(
+    user_email: str,
+    settings: Dict[str, Any],
+    db: asyncpg.Connection
+) -> Dict[str, Any]:
+    """
+    Generate preview of vault alerts with custom filters.
+
+    Args:
+        user_email: User's email address
+        settings: Form data from adaptive card
+        db: Database connection
+
+    Returns:
+        Preview message with metadata
+    """
+    logger.info(f"👁️ Generating vault alerts preview for {user_email}")
+
+    # Check access
+    has_access = await db.fetchval(
+        "SELECT has_vault_alerts_access($1)",
+        user_email
+    )
+
+    if not has_access:
+        return {
+            "type": "message",
+            "text": "❌ You don't have permission to preview vault alerts."
+        }
+
+    # Parse custom filters (same as save function)
+    locations_str = settings.get('locations', '').strip()
+    locations = [loc.strip() for loc in locations_str.split(',') if loc.strip()] if locations_str else []
+
+    designations_str = settings.get('designations', '').strip()
+    designations = [des.strip() for des in designations_str.split(',') if des.strip()] if designations_str else []
+
+    availability = settings.get('availability', '').strip() or None
+
+    compensation_min_str = settings.get('compensation_min', '')
+    compensation_min = int(compensation_min_str) if compensation_min_str and str(compensation_min_str).strip() else None
+
+    compensation_max_str = settings.get('compensation_max', '')
+    compensation_max = int(compensation_max_str) if compensation_max_str and str(compensation_max_str).strip() else None
+
+    date_range_days_str = settings.get('date_range_days', '')
+    date_range_days = int(date_range_days_str) if date_range_days_str and str(date_range_days_str).strip() else None
+
+    search_terms_str = settings.get('search_terms', '').strip()
+    search_terms = [term.strip() for term in search_terms_str.split(',') if term.strip()] if search_terms_str else []
+
+    max_candidates_raw = settings.get('max_candidates', 50)
+    try:
+        max_candidates = int(max_candidates_raw)
+    except (TypeError, ValueError):
+        max_candidates = 50
+    max_candidates = max(1, min(max_candidates, 200))
+    audience = settings.get('audience', 'advisors')
+
+    # Build custom_filters dict
+    custom_filters = {}
+    if locations:
+        custom_filters['locations'] = locations
+    if designations:
+        custom_filters['designations'] = designations
+    if availability:
+        custom_filters['availability'] = availability
+    if compensation_min:
+        custom_filters['compensation_min'] = compensation_min
+    if compensation_max:
+        custom_filters['compensation_max'] = compensation_max
+    if date_range_days:
+        custom_filters['date_range_days'] = date_range_days
+    if search_terms:
+        custom_filters['search_terms'] = search_terms
+
+    try:
+        # Generate vault alerts using VaultAlertsGenerator
+        generator = VaultAlertsGenerator()
+        result = await generator.generate_alerts(
+            custom_filters=custom_filters if custom_filters else None,
+            max_candidates=max_candidates,
+            save_files=False  # Don't save files for preview
+        )
+
+        metadata = result['metadata']
+        total_candidates = metadata['total_candidates']
+        advisor_count = metadata['advisor_count']
+        executive_count = metadata['executive_count']
+        cache_hit_rate = metadata['cache_hit_rate']
+        generation_time = metadata['generation_time_seconds']
+
+        # Build preview message
+        filters_applied = "\n".join([
+            f"  • {key}: {value}"
+            for key, value in metadata['filters_applied'].items()
+            if value
+        ]) if metadata['filters_applied'] else "  None (all candidates included)"
+
+        preview_msg = f"""👁️ **Vault Alerts Preview**
+
+**Results:**
+• Total Candidates Found: {total_candidates}
+• Advisors: {advisor_count}
+• Executives: {executive_count}
+
+**Audience Selection:** {audience}
+  ↳ You will receive: {"Advisors only" if audience == "advisors" else "Executives only" if audience == "executives" else "Both advisors and executives"}
+
+**Custom Filters Applied:**
+{filters_applied}
+
+**Performance:**
+• Generation Time: {generation_time}s
+• Cache Hit Rate: {cache_hit_rate * 100:.0f}%
+
+💡 If the results look good, click **Save & Subscribe** to activate your vault alerts subscription."""
+
+        return {
+            "type": "message",
+            "text": preview_msg
+        }
+
+    except Exception as e:
+        logger.error(f"Error generating vault alerts preview: {e}", exc_info=True)
+        return {
+            "type": "message",
+            "text": f"❌ Error generating preview: {str(e)}\n\nPlease check your filters and try again."
         }

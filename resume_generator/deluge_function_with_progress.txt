@@ -1,0 +1,86 @@
+// Enhanced Deluge function with progress tracking
+// Shows real-time progress to user with emoji indicators
+
+// Get Zoho internal ID from the record
+recordId = candidateId;
+
+// API configuration  
+apiUrl = "https://resume-generator.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/resume/save-direct/" + recordId;
+progressUrl = "https://resume-generator.wittyocean-dfae0f9b.eastus.azurecontainerapps.io/api/resume/progress/" + recordId;
+apiKey = "e49d2dbcfa4547f5bdc371c5c06aae2afd06914e16e680a7f31c5fc5384ba384";
+
+// Set up headers
+headerMap = Map();
+headerMap.put("X-API-Key", apiKey);
+headerMap.put("Content-Type", "application/json");
+
+// Show initial message
+info "🚀 Starting resume generation...";
+info "This will take 30-60 seconds. Please wait...";
+
+// Start the resume generation (non-blocking)
+response = invokeurl
+[
+    url :apiUrl
+    type :POST
+    headers:headerMap
+];
+
+// Poll for progress updates
+if(response != null)
+{
+    maxAttempts = 30;  // 30 attempts * 2 seconds = 60 seconds max
+    attempt = 0;
+    lastProgress = 0;
+    
+    while(attempt < maxAttempts)
+    {
+        // Wait 2 seconds between polls
+        sleep(2000);
+        
+        // Check progress
+        progressResponse = invokeurl
+        [
+            url :progressUrl
+            type :GET
+            headers:headerMap
+        ];
+        
+        if(progressResponse != null)
+        {
+            currentProgress = progressResponse.get("progress");
+            message = progressResponse.get("message");
+            status = progressResponse.get("status");
+            
+            // Only show update if progress changed
+            if(currentProgress > lastProgress)
+            {
+                info "[" + currentProgress + "%] " + message;
+                lastProgress = currentProgress;
+            }
+            
+            // Check if complete
+            if(status == "completed")
+            {
+                info "✅ Success! Resume has been generated and attached to this record.";
+                return "Success: Resume generated and attached";
+            }
+            else if(status == "failed")
+            {
+                info "❌ Error: " + message;
+                return "Error: Resume generation failed";
+            }
+        }
+        
+        attempt = attempt + 1;
+    }
+    
+    // Timeout reached
+    info "⏱️ Generation is taking longer than expected. The resume will be attached when complete.";
+    return "In Progress: Check attachments in a few moments";
+}
+else
+{
+    info "❌ Error: Failed to start resume generation";
+    return "Error: Failed to trigger resume generation";
+}

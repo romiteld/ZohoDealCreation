@@ -1,0 +1,375 @@
+🧪 ANONYMIZATION TEST RESULTS
+================================================================================
+Generated: 2025-10-13 05:37:43 PM
+Total Candidates Tested: 10
+================================================================================
+
+Candidate: TWAV117733
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: Charles Schwab
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: Orlando, FL
+  AFTER:  Orlando area, FL
+  Status: ✅
+
+EDUCATION:
+  BEFORE: Paralegal
+  AFTER:  Paralegal
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Jerri Futch brings over two decades of expertise in financial services, legal operations, and client...
+  AFTER:  Jerri Futch brings over two decades of expertise in financial services, legal operations, and client...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV114860
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: Nashville, TN
+  AFTER:  Nashville area, TN
+  Status: ✅
+
+EDUCATION:
+  BEFORE: CFP
+  AFTER:  CFP
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Tyler Baskin is a motivated and personable financial professional with a strong background in client...
+  AFTER:  Tyler Baskin is a motivated and personable financial professional with a strong background in client...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV118067
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: Pacific Advisors
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: , 
+  AFTER:  Location not disclosed, 
+  Status: ✅
+
+EDUCATION:
+  BEFORE: CFP®, CFA®, ChFC®, RICP®
+  AFTER:  CFP®, CFA®, ChFC®, RICP®
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Haiqing Chen, CFP®, ChFC®, RICP®, is a financial professional with over 6 years of experience in wea...
+  AFTER:  Haiqing Chen, CFP®, ChFC®, RICP®, is a financial professional with over 6 years of experience in wea...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV118010
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: Marmo Financial Group, LLC
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: , 
+  AFTER:  Location not disclosed, 
+  Status: ✅
+
+EDUCATION:
+  BEFORE: CFP
+  AFTER:  CFP
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Greg Spryn is a CFP® with a physics bachelor’s and an MBA (Marketing & Organizational Effectiveness,...
+  AFTER:  Greg Spryn is a CFP® with a physics bachelor’s and an MBA (Marketing & Organizational Effectiveness,...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV117970
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: Citizens
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: , 
+  AFTER:  Location not disclosed, 
+  Status: ✅
+
+EDUCATION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Brett Melton is an experienced financial professional with 12 years in investment banking and wealth...
+  AFTER:  Brett Melton is an experienced financial professional with 12 years in investment banking and wealth...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV117895
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: Avantia: A Family Office
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 300000000
+  AFTER:  $250M-$500M range
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: Seattle, WA
+  AFTER:  Seattle Metro, 
+  Status: ✅
+
+EDUCATION:
+  BEFORE: NONE
+  AFTER:  NONE
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Billy Howard is a seasoned wealth management professional with 16 years of experience advising ultra...
+  AFTER:  Billy Howard is a seasoned wealth management professional with 16 years of experience advising ultra...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV117805
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: Heartland Advisors, Inc.
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: , 
+  AFTER:  Location not disclosed, 
+  Status: ✅
+
+EDUCATION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Corbin McGuire is a seasoned investment professional with 8 years of experience in institutional and...
+  AFTER:  Corbin McGuire is a seasoned investment professional with 8 years of experience in institutional and...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV118201
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: GWH Advisors & Accountants
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: , 
+  AFTER:  Location not disclosed, 
+  Status: ✅
+
+EDUCATION:
+  BEFORE: CRPC®, AWMA®
+  AFTER:  CRPC®, AWMA®
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Chad is a planning-first financial advisor with ~12 years of experience (2013–present) across wireho...
+  AFTER:  Chad is a planning-first financial advisor with ~12 years of experience (2013–present) across wireho...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV117710
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: Ameriprise Financial Services, LLC
+  AFTER:  a leading financial services firm
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: , 
+  AFTER:  Location not disclosed, 
+  Status: ✅
+
+EDUCATION:
+  BEFORE: APMA
+  AFTER:  APMA
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Greg is a seasoned financial services professional with over a decade of diverse industry experience...
+  AFTER:  Greg is a seasoned financial services professional with over a decade of diverse industry experience...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+Candidate: TWAV115990
+--------------------------------------------------------------------------------
+FIRM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+AUM:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+PRODUCTION:
+  BEFORE: 
+  AFTER:  
+  Status: ✅
+
+LOCATION:
+  BEFORE: Berkley, CA
+  AFTER:  Berkley area, CA
+  Status: ✅
+
+EDUCATION:
+  BEFORE: MBA
+  AFTER:  MBA
+  Status: ✅
+
+NOTES/ACHIEVEMENTS:
+  BEFORE: Sarah Intoccia brings over 6 years of experience in financial services with a deep background in cli...
+  AFTER:  Sarah Intoccia brings over 6 years of experience in financial services with a deep background in cli...
+  Status: ✅
+
+✅ ALL RULES APPLIED CORRECTLY
+
+================================================================================
+
+
+================================================================================
+📊 OVERALL SUMMARY
+================================================================================
+Total Candidates: 10
+Passed: 10/10 (100.0%)
+Failed: 0/10 (0.0%)
+Confidentiality Score: 100.0%
+================================================================================

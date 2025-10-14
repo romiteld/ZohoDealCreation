@@ -1,0 +1,267 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>{{candidate_name}} - Resume</title>
+    <style>
+        /* PDF Configuration */
+        @page {
+            size: 8.5in 11in;
+            margin: 0;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Arial', sans-serif;
+            margin: 0;
+            padding: 0;
+            width: 8.5in;
+            min-height: 11in;
+            max-height: 11in;
+        }
+
+        /* Resume Container */
+        .resume-container {
+            width: 8.5in;
+            min-height: 11in;
+            margin: 0 auto;
+            background-color: #FFFFFF;
+            color: #333;
+        }
+
+        /* BLACK HEADER with GOLD CIRCULAR DECORATIONS */
+        .header {
+            background-color: #000000;
+            color: #FFFFFF;
+            padding: 30px 40px 20px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        /* Gold Circular Decorative Elements (from cb-bg-css.txt) */
+        .header::before,
+        .header::after {
+            content: '';
+            position: absolute;
+            width: 150px;
+            height: 150px;
+            border: 4px solid #C9B037; /* Gold/Brown Accent */
+            border-radius: 50%;
+            z-index: 0;
+        }
+
+        .header::before {
+            top: -50px;
+            right: -50px;
+            transform: rotate(45deg);
+            border-style: solid none none solid;
+        }
+
+        .header::after {
+            bottom: -50px;
+            left: -50px;
+            transform: rotate(225deg);
+            border-style: solid solid none none;
+        }
+
+        .header-content {
+            position: relative;
+            z-index: 1;
+        }
+
+        .company-logo {
+            width: 200px;
+            height: 100px;
+            margin-bottom: 15px;
+            background-size: contain;
+            background-repeat: no-repeat;
+            background-position: left center;
+            {{logo_css}}
+        }
+
+        .company-title {
+            font-size: 1.4em;
+            font-weight: 300;
+            letter-spacing: 2px;
+            margin-bottom: 20px;
+        }
+
+        /* CANDIDATE NAME in GOLD */
+        .candidate-name {
+            font-size: 2.5em;
+            font-weight: bold;
+            color: #C9B037; /* Gold for premium feel */
+            margin: 0 0 5px 0;
+        }
+
+        .contact-info {
+            font-size: 0.9em;
+            line-height: 1.4;
+        }
+
+        .contact-info a {
+            color: #FFFFFF;
+            text-decoration: none;
+            margin-right: 15px;
+        }
+
+        /* WHITE MAIN BODY (for printing) */
+        .main-content {
+            padding: 20px 40px;
+        }
+
+        /* Section Headings with Gold Underline */
+        .main-content h2 {
+            font-size: 1.4em;
+            color: #000000;
+            border-bottom: 2px solid #C9B037; /* Gold Accent */
+            padding-bottom: 5px;
+            margin-top: 25px;
+            margin-bottom: 10px;
+        }
+
+        /* Executive Summary */
+        .summary-block {
+            line-height: 1.6;
+            font-size: 1em;
+            margin-bottom: 20px;
+        }
+
+        /* Experience Section */
+        .experience-block {
+            margin-bottom: 15px;
+        }
+
+        .job-title {
+            font-weight: bold;
+            font-size: 1.1em;
+            margin-top: 10px;
+        }
+
+        .company-name,
+        .dates {
+            font-size: 0.9em;
+            color: #555;
+            display: block;
+        }
+
+        .company-name {
+            font-style: italic;
+        }
+
+        .description-list {
+            list-style: disc;
+            padding-left: 20px;
+            margin-top: 5px;
+            font-size: 0.95em;
+        }
+
+        .description-list li {
+            margin-bottom: 5px;
+        }
+
+        /* Skills Section */
+        .skills-list {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 10px;
+            font-size: 0.9em;
+        }
+
+        .skill-item {
+            background-color: #EEE;
+            padding: 5px 10px;
+            border-radius: 3px;
+        }
+
+        /* Education Section */
+        .education-block {
+            margin-bottom: 10px;
+        }
+
+        .school-name {
+            font-weight: bold;
+            margin-top: 10px;
+        }
+
+        .degree-info {
+            font-size: 0.9em;
+            color: #555;
+        }
+    </style>
+</head>
+<body>
+    <div class="resume-container">
+
+        <!-- BLACK LETTERHEAD WITH GOLD DECORATIONS -->
+        <div class="header">
+            <div class="header-content">
+                <div class="company-logo"></div>
+                <div class="company-title">The Well Recruiting Solutions</div>
+
+                <!-- CANDIDATE NAME (Gold) -->
+                <h1 class="candidate-name">{{candidate_name}}</h1>
+
+                <!-- CONTACT INFO -->
+                <p class="contact-info">
+                    {{phone}} <span style="margin: 0 5px;">|</span>
+                    {{email}} <span style="margin: 0 5px;">|</span>
+                    {{city_state}}
+                    {% if linkedin_url %}
+                    <span style="margin: 0 5px;">|</span>
+                    <a href="{{linkedin_url}}">LinkedIn Profile</a>
+                    {% endif %}
+                </p>
+            </div>
+        </div>
+
+        <!-- WHITE MAIN BODY -->
+        <div class="main-content">
+
+            <!-- 1. EXECUTIVE SUMMARY (AI-generated from interview notes) -->
+            <h2>EXECUTIVE SUMMARY</h2>
+            <div class="summary-block">
+                {{executive_summary}}
+            </div>
+
+            <!-- 2. PROFESSIONAL EXPERIENCE (from LinkedIn) -->
+            <h2>PROFESSIONAL EXPERIENCE</h2>
+            {% for job in experience %}
+            <div class="experience-block">
+                <div class="job-title">{{job.title}}</div>
+                <span class="company-name">{{job.company}}, {{job.location}}</span>
+                <span class="dates">{{job.dates}}</span>
+                <ul class="description-list">
+                    {% for bullet in job.bullets %}
+                    <li>{{bullet}}</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+
+            <!-- 3. KEY SKILLS -->
+            <h2>KEY SKILLS</h2>
+            <div class="skills-list">
+                {% for skill in skills %}
+                <span class="skill-item">{{skill}}</span>
+                {% endfor %}
+            </div>
+
+            <!-- 4. EDUCATION & CERTIFICATIONS -->
+            <h2>EDUCATION & CERTIFICATIONS</h2>
+            {% for edu in education %}
+            <div class="education-block">
+                <div class="school-name">{{edu.school}}</div>
+                <div class="degree-info">{{edu.degree}}, {{edu.major}} | {{edu.year}}</div>
+            </div>
+            {% endfor %}
+
+        </div>
+    </div>
+</body>
+</html>

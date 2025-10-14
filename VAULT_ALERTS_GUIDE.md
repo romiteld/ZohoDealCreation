@@ -294,6 +294,167 @@ asyncio.run(test_redis())
 
 **Expected Output:** `✅ Redis connected`
 
+---
+
+## 🔐 Anonymization & Confidentiality Rules
+
+### CRITICAL: Privacy-First Bullet Generation
+
+**BEFORE generating bullets, ALL candidate data MUST pass through anonymization pipeline.**
+
+This protects candidates from identification via:
+- LinkedIn searches
+- BrokerCheck lookups
+- Firm-specific databases
+- Regional market knowledge
+
+#### Automated Anonymization Rules
+
+##### 1. Firm Name Anonymization
+```python
+# Specific firms → Generic types
+"Merrill Lynch" → "a leading national wirehouse"
+"Cresset" → "a multi-billion dollar RIA"
+"SAFE Credit Union" → "a regional credit union"
+"JP Morgan Private Bank" → "a global financial institution"
+"Charles Schwab" → "a top national broker-dealer"
+```
+
+**Why**: Prevents instant identification via LinkedIn/BrokerCheck.
+
+##### 2. Financial Metrics Rounding
+```python
+# Exact figures → Rounded ranges
+"$1.68B" → "$1.5B-$2.0B range"
+"$300M" → "$250M-$400M"
+"Scaled from $125M to $300M" → "more than doubled AUM"
+```
+
+**Why**: Unique AUM figures are traceable performance markers.
+
+##### 3. Location Generalization
+```python
+# Suburbs/ZIPs → Major metros only (top 25)
+"Frisco, TX 75034" → "Dallas/Fort Worth"
+"Grand Rapids, MI" → "Greater Detroit Area"
+"Des Moines, IA" → "Midwest Region"
+```
+
+**Why**: Combined with firm, specific location pinpoints individuals.
+
+##### 4. Education Stripping
+```python
+# University names removed
+"MBA from LSU" → "MBA"
+"Penn State (Finance)" → "Master's in Finance"
+"Global MBA from IE University" → "MBA"
+```
+
+**Why**: Education + metro area = direct identity discovery.
+
+##### 5. Achievement Generalization
+```python
+# Unique identifiers → Generic achievements
+"Ranked #1 nationwide" → "Top-ranked nationally"
+"52% VA market share in 2021" → "Leading market position"
+"Chairman's Club at Schwab" → "Top producer recognition"
+```
+
+**Why**: Standout claims are highly traceable.
+
+##### 6. Proprietary Systems
+```python
+# Firm-specific programs removed
+"E23 Consulting framework" → "Custom consulting methodology"
+"Savvy platform" → "Firm-branded technology solution"
+"Search Everywhere Optimization" → "Internal optimization framework"
+```
+
+**Why**: Internal program names identify specific firms.
+
+### GPT-5 System Prompt Enhancement
+
+**Updated confidentiality instructions for Agent 2:**
+
+```
+CRITICAL CONFIDENTIALITY RULES:
+- NEVER mention specific firm names (Merrill, Schwab, Fidelity, JP Morgan, etc.)
+- Use generic terms: "major wirehouse," "leading RIA," "Fortune 500 asset manager"
+- Round all AUM/production to ranges ($250M-$400M, NOT exact $300M)
+- Use major metro areas only (Dallas/Fort Worth, NOT Frisco or suburbs)
+- Strip university names from education (MBA, NOT "MBA from LSU")
+- Generalize achievements ("top-ranked nationally" NOT "#1 nationwide")
+- Remove proprietary program names (use "internal framework")
+
+EXAMPLES OF ANONYMIZED BULLETS:
+
+❌ BEFORE (Identifiable):
+"Managed $1.68B high-net-worth book at JP Morgan Private Bank; ranked #1 in Southwest region"
+
+✅ AFTER (Anonymized):
+"Managed $1.5B-$2.0B high-net-worth book at a global financial institution; top-ranked in region"
+
+❌ BEFORE (Identifiable):
+"Chairman's Club at Charles Schwab; MBA from LSU; based in Frisco, TX (75034)"
+
+✅ AFTER (Anonymized):
+"Top producer recognition at national broker-dealer; MBA; based in Dallas/Fort Worth"
+
+❌ BEFORE (Identifiable):
+"Led SAFE Credit Union's E23 Consulting program to $720M AUM; captured 52% VA market share"
+
+✅ AFTER (Anonymized):
+"Led regional credit union's consulting program to $700M-$800M AUM; achieved leading market position"
+```
+
+### Anonymization Pipeline Flow
+
+```
+Raw Candidate Data
+        ↓
+  [anonymizer.py]
+        ↓
+Anonymized Data → GPT-5 Bullet Generator → Boss-Format HTML
+                          ↓
+                  Redis Cache (24hr)
+```
+
+### Compliance Verification
+
+**Before sending ANY vault alerts, run these checks:**
+
+```bash
+# 1. Search for firm names
+grep -i "merrill\|schwab\|fidelity\|jp morgan\|ubs\|cresset\|vanguard" boss_format_*.html
+
+# 2. Search for ZIP codes
+grep -E "[0-9]{5}" boss_format_*.html
+
+# 3. Search for university names
+grep -i "university\|college\|LSU\|Penn State\|IE Business" boss_format_*.html
+
+# 4. Search for precise AUM figures
+grep -E "\$[0-9]+\.[0-9]+[BM]" boss_format_*.html
+
+# 5. Search for unique identifiers
+grep -i "chairman's club\|president's club\|#1 nationwide\|ranked.*nationwide" boss_format_*.html
+```
+
+**Expected result**: ZERO matches on all checks.
+
+### Success Criteria
+
+✅ **Zero specific firm names** in generated bullets
+✅ **Zero ZIP codes** or suburb names
+✅ **Zero university names** in education references
+✅ **All AUM/production rounded** to $50M/$100M ranges
+✅ **All achievements generalized** (no unique identifiers)
+✅ **All proprietary systems removed**
+
+**Confidentiality Score Target**: 95%+ compliance
+
+---
+
 ### 3. Test Azure OpenAI Connection
 ```bash
 python3 -c "

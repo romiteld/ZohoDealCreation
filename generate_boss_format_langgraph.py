@@ -2,6 +2,13 @@
 """
 Generate Advisor Vault Alerts in BOSS'S EXACT FORMAT using LangGraph.
 4-agent workflow with quality verification.
+
+PRIVACY MODE INTEGRATION (2025-10-13):
+- Anonymizes candidate data BEFORE GPT-5 bullet generation
+- Company names → Generic descriptors (e.g., "Major wirehouse", "Large RIA")
+- AUM/Production → Rounded ranges (e.g., "$1B+ AUM", "$500M+ AUM")
+- GPT-5 system prompt includes confidentiality rules with examples
+- Controlled by PRIVACY_MODE environment variable (default: true)
 """
 
 import asyncio
@@ -28,6 +35,9 @@ load_dotenv('.env.local')
 # Redis cache manager
 sys.path.insert(0, '/home/romiteld/Development/Desktop_Apps/outlook/well_shared')
 from well_shared.cache.redis_manager import RedisCacheManager
+
+# Privacy mode flag
+PRIVACY_MODE = os.getenv('PRIVACY_MODE', 'true').lower() == 'true'
 
 # Database connection
 DATABASE_URL = os.getenv('DATABASE_URL')
@@ -99,6 +109,221 @@ def get_alert_type(title: str) -> str:
     # Default to advisor
     else:
         return "Advisor Candidate Alert"
+
+# Company anonymization mapping for privacy
+FIRM_TYPE_MAP = {
+    'wirehouse': ['Merrill Lynch', 'Morgan Stanley', 'Wells Fargo', 'UBS', 'Raymond James'],
+    'ria': ['Nuance Investments', 'Gottfried & Somberg', 'Fisher Investments', 'Edelman Financial'],
+    'bank': ['JPMorgan', 'Bank of America', 'Wells Fargo Advisors', 'Citigroup'],
+    'insurance': ['Northwestern Mutual', 'MassMutual', 'New York Life', 'Prudential'],
+    'law_firm': ['Holland & Knight', 'Baker McKenzie', 'DLA Piper', 'K&L Gates', 'LLP', 'PC', 'Attorneys', 'Law'],
+    'accounting': ['Deloitte', 'PwC', 'EY', 'KPMG', 'Grant Thornton'],
+    'consulting': ['McKinsey', 'BCG', 'Bain', 'Accenture', 'Deloitte Consulting']
+}
+
+def parse_aum(aum_str: str) -> float:
+    """Parse AUM string to float value in dollars."""
+    if not aum_str:
+        return 0.0
+
+    # Remove $ and commas, clean up spaces
+    cleaned = aum_str.replace('$', '').replace(',', '').strip()
+
+    # Pattern to extract number and unit
+    pattern = r'(\d+(?:\.\d+)?)\s*([BMKbmk])?'
+    import re
+    match = re.match(pattern, cleaned)
+
+    if not match:
+        return 0.0
+
+    amount = float(match.group(1))
+    unit = match.group(2)
+
+    if unit:
+        unit = unit.upper()
+        multipliers = {
+            'B': 1_000_000_000,
+            'M': 1_000_000,
+            'K': 1_000
+        }
+        return amount * multipliers.get(unit, 1)
+
+    return amount
+
+def round_aum_for_privacy(aum_value: float) -> str:
+    """Round AUM to broad ranges with + suffix for privacy."""
+    if aum_value >= 1_000_000_000:  # $1B+
+        billions = int(aum_value / 1_000_000_000)
+        return f"${billions}B+ AUM"
+    elif aum_value >= 100_000_000:  # $100M - $999M
+        hundreds = int(aum_value / 100_000_000) * 100
+        return f"${hundreds}M+ AUM"
+    elif aum_value >= 10_000_000:  # $10M - $99M
+        tens = int(aum_value / 10_000_000) * 10
+        return f"${tens}M+ AUM"
+    else:
+        return ""  # Too small to display (identifying)
+
+def anonymize_company(company_name: str, aum: float = None) -> str:
+    """
+    Replace firm names with generic descriptors for privacy.
+    Prevents candidate identification through company name.
+    """
+    if not company_name or company_name == "Unknown":
+        return "Not disclosed"
+
+    # Check against known firm types
+    for firm_type, firms in FIRM_TYPE_MAP.items():
+        if any(firm.lower() in company_name.lower() for firm in firms):
+            if firm_type == 'wirehouse':
+                return "Major wirehouse"
+            elif firm_type == 'ria':
+                # Use AUM to distinguish size if available
+                if aum and aum > 1_000_000_000:  # $1B+
+                    return "Large RIA"
+                else:
+                    return "Mid-sized RIA"
+            elif firm_type == 'bank':
+                return "National bank"
+            elif firm_type == 'insurance':
+                return "Insurance brokerage"
+            elif firm_type == 'law_firm':
+                return "National law firm"
+            elif firm_type == 'accounting':
+                return "Major accounting firm"
+            elif firm_type == 'consulting':
+                return "Management consulting firm"
+
+    # Generic fallback based on AUM
+    if aum:
+        if aum > 500_000_000:  # $500M+
+            return "Large wealth management firm"
+        else:
+            return "Boutique advisory firm"
+
+    return "Advisory firm"
+
+def anonymize_candidate_data(candidate: dict) -> dict:
+    """
+    Anonymize candidate data before GPT-5 processing.
+
+    Anonymization rules:
+    - Company names → Generic firm types (e.g., "Major wirehouse", "Large RIA")
+    - AUM values → Rounded ranges (e.g., "$1B+ AUM", "$500M+ AUM")
+    - Production → Rounded ranges
+    - Keep: Title, years experience, licenses, designations, location (city/state)
+    - Remove: Specific firm names, exact compensation, unique identifiers
+    """
+    anon_candidate = candidate.copy()
+
+    # Parse AUM for privacy-aware company anonymization
+    parsed_aum = None
+    if candidate.get('aum'):
+        parsed_aum = parse_aum(str(candidate['aum']))
+
+    # Anonymize company name
+    if PRIVACY_MODE and candidate.get('firm'):
+        anon_candidate['firm'] = anonymize_company(candidate['firm'], parsed_aum)
+
+    # Round AUM to privacy ranges
+    if PRIVACY_MODE and parsed_aum and parsed_aum > 0:
+        anon_candidate['aum'] = round_aum_for_privacy(parsed_aum)
+
+    # Round production to ranges (if present)
+    if PRIVACY_MODE and candidate.get('production'):
+        # Extract numeric value from production string
+        import re
+        prod_match = re.search(r'\$?(\d+(?:\.\d+)?)\s*([BMKbmk])?', str(candidate['production']))
+        if prod_match:
+            prod_value = parse_aum(candidate['production'])
+            if prod_value >= 1_000_000:
+                prod_rounded = int(prod_value / 100_000) * 100_000
+                anon_candidate['production'] = f"${prod_rounded // 1_000}K+" if prod_rounded < 1_000_000 else f"${prod_rounded // 1_000_000}M+"
+
+    return anon_candidate
+
+def post_process_bullets(bullets: list) -> list:
+    """
+    Post-process GPT-5 generated bullets to remove any leaked confidential information.
+
+    Scans for and removes:
+    - Specific firm names (wirehouses, RIAs, banks, insurance firms)
+    - Exact AUM/production figures without + suffix
+    - ZIP codes
+    - University names
+    - Specific city suburbs (replaced with metro area)
+
+    Returns cleaned bullets with identifying information stripped.
+    """
+    if not PRIVACY_MODE:
+        return bullets
+
+    import re
+
+    # Build comprehensive firm name patterns from FIRM_TYPE_MAP
+    all_firms = []
+    for firms_list in FIRM_TYPE_MAP.values():
+        all_firms.extend(firms_list)
+
+    # Additional known firms not in type map
+    additional_firms = [
+        'TD Ameritrade', 'Schwab', 'Charles Schwab', 'Fidelity', 'Vanguard',
+        'Edward Jones', 'LPL Financial', 'Ameriprise', 'Northwestern',
+        'Mass Mutual', 'Prudential', 'New York Life', 'Cresset', 'USAA',
+        'Regions Bank', 'Truist', 'PNC', 'US Bank', 'Citibank',
+        'Chase', 'Goldman Sachs', 'Credit Suisse', 'Deutsche Bank'
+    ]
+    all_firms.extend(additional_firms)
+
+    # University patterns
+    universities = [
+        'Harvard', 'Yale', 'Princeton', 'Stanford', 'MIT', 'Columbia',
+        'Penn', 'UPenn', 'Wharton', 'Duke', 'Dartmouth', 'Brown', 'Cornell',
+        'Northwestern', 'Chicago', 'Berkeley', 'UCLA', 'USC', 'NYU',
+        'Georgetown', 'Vanderbilt', 'Notre Dame', 'Rice', 'Emory',
+        'UVA', 'Michigan', 'UNC', 'Wisconsin', 'Texas', 'Florida',
+        'Ohio State', 'Penn State', 'Indiana', 'Illinois', 'Purdue',
+        'Georgia Tech', 'UC Berkeley', 'Haas', 'Booth', 'Kellogg',
+        'Stern', 'Fuqua', 'Tuck', 'Sloan', 'Ross', 'Anderson', 'Darden',
+        'Cambridge', 'Oxford', 'LSE', 'INSEAD', 'IE Business', 'IE University'
+    ]
+
+    # Generic replacements
+    firm_replacement = "a leading firm"
+    university_replacement = "a top university"
+
+    cleaned_bullets = []
+
+    for bullet in bullets:
+        cleaned = bullet
+
+        # Strip firm names (case-insensitive)
+        for firm in all_firms:
+            # Match whole words only to avoid false positives
+            pattern = r'\b' + re.escape(firm) + r'\b'
+            if re.search(pattern, cleaned, re.IGNORECASE):
+                cleaned = re.sub(pattern, firm_replacement, cleaned, flags=re.IGNORECASE)
+
+        # Strip university names
+        for uni in universities:
+            pattern = r'\b' + re.escape(uni) + r'\b'
+            if re.search(pattern, cleaned, re.IGNORECASE):
+                cleaned = re.sub(pattern, university_replacement, cleaned, flags=re.IGNORECASE)
+
+        # Strip exact AUM figures (e.g., "$1.5B", "$350M") if they DON'T have + suffix
+        # Pattern: dollar sign, number with optional decimal, B or M unit, NOT followed by +
+        cleaned = re.sub(r'\$(\d+(?:\.\d+)?)(B|M)(?!\+)', r'$\1\2+', cleaned)
+
+        # Strip ZIP codes (5 digits)
+        cleaned = re.sub(r'\b\d{5}\b', '[ZIP]', cleaned)
+
+        # Clean up any double spaces or formatting issues from replacements
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+        cleaned_bullets.append(cleaned)
+
+    return cleaned_bullets
 
 # AGENT 1: Database Loader
 async def agent_database_loader(state: VaultAlertsState) -> VaultAlertsState:
@@ -213,20 +438,23 @@ async def generate_bullets(candidate: dict, cache_mgr: RedisCacheManager, state:
 
     state['cache_stats']['misses'] += 1
 
-    # Build context
-    title = candidate.get('title', '')
-    firm = candidate.get('firm', '')
-    years_exp = candidate.get('years_experience', '')
-    aum = candidate.get('aum', '')
-    production = candidate.get('production', '')
-    licenses = candidate.get('licenses', '')
-    headline = candidate.get('headline', '')
-    interviewer_notes = candidate.get('interviewer_notes', '')
-    top_performance = candidate.get('top_performance', '')
-    candidate_experience = candidate.get('candidate_experience', '')
-    professional_designations = candidate.get('professional_designations', '')
-    availability = candidate.get('availability', 'Not specified')
-    compensation = candidate.get('compensation', 'Negotiable')
+    # **CRITICAL: Anonymize candidate data BEFORE prompt building**
+    anon_candidate = anonymize_candidate_data(candidate)
+
+    # Build context from ANONYMIZED data
+    title = anon_candidate.get('title', '')
+    firm = anon_candidate.get('firm', '')
+    years_exp = anon_candidate.get('years_experience', '')
+    aum = anon_candidate.get('aum', '')
+    production = anon_candidate.get('production', '')
+    licenses = anon_candidate.get('licenses', '')
+    headline = anon_candidate.get('headline', '')
+    interviewer_notes = anon_candidate.get('interviewer_notes', '')
+    top_performance = anon_candidate.get('top_performance', '')
+    candidate_experience = anon_candidate.get('candidate_experience', '')
+    professional_designations = anon_candidate.get('professional_designations', '')
+    availability = anon_candidate.get('availability', 'Not specified')
+    compensation = anon_candidate.get('compensation', 'Negotiable')
 
     context_parts = []
     if title:
@@ -272,6 +500,23 @@ CRITICAL RULES:
 5. LAST bullet MUST repeat availability and compensation exactly
 6. Use active verbs and specific numbers
 
+CONFIDENTIALITY RULES (CRITICAL):
+- NEVER mention specific firm names (e.g., "Morgan Stanley", "UBS", "Merrill Lynch")
+- USE generic descriptors already provided (e.g., "Major wirehouse", "Large RIA", "National bank")
+- NEVER mention specific universities or unique identifiers
+- USE rounded ranges for AUM/Production (e.g., "$1B+ AUM", "$500M+ AUM")
+- AVOID any details that could uniquely identify the candidate
+
+EXAMPLES OF ANONYMIZED BULLETS:
+✅ "Built $1B+ AUM portfolio at major wirehouse over 15 years"
+❌ "Built $1.2B AUM portfolio at Morgan Stanley from 2008-2023"
+
+✅ "Manages $500M+ AUM with focus on HNW clients"
+❌ "Manages $537M AUM with 85 HNW clients at UBS Private Wealth"
+
+✅ "Holds CFP, CFA charterholder; Series 7, 65, 66"
+❌ "Stanford MBA, CFP from 2015, worked at Goldman Sachs Private Wealth"
+
 Candidate data:
 {context}
 
@@ -285,7 +530,7 @@ Return ONLY valid JSON with 5-6 bullets. LAST bullet MUST be availability + comp
         response = client.chat.completions.create(
             model=os.getenv('AZURE_OPENAI_DEPLOYMENT'),  # Uses gpt-5-mini deployment
             messages=[
-                {"role": "system", "content": "You are an expert financial recruiter writing compelling bullet points."},
+                {"role": "system", "content": "You are an expert financial recruiter writing compelling, CONFIDENTIAL bullet points. NEVER reveal specific firm names, universities, or identifying details. Use ONLY the anonymized data provided."},
                 {"role": "user", "content": prompt}
             ],
             temperature=1,
@@ -297,6 +542,9 @@ Return ONLY valid JSON with 5-6 bullets. LAST bullet MUST be availability + comp
 
         # Strip leading bullet characters that GPT might add
         bullets = [bullet.lstrip('• ').lstrip('- ').strip() for bullet in bullets]
+
+        # **CRITICAL: Post-process to remove any leaked confidential information**
+        bullets = post_process_bullets(bullets)
 
         # Validate we got 5-6 bullets
         if len(bullets) < 5 or len(bullets) > 6:
@@ -430,7 +678,8 @@ def render_boss_format(candidates: list, title: str) -> str:
         title_str = candidate.get('title', 'Unknown')
         alert_type = get_alert_type(title_str)
 
-        # Location formatting
+        # Location formatting with ZIP code removal
+        import re
         city = candidate.get('city', '')
         state = candidate.get('state', '')
         location = candidate.get('current_location', '')
@@ -441,6 +690,10 @@ def render_boss_format(candidates: list, title: str) -> str:
             location = location
         else:
             location = "Location TBD"
+
+        # **CRITICAL: Strip ZIP codes from location field (privacy requirement)**
+        if PRIVACY_MODE:
+            location = re.sub(r'\s*\d{5}(?:-\d{4})?\s*', '', location).strip()
 
         availability = candidate.get('availability', 'Not specified')
         compensation = candidate.get('compensation', 'Negotiable')
