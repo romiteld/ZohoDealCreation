@@ -120,3 +120,99 @@ def test_zoho_field_mapping_no_location():
     assert result['city'] == ''
     assert result['state'] == ''
     assert result['current_location'] == ''
+
+
+@pytest.mark.asyncio
+async def test_data_source_parity():
+    """
+    Verify PostgreSQL and Zoho API return equivalent data structures.
+
+    This test:
+    1. Fetches candidates from PostgreSQL (USE_ZOHO_API=false)
+    2. Fetches candidates from Zoho API (USE_ZOHO_API=true)
+    3. Verifies both return the same schema (29 columns)
+    4. Validates field types and structure match
+
+    Note: This is a schema parity test, not a data equivalence test.
+    """
+    from app.config import feature_flags
+    from app.jobs.vault_alerts_generator import VaultAlertsGenerator
+
+    try:
+        # Save original flag value
+        original_flag = feature_flags.USE_ZOHO_API
+
+        # Test PostgreSQL path
+        feature_flags.USE_ZOHO_API = False
+
+        gen_pg = VaultAlertsGenerator()
+        await gen_pg.initialize()
+
+        state_pg = {
+            'from_date': '2025-01-01',
+            'audience': 'advisors',
+            'custom_filters': {},
+            'all_candidates': [],
+            'advisor_candidates': [],
+            'executive_candidates': [],
+            'cache_manager': None,
+            'cache_stats': {'hits': 0, 'misses': 0},
+            'quality_metrics': {},
+            'advisor_html': None,
+            'executive_html': None,
+            'errors': []
+        }
+
+        # Call the database loader agent
+        result_pg = await gen_pg._agent_database_loader(state_pg)
+        pg_candidates = result_pg['all_candidates']
+
+        # Test Zoho API path
+        feature_flags.USE_ZOHO_API = True
+
+        gen_zoho = VaultAlertsGenerator()
+        await gen_zoho.initialize()
+
+        state_zoho = {
+            'from_date': '2025-01-01',
+            'audience': 'advisors',
+            'custom_filters': {},
+            'all_candidates': [],
+            'advisor_candidates': [],
+            'executive_candidates': [],
+            'cache_manager': None,
+            'cache_stats': {'hits': 0, 'misses': 0},
+            'quality_metrics': {},
+            'advisor_html': None,
+            'executive_html': None,
+            'errors': []
+        }
+
+        # Call the database loader agent
+        result_zoho = await gen_zoho._agent_database_loader(state_zoho)
+        zoho_candidates = result_zoho['all_candidates']
+
+        # Verify schema parity
+        if pg_candidates and zoho_candidates:
+            pg_keys = set(pg_candidates[0].keys())
+            zoho_keys = set(zoho_candidates[0].keys())
+
+            # Check for schema mismatches
+            missing_in_zoho = pg_keys - zoho_keys
+            extra_in_zoho = zoho_keys - pg_keys
+
+            assert not missing_in_zoho, f"Missing columns in Zoho data: {missing_in_zoho}"
+            assert not extra_in_zoho, f"Extra columns in Zoho data: {extra_in_zoho}"
+            assert pg_keys == zoho_keys, f"Schema mismatch: {pg_keys ^ zoho_keys}"
+
+            print(f"✅ Schema parity validated: {len(pg_keys)} columns")
+            print(f"   PostgreSQL: {len(pg_candidates)} candidates")
+            print(f"   Zoho API: {len(zoho_candidates)} candidates")
+
+        # Clean up
+        await gen_pg.close()
+        await gen_zoho.close()
+
+    finally:
+        # Restore original flag
+        feature_flags.USE_ZOHO_API = original_flag

@@ -36,6 +36,7 @@ from langgraph.graph import StateGraph, END
 
 from well_shared.cache.redis_manager import RedisCacheManager
 from app.config import PRIVACY_MODE
+from app.config.feature_flags import USE_ZOHO_API
 from app.utils.anonymizer import anonymize_candidate_data
 
 
@@ -100,6 +101,33 @@ class VaultAlertsGenerator:
             azure_endpoint=azure_endpoint
         )
         self.model = os.getenv('AZURE_OPENAI_DEPLOYMENT', 'gpt-5-mini')
+
+        # Feature flag for dual data source
+        self.use_zoho_api = USE_ZOHO_API
+
+        # Initialize Zoho client if using API
+        if self.use_zoho_api:
+            from app.integrations import ZohoApiClient
+            self.zoho_client = ZohoApiClient()
+
+        # Track initialization state
+        self._initialized = False
+
+    async def initialize(self):
+        """Initialize async clients."""
+        if hasattr(self, '_initialized') and self._initialized:
+            return
+
+        # Initialize Zoho client if using API
+        if self.use_zoho_api:
+            await self.zoho_client.initialize()
+
+        self._initialized = True
+
+    async def close(self):
+        """Close async clients."""
+        if hasattr(self, 'zoho_client') and self.use_zoho_api:
+            await self.zoho_client.close()
 
     async def generate_alerts(
         self,
@@ -340,11 +368,25 @@ class VaultAlertsGenerator:
         return sanitized
 
     # -------------------------------------------------------------------------
-    # AGENT 1: Database Loader (with custom filters)
+    # AGENT 1: Database Loader (with custom filters and dual source support)
     # -------------------------------------------------------------------------
 
     async def _agent_database_loader(self, state: VaultAlertsState) -> VaultAlertsState:
-        """Load candidates from PostgreSQL with optional custom filtering."""
+        """
+        Load vault candidates from PostgreSQL or Zoho API based on USE_ZOHO_API flag.
+
+        Data source priority:
+        1. If USE_ZOHO_API=true: Fetch from Zoho API (with Redis caching)
+        2. If USE_ZOHO_API=false: Fetch from PostgreSQL (existing behavior)
+
+        Both paths apply:
+        - Custom filtering
+        - Anonymization (if PRIVACY_MODE=true)
+        - Advisor/Executive categorization
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
         raw_filters = state.get('custom_filters', {}) or {}
 
         # ========================================================================
@@ -360,6 +402,196 @@ class VaultAlertsGenerator:
         date_range_days = custom_filters.get('date_range_days')  # Already validated as int
         min_comp = custom_filters.get('compensation_min')  # Already validated as int
         max_comp = custom_filters.get('compensation_max')  # Already validated as int
+
+        # ========================================================================
+        # DUAL DATA SOURCE LOGIC: PostgreSQL vs Zoho API
+        # ========================================================================
+        try:
+            if self.use_zoho_api:
+                # ZOHO API PATH
+                logger.info("🔄 Using Zoho API as data source")
+
+                # Check Redis cache first
+                cache_mgr = RedisCacheManager(connection_string=self.redis_connection)
+                await cache_mgr.connect()
+
+                cache_key = f"vault:zoho:v2:{date_range_days or 'all'}"
+                cached = await cache_mgr.get(cache_key)
+
+                if cached:
+                    logger.info("✅ Cache hit: Using cached Zoho candidates")
+                    all_candidates = json.loads(cached)
+                    state['data_source'] = 'zoho_cache'
+                else:
+                    # Fetch from Zoho API
+                    logger.info("🌐 Fetching candidates from Zoho API")
+                    all_candidates = await self._fetch_from_zoho_api(custom_filters)
+
+                    # Cache the results (24 hour TTL)
+                    await cache_mgr.set(cache_key, json.dumps(all_candidates), ttl=timedelta(hours=24))
+                    logger.info(f"💾 Cached {len(all_candidates)} candidates from Zoho API")
+                    state['data_source'] = 'zoho_api'
+
+                await cache_mgr.disconnect()
+
+            else:
+                # POSTGRESQL PATH (existing)
+                logger.info("🔄 Using PostgreSQL as data source")
+                all_candidates = await self._fetch_from_database_internal(custom_filters)
+                state['data_source'] = 'postgresql'
+
+            # ========================================================================
+            # COMMON POST-PROCESSING (applies to both data sources)
+            # ========================================================================
+
+            # **ANONYMIZE ALL CANDIDATES** immediately after loading
+            if PRIVACY_MODE:
+                logger.info("🔒 Applying anonymization to candidates")
+                for c in all_candidates:
+                    anonymize_candidate_data(c)  # MUTATES in place
+
+            # Compensation range filtering (post-query parsing)
+            if min_comp is not None or max_comp is not None:
+                logger.info(f"💰 Applying compensation filter: ${min_comp or 0} - ${max_comp or 'unlimited'}")
+                all_candidates = [
+                    candidate for candidate in all_candidates
+                    if self._compensation_in_range(candidate.get('compensation'), min_comp, max_comp)
+                ]
+
+            # Filter into advisor vs executive categories
+            advisor_candidates = []
+            executive_candidates = []
+
+            for candidate in all_candidates:
+                title = candidate.get('title', '')
+                if self._is_executive(title):
+                    executive_candidates.append(candidate)
+                elif self._is_advisor(title):
+                    advisor_candidates.append(candidate)
+                else:
+                    advisor_candidates.append(candidate)  # Default to advisor
+
+            # Persist normalized filters for downstream metadata
+            normalized_filters: Dict[str, Any] = {}
+            if locations:
+                normalized_filters['locations'] = locations
+            if designations:
+                normalized_filters['designations'] = designations
+            if availability_filter:
+                normalized_filters['availability'] = availability_filter
+            if min_comp is not None:
+                normalized_filters['compensation_min'] = min_comp
+            if max_comp is not None:
+                normalized_filters['compensation_max'] = max_comp
+            if date_range_days:
+                normalized_filters['date_range_days'] = date_range_days
+            if search_terms:
+                normalized_filters['search_terms'] = search_terms
+
+            # MUTATE state (don't return new dict)
+            state['all_candidates'] = all_candidates
+            state['advisor_candidates'] = advisor_candidates
+            state['executive_candidates'] = executive_candidates
+            state['custom_filters'] = normalized_filters
+
+            logger.info(f"✅ Loaded {len(all_candidates)} candidates ({len(advisor_candidates)} advisors, {len(executive_candidates)} executives)")
+
+        except Exception as e:
+            logger.error(f"❌ Database loader failed: {e}")
+            state['errors'].append(f"Database loader error: {str(e)}")
+
+        return state
+
+    async def _fetch_from_zoho_api(self, custom_filters: Dict) -> List[Dict]:
+        """
+        Fetch vault candidates from Zoho API.
+
+        Args:
+            custom_filters: Validated filter dictionary
+
+        Returns:
+            List of candidates mapped to PostgreSQL schema
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        from app.integrations import map_to_vault_schema
+
+        # Extract filters
+        date_range_days = custom_filters.get('date_range_days')
+        from_date = None
+        if date_range_days:
+            from_date = datetime.now() - timedelta(days=date_range_days)
+
+        # Initialize Zoho client if not already done
+        await self.initialize()
+
+        # Query Zoho for vault candidates
+        logger.info("📞 Calling Zoho API: query_candidates()")
+        zoho_candidates = await self.zoho_client.query_candidates(
+            limit=500,  # Max candidates
+            from_date=from_date,
+            published_to_vault=True  # Only vault candidates
+        )
+
+        logger.info(f"📦 Received {len(zoho_candidates)} candidates from Zoho API")
+
+        # Map to PostgreSQL schema
+        candidates = [map_to_vault_schema(c) for c in zoho_candidates]
+
+        # Apply custom filters (since Zoho API doesn't support all filters)
+        if custom_filters.get('locations'):
+            locations = custom_filters['locations']
+            candidates = [
+                c for c in candidates
+                if any(loc.lower() in f"{c.get('city', '')}, {c.get('state', '')}".lower() for loc in locations)
+            ]
+
+        if custom_filters.get('designations'):
+            designations = custom_filters['designations']
+            candidates = [
+                c for c in candidates
+                if any(desig.lower() in (c.get('professional_designations', '') or '').lower() for desig in designations)
+            ]
+
+        if custom_filters.get('availability'):
+            availability = custom_filters['availability']
+            candidates = [
+                c for c in candidates
+                if availability.lower() in (c.get('availability', '') or '').lower()
+            ]
+
+        if custom_filters.get('search_terms'):
+            search_terms = custom_filters['search_terms']
+            candidates = [
+                c for c in candidates
+                if any(
+                    term.lower() in (c.get('title', '') or '').lower() or
+                    term.lower() in (c.get('headline', '') or '').lower() or
+                    term.lower() in (c.get('interviewer_notes', '') or '').lower()
+                    for term in search_terms
+                )
+            ]
+
+        logger.info(f"🔍 After filtering: {len(candidates)} candidates remain")
+        return candidates
+
+    async def _fetch_from_database_internal(self, custom_filters: Dict) -> List[Dict]:
+        """
+        Fetch vault candidates from PostgreSQL (existing logic).
+
+        Args:
+            custom_filters: Validated filter dictionary
+
+        Returns:
+            List of candidates from database
+        """
+        # Extract filters
+        locations = custom_filters.get('locations', [])
+        designations = custom_filters.get('designations', [])
+        availability_filter = custom_filters.get('availability')
+        search_terms = custom_filters.get('search_terms', [])
+        date_range_days = custom_filters.get('date_range_days')
 
         conn = await asyncpg.connect(self.database_url)
 
@@ -429,57 +661,10 @@ class VaultAlertsGenerator:
                 rows = await conn.fetch(query)
 
             all_candidates = [dict(row) for row in rows]
-
-            # **ANONYMIZE ALL CANDIDATES** immediately after loading from database
-            if PRIVACY_MODE:
-                all_candidates = [anonymize_candidate_data(c) for c in all_candidates]
-
-            # Compensation range filtering (post-query parsing)
-            if min_comp is not None or max_comp is not None:
-                all_candidates = [
-                    candidate for candidate in all_candidates
-                    if self._compensation_in_range(candidate.get('compensation'), min_comp, max_comp)
-                ]
-
-            # Filter into advisor vs executive categories
-            advisor_candidates = []
-            executive_candidates = []
-
-            for candidate in all_candidates:
-                title = candidate.get('title', '')
-                if self._is_executive(title):
-                    executive_candidates.append(candidate)
-                elif self._is_advisor(title):
-                    advisor_candidates.append(candidate)
-                else:
-                    advisor_candidates.append(candidate)  # Default to advisor
-
-            # Persist normalized filters for downstream metadata
-            normalized_filters: Dict[str, Any] = {}
-            if locations:
-                normalized_filters['locations'] = locations
-            if designations:
-                normalized_filters['designations'] = designations
-            if availability_filter:
-                normalized_filters['availability'] = availability_filter
-            if min_comp is not None:
-                normalized_filters['compensation_min'] = min_comp
-            if max_comp is not None:
-                normalized_filters['compensation_max'] = max_comp
-            if date_range_days:
-                normalized_filters['date_range_days'] = date_range_days
-            if search_terms:
-                normalized_filters['search_terms'] = search_terms
-
-            state['all_candidates'] = all_candidates
-            state['advisor_candidates'] = advisor_candidates
-            state['executive_candidates'] = executive_candidates
-            state['custom_filters'] = normalized_filters
+            return all_candidates
 
         finally:
             await conn.close()
-
-        return state
 
     # -------------------------------------------------------------------------
     # AGENT 2: GPT-5 Bullet Generator
