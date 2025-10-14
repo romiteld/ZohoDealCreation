@@ -6,6 +6,7 @@ import logging
 import uuid
 import json
 import os
+import unicodedata
 from typing import Dict, Any, Optional
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Request, Header
@@ -132,6 +133,29 @@ def remove_mention_text(text: str, entities: Optional[list] = None) -> str:
     cleaned = ' '.join(cleaned.split())
 
     return cleaned.strip()
+
+
+def normalize_command_text(text: str) -> str:
+    """Normalize Teams message text for reliable command parsing."""
+    if not text:
+        return ""
+
+    # Normalize unicode characters (e.g., smart quotes, full-width variants)
+    normalized = unicodedata.normalize("NFKC", text)
+
+    # Remove zero-width and formatting characters that can appear in Teams inputs
+    normalized = "".join(
+        ch for ch in normalized
+        if unicodedata.category(ch) != "Cf"
+    )
+
+    # Replace non-breaking spaces with regular spaces so strip/split behave consistently
+    normalized = normalized.replace("\u00A0", " ")
+
+    # Collapse whitespace and lowercase for command matching
+    normalized = " ".join(normalized.split())
+
+    return normalized.strip().lower()
 
 
 # Helper function for audit logging
@@ -384,9 +408,15 @@ async def handle_message_activity(
     # Parse command - strip bot mentions first (handles @TalentWell mentions)
     raw_text = activity.text or ""
     cleaned_text = remove_mention_text(raw_text, activity.entities)
-    message_text = cleaned_text.strip().lower()
+    message_text = normalize_command_text(cleaned_text)
 
-    logger.info(f"Message received - Raw: '{raw_text}' | Cleaned: '{cleaned_text}' | Command: '{message_text}' | From: {user_email}")
+    logger.info(
+        "Message received - Raw: '%s' | Cleaned: '%s' | Normalized: '%s' | From: %s",
+        raw_text,
+        cleaned_text,
+        message_text,
+        user_email,
+    )
 
     # ========================================
     # STEP 1: Check for COMMANDS first (anyone can use)
