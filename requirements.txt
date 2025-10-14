@@ -70,6 +70,9 @@ azure-core==1.29.6
 slowapi==0.1.9
 cryptography==41.0.7
 
+# Circuit breaker pattern for resilience
+pybreaker==1.2.0
+
 # Token counting for cost calculation
 tiktoken>=0.7,<1
 

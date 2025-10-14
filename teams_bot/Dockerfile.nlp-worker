@@ -1,0 +1,32 @@
+# NLP Worker Dockerfile
+# Subscribes to Service Bus teams-nlp-queries queue
+# Processes natural language queries with QueryEngine
+
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    gcc \
+    postgresql-client \
+    && rm -rf /var/lib/apt/lists/*
+
+# Copy requirements
+COPY requirements.txt requirements-dev.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy shared library
+COPY well_shared/ ./well_shared/
+RUN cd well_shared && pip install -e .
+
+# Copy application code
+COPY app/ ./app/
+COPY teams_bot/ ./teams_bot/
+COPY migrations/ ./migrations/
+
+# Set Python path
+ENV PYTHONPATH=/app
+
+# Run NLP worker
+CMD ["python", "-m", "teams_bot.app.workers.nlp_worker"]

@@ -474,3 +474,94 @@ pytest.assert_valid_uuid = assert_valid_uuid
 pytest.assert_valid_email = assert_valid_email
 pytest.assert_response_time = assert_response_time
 pytest.assert_memory_usage = assert_memory_usage
+
+
+# Service Bus specific fixtures
+@pytest.fixture
+async def service_bus_client():
+    """Mock Service Bus client for testing."""
+    from app.service_bus_manager import ServiceBusManager
+
+    # Use mock connection string for testing
+    client = ServiceBusManager(
+        connection_string="Endpoint=sb://test.servicebus.windows.net/;SharedAccessKeyName=test;SharedAccessKey=test==",
+        queue_name="test-queue"
+    )
+
+    # Mock the Azure SDK internals
+    client._client = AsyncMock()
+    client._sender = AsyncMock()
+    client._receiver = AsyncMock()
+
+    # Configure default behaviors
+    client._sender.send_messages = AsyncMock()
+    client._receiver.receive_messages = AsyncMock(return_value=[])
+    client._receiver.peek_messages = AsyncMock(return_value=[])
+    client._receiver.complete_message = AsyncMock()
+    client._receiver.abandon_message = AsyncMock()
+    client._receiver.dead_letter_message = AsyncMock()
+
+    yield client
+
+    # Cleanup
+    await client.close()
+
+
+@pytest.fixture
+def mock_conversation_reference():
+    """Mock Teams conversation reference for proactive messaging."""
+    return {
+        "conversation_id": "test-conv-123",
+        "service_url": "https://smba.trafficmanager.net/amer/",
+        "tenant_id": "test-tenant-id",
+        "user": {
+            "id": "test-user-id",
+            "name": "Test User"
+        },
+        "bot": {
+            "id": "test-bot-id",
+            "name": "Test Bot"
+        },
+        "channel_id": "msteams",
+        "locale": "en-US"
+    }
+
+
+@pytest.fixture
+def mock_circuit_breaker():
+    """Mock circuit breaker for testing failure scenarios."""
+    from unittest.mock import MagicMock
+
+    breaker = MagicMock()
+    breaker.state = "closed"
+    breaker.failure_count = 0
+    breaker.success_count = 0
+    breaker.last_failure_time = None
+    breaker.is_open = False
+
+    def open_circuit():
+        breaker.state = "open"
+        breaker.is_open = True
+
+    def close_circuit():
+        breaker.state = "closed"
+        breaker.is_open = False
+        breaker.failure_count = 0
+
+    breaker.open = open_circuit
+    breaker.close = close_circuit
+
+    return breaker
+
+
+@pytest.fixture
+def mock_message_bus_service():
+    """Mock message bus service for testing."""
+    service = AsyncMock()
+    service.publish_digest_request = AsyncMock(return_value="msg-123")
+    service.process_digest_message = AsyncMock()
+    service.send_proactive_message = AsyncMock()
+    service.store_conversation_reference = AsyncMock()
+    service.get_conversation_reference = AsyncMock(return_value=None)
+
+    return service
