@@ -25,6 +25,33 @@ class QueryEngine:
         """Initialize query engine with OpenAI client."""
         self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
         self.model = "gpt-5-mini"  # Fast model for query classification
+        self.redis_manager = None
+        self._initialized = False
+
+    async def _ensure_initialized(self):
+        """Lazy initialization of Redis client."""
+        if self._initialized:
+            return
+
+        try:
+            from well_shared.cache.redis_manager import get_cache_manager
+
+            # Initialize Redis manager
+            self.redis_manager = await get_cache_manager()
+
+            if self.redis_manager:
+                # Test connection
+                await self.redis_manager.connect()
+                logger.info("QueryEngine initialized successfully with Redis")
+            else:
+                logger.warning("QueryEngine initialized without Redis - circuit breaker unavailable")
+
+            self._initialized = True
+
+        except Exception as e:
+            logger.warning(f"QueryEngine initialization failed: {e}")
+            # Don't raise - allow degraded operation
+            self._initialized = True  # Mark as initialized to prevent retry loops
 
     async def process_query(
         self,
@@ -106,7 +133,7 @@ class QueryEngine:
         conversation_context: Optional[str] = None
     ) -> Tuple[Dict[str, Any], float]:
         """
-        Classify user intent using GPT-5-mini with conversation context.
+        Classify user intent using GPT-5-mini with conversation context and circuit breaker.
 
         Args:
             query: User's natural language query
@@ -120,6 +147,19 @@ class QueryEngine:
             - filters: Query filters
             - confidence: Float 0.0-1.0 indicating classification confidence
         """
+        await self._ensure_initialized()
+
+        # Check circuit breaker BEFORE making expensive LLM call
+        if self.redis_manager and self.redis_manager._is_circuit_breaker_open():
+            logger.warning("Circuit breaker open - skipping LLM classification")
+            # Return fallback intent with low confidence
+            return {
+                "intent_type": "search",
+                "table": "deals",
+                "entities": {"search_terms": [query]},
+                "filters": {}
+            }, 0.3
+
         system_prompt = """You are a query classifier for a recruitment CRM system.
 Classify the user's intent and extract key entities.
 
@@ -199,10 +239,17 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             intent = json.loads(response.choices[0].message.content)
             confidence = intent.pop("confidence", 0.8)  # Extract confidence, default 0.8
             logger.debug(f"Classified intent: {intent} (confidence: {confidence:.2f})")
+
+            # DO NOT call record_success() - not a public helper
             return intent, confidence
 
         except Exception as e:
             logger.error(f"Error classifying intent: {e}", exc_info=True)
+
+            # Record circuit breaker failure
+            if self.redis_manager:
+                self.redis_manager._record_circuit_breaker_failure()
+
             # Fallback to basic intent with low confidence
             return {
                 "intent_type": "search",
