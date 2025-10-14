@@ -10,9 +10,9 @@ import logging
 from typing import Dict, Any
 from datetime import datetime
 
-from teams_bot.app.services import create_proactive_messaging_service
-from teams_bot.app.api.teams.adaptive_cards import create_digest_preview_card
-from teams_bot.app.jobs.talentwell_curator import TalentWellCurator
+from app.services import create_proactive_messaging_service
+from app.api.teams.adaptive_cards import create_digest_preview_card
+from app.jobs.talentwell_curator import TalentWellCurator
 from well_shared.database.connection import get_connection_manager
 
 logger = logging.getLogger(__name__)

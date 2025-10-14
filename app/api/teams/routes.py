@@ -23,6 +23,7 @@ from app.api.teams.adaptive_cards import (
     create_welcome_card,
     create_help_card,
     create_digest_preview_card,
+    create_digest_acknowledgment_card,
     create_error_card,
     create_preferences_card,
     create_clarification_card,
@@ -36,6 +37,7 @@ from app.api.teams.query_engine import process_natural_language_query
 from app.api.teams.conversation_memory import get_memory_manager
 from app.api.teams.clarification_engine import get_clarification_engine, RateLimitExceeded
 from app.api.teams.conversation_state import CONFIDENCE_THRESHOLD_LOW, CONFIDENCE_THRESHOLD_MED
+from app.services.proactive_messaging import create_proactive_messaging_service
 
 logger = logging.getLogger(__name__)
 
@@ -450,12 +452,73 @@ async def handle_message_activity(
             if audience == "steve_perry":
                 audience = "advisors"  # Map legacy steve_perry to advisors
 
-        # Enhanced logging for debugging
-        import os
-        logger.info(f"=== DIGEST COMMAND ===")
-        logger.info(f"Audience: {audience}")
-        logger.info(f"ZOHO_VAULT_VIEW_ID: {os.getenv('ZOHO_VAULT_VIEW_ID', 'NOT SET')}")
-        logger.info(f"ZCAND_MODULE: {os.getenv('ZCAND_MODULE', 'NOT SET')}")
+        # FEATURE FLAG: USE_ASYNC_DIGEST (Phase 3 - Service Bus integration)
+        from app.config.feature_flags import USE_ASYNC_DIGEST
+
+        if USE_ASYNC_DIGEST:
+            # ============================================================
+            # ASYNC MODE: Publish to Service Bus, return ack immediately
+            # ============================================================
+            logger.info(f"=== DIGEST COMMAND (ASYNC MODE) ===")
+            logger.info(f"Audience: {audience}, User: {user_email}, Conversation: {conversation_id}")
+            logger.info(f"Feature flag USE_ASYNC_DIGEST=true, routing to Service Bus")
+
+            try:
+                from app.services.message_bus import get_message_bus
+
+                # Get service URL from activity (required for proactive messaging)
+                service_url = activity.service_url if activity else ""
+
+                # Store conversation reference so workers can send proactive messages later
+                proactive_service = await create_proactive_messaging_service()
+                await proactive_service.store_conversation_reference(activity)
+
+                # Publish digest request to Service Bus
+                message_bus = get_message_bus()
+                request_id = await message_bus.publish_digest_request(
+                    conversation_id=conversation_id,
+                    service_url=service_url,
+                    audience=audience,
+                    user_email=user_email,
+                    user_name=user_name,
+                    tenant_id=None,  # Will use default from worker
+                    date_range_days=7,  # Default 7 days
+                    include_vault=True,
+                    include_deals=True,
+                    include_meetings=True,
+                    format_type="html",
+                    test_recipient_email=test_email  # Support test mode in async flow
+                )
+
+                logger.info(f"✅ Published digest request {request_id} to Service Bus queue")
+
+                # Store conversation reference for audit
+                await db.execute("""
+                    INSERT INTO teams_digest_requests (
+                        request_id, user_id, user_email, conversation_id,
+                        audience, dry_run, status, created_at
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+                """, request_id, user_id, user_email, conversation_id, audience, False, "queued")
+
+                # Return acknowledgment card immediately (< 500ms)
+                card = create_digest_acknowledgment_card(
+                    audience=audience,
+                    request_id=request_id
+                )
+                attachment = CardFactory.adaptive_card(card["content"])
+                return MessageFactory.attachment(attachment)
+
+            except Exception as e:
+                logger.error(f"❌ Async digest failed: {e}", exc_info=True)
+                logger.warning("Falling back to synchronous digest generation")
+                # Fall through to sync mode on failure
+
+        # ============================================================
+        # SYNC MODE (LEGACY): Generate digest inline, blocks 5-15s
+        # ============================================================
+        logger.info(f"=== DIGEST COMMAND (SYNC MODE) ===")
+        logger.info(f"Audience: {audience}, User: {user_email}")
+        logger.info(f"Feature flag USE_ASYNC_DIGEST={USE_ASYNC_DIGEST}, using synchronous flow")
 
         return await generate_digest_preview(
             user_id=user_id,

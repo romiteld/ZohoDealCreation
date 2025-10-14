@@ -7,6 +7,7 @@ class CandidateResponse(BaseModel):
     phone: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    current_location: Optional[str] = None
     linkedin_url: Optional[str] = None
     interview_notes: Optional[str] = None
     target_role: Optional[str] = None

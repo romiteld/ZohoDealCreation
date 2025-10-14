@@ -1,0 +1,38 @@
+Subject: Calendly Email Deliverability Issue - Resolved
+
+Hi Brandon,
+
+I investigated the Calendly email deliverability issue where meeting invites were going to spam folders for team members like Ashlee.
+
+ISSUE IDENTIFIED:
+The root cause was that Calendly's mail servers were not authorized in our SPF (Sender Policy Framework) DNS record. When Calendly sends meeting invites on behalf of emailthewell.com addresses, email providers perform an SPF check to verify the sending server is authorized. Our SPF record included Microsoft 365, Zoho, and Azure Communication Services, but was missing Calendly's authorization.
+
+This caused:
+- SPF authentication to fail for Calendly-sent emails
+- Email providers flagging the messages as suspicious
+- Automatic routing to Junk/Spam folders
+
+FIX APPLIED:
+I updated the SPF TXT record in Cloudflare DNS for emailthewell.com to include Calendly's mail server authorization.
+
+Changed from:
+v=spf1 include:spf.protection.outlook.com include:zcsend.net include:spf.azure-communication-services.net ~all
+
+Changed to:
+v=spf1 include:spf.protection.outlook.com include:zcsend.net include:spf.azure-communication-services.net include:spf.mtasv.net ~all
+
+The DNS update has propagated successfully and is now live.
+
+VERIFICATION NEEDED:
+To confirm the fix is working:
+1. Have Ashlee create a test meeting using her Calendly link
+2. Book the test meeting from another email address
+3. Verify the calendar invite arrives in the Inbox (not Junk/Spam folder)
+4. Optional: Check the email headers to confirm SPF status shows "PASS"
+
+Once verified, Ashlee and other team members should no longer experience Calendly invites going to spam.
+
+Let me know if you need any additional information or if you'd like me to coordinate the testing with Ashlee directly.
+
+Thanks,
+Danny

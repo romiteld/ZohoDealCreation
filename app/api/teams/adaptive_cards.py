@@ -523,6 +523,81 @@ def create_error_card(error_message: str) -> Dict[str, Any]:
     }
 
 
+def create_digest_acknowledgment_card(
+    audience: str,
+    request_id: str
+) -> Dict[str, Any]:
+    """
+    Create acknowledgment card shown immediately when digest request is submitted.
+    Informs user that request is processing asynchronously via Service Bus queue.
+
+    Args:
+        audience: The audience filter (advisors, c_suite, global)
+        request_id: UUID of the digest request for tracking
+
+    Returns:
+        Adaptive Card JSON for acknowledgment message
+    """
+    return {
+        "contentType": "application/vnd.microsoft.card.adaptive",
+        "content": {
+            "$schema": "http://adaptivecards.io/schemas/adaptive-card.json",
+            "type": "AdaptiveCard",
+            "version": "1.2",
+            "body": [
+                {
+                    "type": "TextBlock",
+                    "text": "⏳ Processing Your Digest Request",
+                    "size": "ExtraLarge",
+                    "weight": "Bolder",
+                    "color": "Accent"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"Your **{audience.replace('_', ' ').title()}** digest is being generated.",
+                    "wrap": True,
+                    "size": "Medium",
+                    "spacing": "Small"
+                },
+                {
+                    "type": "TextBlock",
+                    "text": "You'll receive the results in a moment via a proactive message. No need to wait here!",
+                    "wrap": True,
+                    "isSubtle": True,
+                    "spacing": "Small"
+                },
+                {
+                    "type": "Container",
+                    "spacing": "Medium",
+                    "separator": True,
+                    "items": [
+                        {
+                            "type": "TextBlock",
+                            "text": "📊 What's happening:",
+                            "weight": "Bolder",
+                            "size": "Small"
+                        },
+                        {
+                            "type": "TextBlock",
+                            "text": "• Analyzing candidate data\n• Ranking by composite score\n• Generating insights and summaries\n• Preparing preview card",
+                            "wrap": True,
+                            "size": "Small",
+                            "spacing": "Small"
+                        }
+                    ]
+                },
+                {
+                    "type": "TextBlock",
+                    "text": f"Request ID: `{request_id}`",
+                    "size": "Small",
+                    "isSubtle": True,
+                    "spacing": "Medium"
+                }
+            ]
+        }
+    }
+
+
 def create_preferences_card(
     current_audience: str = "global",
     digest_frequency: str = "weekly",

@@ -101,6 +101,7 @@ class DigestRequestMessage(BaseMessage):
     include_deals: bool = Field(default=True, description="Include active deals")
     include_meetings: bool = Field(default=True, description="Include recent meetings")
     format_type: str = Field(default="html", description="Output format (html/markdown/text)")
+    test_recipient_email: Optional[str] = Field(default=None, description="Test mode: override recipient email")
 
     @field_validator('service_url')
     @classmethod

@@ -10,9 +10,16 @@ from datetime import timedelta
 from azure.servicebus.aio import ServiceBusClient
 from azure.servicebus import ServiceBusMessage
 from azure.servicebus.exceptions import ServiceBusError
-from azure.servicebus.management.aio import ServiceBusAdministrationClient
 
-from teams_bot.app.models.messages import (
+# Optional: Only needed for queue metrics in API endpoints
+try:
+    from azure.servicebus.management.aio import ServiceBusAdministrationClient
+    ADMIN_CLIENT_AVAILABLE = True
+except ImportError:
+    ServiceBusAdministrationClient = None
+    ADMIN_CLIENT_AVAILABLE = False
+
+from app.models.messages import (
     DigestRequestMessage,
     NLPQueryMessage,
     QueueMetricsResponse,
@@ -54,13 +61,18 @@ class MessageBusService:
             self.connection_string,
             logging_enable=True
         )
-        
-        self._admin_client = ServiceBusAdministrationClient.from_connection_string(
-            self.connection_string
-        )
-        
+
+        # Only create admin client if available (not needed for workers)
+        if ADMIN_CLIENT_AVAILABLE:
+            self._admin_client = ServiceBusAdministrationClient.from_connection_string(
+                self.connection_string
+            )
+            logger.info("MessageBusService initialized with admin client")
+        else:
+            self._admin_client = None
+            logger.info("MessageBusService initialized (admin client not available)")
+
         self._initialized = True
-        logger.info("MessageBusService initialized successfully")
 
     async def publish_digest_request(
         self,
@@ -105,6 +117,12 @@ class MessageBusService:
 
     async def get_queue_metrics(self, queue_name: str) -> QueueMetricsResponse:
         """Get metrics for a specific queue."""
+        if not self._admin_client:
+            raise RuntimeError(
+                "Admin client not available. Queue metrics are only supported in API endpoints, "
+                "not in worker containers."
+            )
+
         try:
             props = await self._admin_client.get_queue_runtime_properties(queue_name)
             return QueueMetricsResponse(

@@ -629,9 +629,9 @@ exceptions
 ## 🚀 Next Steps
 
 1. **Deploy Worker Container Apps** (requires production approval)
-2. **Refactor routes.py** (replace sync digest generation with message bus)
+2. ~~**Refactor routes.py**~~ ✅ COMPLETE (Phase 3 - feature flag `USE_ASYNC_DIGEST`)
 3. **Create Integration Tests** (pytest with Service Bus emulator)
-4. **Enable Feature Flag** (`TEAMS_USE_ASYNC_DIGEST=true` for 10% of users)
+4. **Enable Feature Flag** (`USE_ASYNC_DIGEST=true` for internal testing, then gradual rollout)
 5. **Monitor & Iterate** (tune KEDA thresholds, observe latency metrics)
 
 ---

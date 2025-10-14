@@ -292,6 +292,15 @@
             z-index: 1;
         }
 
+        .header-logo {
+            position: absolute;
+            top: 30px;
+            right: 40px;
+            z-index: 1;
+            width: 120px;
+            height: auto;
+        }
+
         .company-title {
             font-size: 1.4em;
             font-weight: 300;
@@ -471,9 +480,215 @@
         .preview-panel::-webkit-scrollbar-thumb:hover {
             background: #B5A033;
         }
+
+        /* ============================================ */
+        /* MODERN GLASSMORPHIC LOADING PROGRESS BAR   */
+        /* ============================================ */
+
+        /* Full-screen overlay */
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            z-index: 10000;
+            animation: fadeIn 0.3s ease-in;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Centered modal with glassmorphic effect */
+        .loading-modal {
+            background: rgba(255, 255, 255, 0.05);
+            border: 2px solid #C9B037;
+            border-radius: 15px;
+            padding: 40px 50px;
+            min-width: 500px;
+            max-width: 600px;
+            box-shadow: 0 8px 32px 0 rgba(201, 176, 55, 0.2);
+            animation: slideUp 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateY(50px);
+                opacity: 0;
+            }
+            to {
+                transform: translateY(0);
+                opacity: 1;
+            }
+        }
+
+        /* Title */
+        .loading-title {
+            color: #C9B037;
+            font-size: 1.6em;
+            font-weight: 600;
+            margin-bottom: 10px;
+            text-align: center;
+        }
+
+        .loading-subtitle {
+            color: #FFFFFF;
+            font-size: 1.1em;
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        /* Progress bar container */
+        .progress-bar-container {
+            width: 100%;
+            height: 12px;
+            background: rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            overflow: hidden;
+            margin-bottom: 25px;
+            box-shadow: inset 0 2px 4px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Animated progress bar fill */
+        .progress-bar-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #C9B037 0%, #FFD700 50%, #C9B037 100%);
+            background-size: 200% 100%;
+            border-radius: 10px;
+            transition: width 0.6s cubic-bezier(0.4, 0, 0.2, 1);
+            animation: shimmer 2s linear infinite;
+            box-shadow: 0 0 20px rgba(201, 176, 55, 0.6);
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* Percentage text */
+        .progress-percent {
+            color: #FFD700;
+            font-size: 1.3em;
+            font-weight: 700;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        /* Status steps list */
+        .status-steps {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .status-step {
+            color: #999;
+            font-size: 0.95em;
+            padding: 8px 0;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            transition: all 0.3s;
+        }
+
+        .status-step.completed {
+            color: #28a745;
+        }
+
+        .status-step.active {
+            color: #FFFFFF;
+            font-weight: 600;
+        }
+
+        .status-step.active .step-icon {
+            animation: pulse 1.5s ease-in-out infinite;
+        }
+
+        @keyframes pulse {
+            0%, 100% {
+                transform: scale(1);
+                opacity: 1;
+            }
+            50% {
+                transform: scale(1.2);
+                opacity: 0.7;
+            }
+        }
+
+        .step-icon {
+            font-size: 1.2em;
+            min-width: 20px;
+            text-align: center;
+        }
+
+        .step-time {
+            margin-left: auto;
+            color: #999;
+            font-size: 0.85em;
+        }
+
+        .status-step.active .step-time {
+            color: #FFD700;
+            font-weight: 600;
+        }
     </style>
 </head>
 <body>
+    <!-- Loading Progress Overlay (shown during page load) -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-modal">
+            <div class="loading-title">Generating Resume</div>
+            <div class="loading-subtitle" id="loadingSubtitle">Please wait...</div>
+
+            <div class="progress-bar-container">
+                <div class="progress-bar-fill" id="progressBarFill"></div>
+            </div>
+
+            <div class="progress-percent" id="progressPercent">0%</div>
+
+            <ul class="status-steps">
+                <li class="status-step" id="step1">
+                    <span class="step-icon">⏹</span>
+                    <span>Fetching candidate data</span>
+                    <span class="step-time"></span>
+                </li>
+                <li class="status-step" id="step2">
+                    <span class="step-icon">⏹</span>
+                    <span>Downloading LinkedIn PDF</span>
+                    <span class="step-time"></span>
+                </li>
+                <li class="status-step" id="step3">
+                    <span class="step-icon">⏹</span>
+                    <span>Extracting resume data with AI</span>
+                    <span class="step-time"></span>
+                </li>
+                <li class="status-step" id="step4">
+                    <span class="step-icon">⏹</span>
+                    <span>Generating executive summary</span>
+                    <span class="step-time"></span>
+                </li>
+                <li class="status-step" id="step5">
+                    <span class="step-icon">⏹</span>
+                    <span>Enriching company locations</span>
+                    <span class="step-time"></span>
+                </li>
+                <li class="status-step" id="step6">
+                    <span class="step-icon">⏹</span>
+                    <span>Finalizing resume preview</span>
+                    <span class="step-time"></span>
+                </li>
+            </ul>
+        </div>
+    </div>
     <!-- Top Bar -->
     <div class="top-bar">
         <h1>Resume Editor - {{candidate_name}}</h1>
@@ -732,6 +947,7 @@
                             ${linkedinLink}
                         </p>
                     </div>
+                    <img src="{{logo_base64}}" alt="The Well Logo" class="header-logo">
                 </div>
                 <div class="main-content">
                     <h2>EXECUTIVE SUMMARY</h2>
@@ -1040,6 +1256,82 @@
                 addSkill();
             }
         });
+
+        // ============================================
+        // LOADING PROGRESS BAR ANIMATION
+        // ============================================
+
+        // Progress steps configuration (simulated timing based on typical backend processing)
+        const progressSteps = [
+            { stepId: 'step1', percent: 10, duration: 2000, message: 'Fetching candidate data from Zoho CRM...' },
+            { stepId: 'step2', percent: 20, duration: 3000, message: 'Downloading LinkedIn PDF...' },
+            { stepId: 'step3', percent: 60, duration: 8000, message: 'Extracting resume data with GPT-5...' },
+            { stepId: 'step4', percent: 75, duration: 6000, message: 'Generating executive summary...' },
+            { stepId: 'step5', percent: 90, duration: 4000, message: 'Enriching company locations...' },
+            { stepId: 'step6', percent: 100, duration: 2000, message: 'Finalizing resume preview...' }
+        ];
+
+        let currentStepIndex = 0;
+        let progressStartTime = Date.now();
+
+        function updateProgressBar() {
+            if (currentStepIndex >= progressSteps.length) {
+                // All steps complete - hide loading overlay
+                setTimeout(() => {
+                    const overlay = document.getElementById('loadingOverlay');
+                    overlay.style.opacity = '0';
+                    setTimeout(() => {
+                        overlay.style.display = 'none';
+                    }, 300);
+                }, 500);
+                return;
+            }
+
+            const step = progressSteps[currentStepIndex];
+            const stepElement = document.getElementById(step.stepId);
+            const progressBarFill = document.getElementById('progressBarFill');
+            const progressPercent = document.getElementById('progressPercent');
+            const loadingSubtitle = document.getElementById('loadingSubtitle');
+
+            // Update progress bar width and percentage
+            progressBarFill.style.width = step.percent + '%';
+            progressPercent.textContent = step.percent + '%';
+
+            // Update subtitle message
+            loadingSubtitle.textContent = step.message;
+
+            // Mark previous steps as completed
+            if (currentStepIndex > 0) {
+                const prevStepId = progressSteps[currentStepIndex - 1].stepId;
+                const prevStepElement = document.getElementById(prevStepId);
+                prevStepElement.classList.remove('active');
+                prevStepElement.classList.add('completed');
+                prevStepElement.querySelector('.step-icon').textContent = '✓';
+
+                // Calculate and show completion time
+                const elapsed = Math.round((Date.now() - progressStartTime) / 1000);
+                prevStepElement.querySelector('.step-time').textContent = elapsed + 's';
+            }
+
+            // Mark current step as active
+            stepElement.classList.add('active');
+            stepElement.querySelector('.step-icon').textContent = '⏳';
+
+            // Calculate estimated time remaining
+            const totalDuration = progressSteps.reduce((sum, s) => sum + s.duration, 0);
+            const elapsedDuration = progressSteps.slice(0, currentStepIndex).reduce((sum, s) => sum + s.duration, 0);
+            const remainingDuration = totalDuration - elapsedDuration;
+            const estimatedSeconds = Math.ceil(remainingDuration / 1000);
+            stepElement.querySelector('.step-time').textContent = '~' + estimatedSeconds + 's';
+
+            // Move to next step after duration
+            currentStepIndex++;
+            setTimeout(updateProgressBar, step.duration);
+        }
+
+        // Initialize progress bar on page load
+        // Start animation immediately - overlay is visible by default
+        updateProgressBar();
     </script>
 </body>
 </html>

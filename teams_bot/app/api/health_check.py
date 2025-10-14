@@ -9,7 +9,7 @@ from datetime import datetime
 import logging
 
 # Import circuit breaker health check
-from teams_bot.app.services.circuit_breaker import get_circuit_breaker_health
+from app.services.circuit_breaker import get_circuit_breaker_health
 
 # Import service health checks
 from well_shared.cache.redis_manager import get_redis_health_status
@@ -152,7 +152,7 @@ async def dependency_health() -> Dict[str, Any]:
         }
 
     # Zoho API (check circuit breaker state instead of making actual call)
-    from teams_bot.app.services.circuit_breaker import get_breaker_status
+    from app.services.circuit_breaker import get_breaker_status
     zoho_breaker = get_breaker_status("zoho_api_breaker")
     dependencies["dependencies"]["zoho_api"] = {
         "available": zoho_breaker["state"] != "open",
@@ -189,7 +189,7 @@ async def reset_circuit_breakers(breaker_name: str = None) -> Dict[str, str]:
     Args:
         breaker_name: Optional specific breaker to reset, or reset all if not provided
     """
-    from teams_bot.app.services.circuit_breaker import reset_all_breakers, reset_breaker
+    from app.services.circuit_breaker import reset_all_breakers, reset_breaker
 
     try:
         if breaker_name:

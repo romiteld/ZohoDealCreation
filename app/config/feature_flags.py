@@ -24,6 +24,9 @@ USE_ZOHO_API = os.getenv('USE_ZOHO_API', 'false').lower() == 'true'
 FEATURE_LLM_SENTIMENT = os.getenv('FEATURE_LLM_SENTIMENT', 'true').lower() == 'true'
 FEATURE_GROWTH_EXTRACTION = os.getenv('FEATURE_GROWTH_EXTRACTION', 'true').lower() == 'true'
 
+# Teams Bot async processing (Phase 3 - Service Bus integration)
+USE_ASYNC_DIGEST = os.getenv('USE_ASYNC_DIGEST', 'false').lower() == 'true'
+
 # UX features (Phase 3 - not implemented yet)
 FEATURE_AUDIENCE_FILTERING = os.getenv('FEATURE_AUDIENCE_FILTERING', 'false').lower() == 'true'
 FEATURE_CANDIDATE_SCORING = os.getenv('FEATURE_CANDIDATE_SCORING', 'false').lower() == 'true'

@@ -14,7 +14,11 @@ RUN apt-get update && apt-get install -y \
 COPY well_shared/ /tmp/well_shared/
 RUN pip install --no-cache-dir -e /tmp/well_shared/
 
-# Copy Teams Bot requirements
+# Copy and install main app requirements first (includes langgraph, etc.)
+COPY requirements.txt ./requirements-main.txt
+RUN pip install --no-cache-dir -r requirements-main.txt
+
+# Copy and install Teams Bot specific requirements
 COPY teams_bot/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -29,6 +33,7 @@ COPY app/jobs/ ./app/jobs/
 COPY app/templates/ ./app/templates/
 COPY app/bandits/ ./app/bandits/
 COPY app/config/ ./app/config/
+COPY app/utils/ ./app/utils/
 COPY app/integrations.py ./app/
 COPY app/business_rules.py ./app/
 COPY app/powerbi_integration.py ./app/

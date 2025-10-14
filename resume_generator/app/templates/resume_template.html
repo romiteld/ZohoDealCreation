@@ -74,14 +74,13 @@
             z-index: 1;
         }
 
-        .company-logo {
-            width: 200px;
-            height: 100px;
-            margin-bottom: 15px;
-            background-size: contain;
-            background-repeat: no-repeat;
-            background-position: left center;
-            {{logo_css}}
+        .header-logo {
+            position: absolute;
+            top: 30px;
+            right: 40px;
+            z-index: 1;
+            width: 120px;
+            height: auto;
         }
 
         .company-title {
@@ -201,7 +200,6 @@
         <!-- BLACK LETTERHEAD WITH GOLD DECORATIONS -->
         <div class="header">
             <div class="header-content">
-                <div class="company-logo"></div>
                 <div class="company-title">The Well Recruiting Solutions</div>
 
                 <!-- CANDIDATE NAME (Gold) -->
@@ -218,6 +216,7 @@
                     {% endif %}
                 </p>
             </div>
+            <img src="{{logo_base64}}" alt="The Well Logo" class="header-logo">
         </div>
 
         <!-- WHITE MAIN BODY -->
@@ -234,7 +233,7 @@
             {% for job in experience %}
             <div class="experience-block">
                 <div class="job-title">{{job.title}}</div>
-                <span class="company-name">{{job.company}}, {{job.location}}</span>
+                <span class="company-name">{{job.company}}{% if job.location %}, {{job.location}}{% endif %}</span>
                 <span class="dates">{{job.dates}}</span>
                 <ul class="description-list">
                     {% for bullet in job.bullets %}

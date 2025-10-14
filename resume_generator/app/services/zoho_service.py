@@ -55,12 +55,20 @@ class ZohoService:
                 ""
             )
 
+            # Try multiple field name formats for Current Location
+            current_location = (
+                candidate_data.get("Current_Location") or
+                candidate_data.get("Current Location") or
+                ""
+            )
+
             return CandidateResponse(
                 full_name=candidate_data.get("Full_Name", ""),
                 email=candidate_data.get("Email", ""),
                 phone=candidate_data.get("Phone", ""),
                 city=candidate_data.get("City", ""),
                 state=candidate_data.get("State", ""),
+                current_location=current_location,
                 linkedin_url=candidate_data.get("LinkedIn_Profile") or candidate_data.get("LinkedIn_URL", ""),
                 interview_notes=interview_notes,
                 target_role=candidate_data.get("Title") or candidate_data.get("Target_Role", "")

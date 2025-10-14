@@ -18,13 +18,15 @@ from typing import Dict, Any, Optional
 from datetime import datetime
 from azure.servicebus.aio import ServiceBusClient
 from azure.servicebus import ServiceBusReceiveMode
+from azure.identity.aio import DefaultAzureCredential
 
-from teams_bot.app.services.proactive_messaging import create_proactive_messaging_service
-from teams_bot.app.models.messages import NLPQueryMessage
+from app.services.proactive_messaging import create_proactive_messaging_service
+from app.models.messages import NLPQueryMessage
 from app.api.teams.query_engine import process_natural_language_query
 from app.api.teams.adaptive_cards import create_error_card
 from well_shared.database.connection import get_connection_manager
 from botbuilder.core import CardFactory, MessageFactory
+from app.utils.service_bus import normalize_message_body
 
 logger = logging.getLogger(__name__)
 
@@ -66,45 +68,61 @@ class NLPWorker:
         self.max_concurrent_messages = max_concurrent_messages
         self.max_wait_time = max_wait_time
 
-        # Service Bus connection
+        # Service Bus connection - prefer managed identity over connection string
+        self.namespace = os.getenv("AZURE_SERVICE_BUS_NAMESPACE")
         self.connection_string = os.getenv(
             "AZURE_SERVICE_BUS_CONNECTION_STRING",
             os.getenv("SERVICE_BUS_CONNECTION_STRING")
         )
-        if not self.connection_string:
-            raise ValueError("SERVICE_BUS_CONNECTION_STRING not found")
+
+        if not self.namespace and not self.connection_string:
+            raise ValueError("Either AZURE_SERVICE_BUS_NAMESPACE or SERVICE_BUS_CONNECTION_STRING required")
 
         self.queue_name = os.getenv("AZURE_SERVICE_BUS_NLP_QUEUE", "teams-nlp-queries")
+        self.use_managed_identity = bool(self.namespace)
 
         self.client: Optional[ServiceBusClient] = None
+        self.credential: Optional[DefaultAzureCredential] = None
         self.proactive_messaging = None
 
+        auth_method = "managed identity" if self.use_managed_identity else "connection string"
         logger.info(
             f"NLPWorker initialized: queue={self.queue_name}, "
-            f"max_concurrent={max_concurrent_messages}"
+            f"max_concurrent={max_concurrent_messages}, auth={auth_method}"
         )
 
     async def initialize(self):
         """Initialize services (database, proactive messaging)."""
         logger.info("Initializing NLPWorker services...")
 
-        # Create Service Bus client
-        self.client = ServiceBusClient.from_connection_string(
-            self.connection_string,
-            logging_enable=True
-        )
+        # Create Service Bus client with managed identity or connection string
+        if self.use_managed_identity:
+            self.credential = DefaultAzureCredential()
+            self.client = ServiceBusClient(
+                fully_qualified_namespace=self.namespace,
+                credential=self.credential,
+                logging_enable=True
+            )
+            logger.info(f"✅ Service Bus client initialized with managed identity: {self.namespace}")
+        else:
+            self.client = ServiceBusClient.from_connection_string(
+                self.connection_string,
+                logging_enable=True
+            )
+            logger.info("✅ Service Bus client initialized with connection string")
 
         # Initialize proactive messaging service
         self.proactive_messaging = await create_proactive_messaging_service()
 
         logger.info("✅ NLPWorker services initialized")
 
-    async def process_message(self, message) -> bool:
+    async def process_message(self, message, nlp_query: NLPQueryMessage) -> bool:
         """
         Process a single NLP query message.
 
         Args:
             message: Service Bus message
+            nlp_query: Pre-parsed and validated NLP query model
 
         Returns:
             True if successful, False if failed (triggers dead letter)
@@ -115,9 +133,6 @@ class NLPWorker:
         logger.info(f"[{correlation_id}] Processing NLP query {message_id}")
 
         try:
-            # Parse message body
-            body = json.loads(str(message))
-            nlp_query = NLPQueryMessage(**body)
 
             logger.info(
                 f"[{correlation_id}] NLP query: "
@@ -203,11 +218,8 @@ class NLPWorker:
                 exc_info=True
             )
 
-            # Send error message to user
+            # Send error message to user (use pre-parsed nlp_query)
             try:
-                body = json.loads(str(message))
-                nlp_query = NLPQueryMessage(**body)
-
                 error_card = create_error_card(
                     f"Failed to process query: {str(e)}"
                 )
@@ -236,7 +248,8 @@ class NLPWorker:
         async with self.client.get_queue_receiver(
             queue_name=self.queue_name,
             receive_mode=ServiceBusReceiveMode.PEEK_LOCK,
-            max_wait_time=self.max_wait_time
+            max_wait_time=self.max_wait_time,
+            prefetch_count=0  # Prevent invisible duplicates for long-running tasks
         ) as receiver:
 
             logger.info("✅ Connected to Service Bus queue, waiting for messages...")
@@ -278,8 +291,43 @@ class NLPWorker:
             message: Service Bus message
             receiver: Service Bus receiver
         """
+        delivery_count = message.delivery_count or 0
+        max_delivery_count = 2  # Service Bus queue configuration
+        nlp_query = None  # Cache parsed model
+
         try:
-            success = await self.process_message(message)
+            # Check for poison message before processing (dead-letter on last attempt)
+            if delivery_count >= max_delivery_count:
+                logger.error(
+                    f"⚠️ Message {message.message_id} exceeded max delivery attempts "
+                    f"({delivery_count}/{max_delivery_count}). Dead-lettering."
+                )
+                await receiver.dead_letter_message(
+                    message,
+                    reason="MaxDeliveryAttemptsExceeded",
+                    error_description=f"Message failed after {delivery_count} delivery attempts"
+                )
+                return
+
+            # Parse and validate message body once (cache for reuse)
+            try:
+                body_bytes = normalize_message_body(message)
+                body = json.loads(body_bytes.decode('utf-8'))
+                nlp_query = NLPQueryMessage(**body)  # Cache validated model
+            except (json.JSONDecodeError, ValueError, TypeError) as parse_error:
+                # Poison message - unparseable or invalid schema
+                logger.error(
+                    f"⚠️ Message {message.message_id} has invalid format: {parse_error}. Dead-lettering."
+                )
+                await receiver.dead_letter_message(
+                    message,
+                    reason="InvalidMessageFormat",
+                    error_description=str(parse_error)
+                )
+                return
+
+            # Process the message (pass cached model to avoid re-parsing)
+            success = await self.process_message(message, nlp_query)
 
             if success:
                 # Complete message (remove from queue)
@@ -287,15 +335,33 @@ class NLPWorker:
                 logger.info(f"✅ Message {message.message_id} completed")
             else:
                 # Abandon message (will retry based on queue config)
+                logger.warning(
+                    f"⚠️ Message {message.message_id} abandoned (will retry). "
+                    f"Delivery attempt {delivery_count + 1}/{max_delivery_count}"
+                )
                 await receiver.abandon_message(message)
-                logger.warning(f"⚠️ Message {message.message_id} abandoned (will retry)")
 
         except Exception as e:
-            logger.error(f"Error processing message {message.message_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error processing message {message.message_id}: {e}",
+                exc_info=True
+            )
             try:
-                await receiver.abandon_message(message)
+                # Check if we should dead-letter due to repeated failures
+                # Service Bus auto-dead-letters at maxDeliveryCount, so we explicit dead-letter at count >= 1
+                if delivery_count >= max_delivery_count - 1:
+                    logger.error(
+                        f"⚠️ Message {message.message_id} nearing max retries ({delivery_count}/{max_delivery_count}). Dead-lettering."
+                    )
+                    await receiver.dead_letter_message(
+                        message,
+                        reason="ProcessingException",
+                        error_description=str(e)
+                    )
+                else:
+                    await receiver.abandon_message(message)
             except Exception as abandon_error:
-                logger.error(f"Failed to abandon message: {abandon_error}")
+                logger.error(f"Failed to abandon/dead-letter message: {abandon_error}")
 
     async def close(self):
         """Clean up resources."""

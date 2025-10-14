@@ -7,6 +7,7 @@ import base64
 
 from app.services.zoho_service import ZohoService
 from app.services.openai_service import OpenAIService
+from app.services.location_enrichment import LocationEnrichmentService
 
 router = APIRouter()
 
@@ -14,20 +15,27 @@ router = APIRouter()
 RESUME_TEMPLATE = None
 LOGO_BASE64 = None
 
-def get_logo_css():
-    """Load and cache the logo CSS with base64 data URI"""
+def get_logo_base64():
+    """Load and cache the logo as base64 data URI for embedding in <img> tags"""
     global LOGO_BASE64
     if LOGO_BASE64 is None:
-        # Read the pre-generated logo CSS
+        # Read the pre-generated logo CSS which contains base64 data URI
         logo_css_path = os.path.join(
             os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
             "logo-css.txt"
         )
         if os.path.exists(logo_css_path):
             with open(logo_css_path, "r") as f:
-                LOGO_BASE64 = f.read().strip()
+                css_content = f.read().strip()
+                # Extract the data URI from: background-image: url(data:image/png;base64,...)
+                if "url(" in css_content and ")" in css_content:
+                    start = css_content.find("url(") + 4
+                    end = css_content.rfind(")")
+                    LOGO_BASE64 = css_content[start:end]
+                else:
+                    LOGO_BASE64 = ""
         else:
-            # Fallback to empty CSS if file not found
+            # Fallback to empty string if file not found
             LOGO_BASE64 = ""
     return LOGO_BASE64
 
@@ -63,6 +71,7 @@ async def resume_editor(candidate_id: str):
     """
     zoho_service = ZohoService()
     openai_service = OpenAIService()
+    location_service = LocationEnrichmentService()
 
     try:
         # Step 1: Fetch candidate from Zoho
@@ -122,28 +131,84 @@ async def resume_editor(candidate_id: str):
                 detail=f"Failed to extract data from PDF: {str(e)}"
             )
 
-        # Step 4: Generate executive summary from interview notes
-        executive_summary = "No executive summary available"
-        if candidate.interview_notes and candidate.interview_notes.strip():
+        # Step 4: Generate executive summary from extracted resume data
+        print(f"[Resume Editor] Generating executive summary...")
+        try:
+            # Use extracted experience and skills to generate summary
+            experience_summary = extracted_data.get("jobs", extracted_data.get("experience", []))
+            skills = extracted_data.get("skills", [])
+
+            # Build comprehensive context for summary generation
+            context_parts = []
+
+            # Add interview notes if available (highest priority - contains key achievements)
+            if candidate.interview_notes and candidate.interview_notes.strip():
+                context_parts.append(f"Interview Notes:\n{candidate.interview_notes}")
+
+            # Add ALL experience with FULL details (not just 2 jobs)
+            if experience_summary and len(experience_summary) > 0:
+                context_parts.append("\nProfessional Experience:")
+                for job in experience_summary:
+                    company = job.get("company", "Unknown")
+                    title = job.get("title", "Unknown")
+                    dates = job.get("dates", "")
+                    bullets = job.get("bullets", [])
+
+                    job_text = f"• {title} at {company}"
+                    if dates:
+                        job_text += f" ({dates})"
+
+                    # Include ALL bullets (not just first 2)
+                    if bullets:
+                        job_text += "\n  - " + "\n  - ".join(bullets)
+
+                    context_parts.append(job_text)
+
+            # Add ALL skills (not just 8)
+            if skills:
+                context_parts.append(f"\nKey Skills: {', '.join(skills)}")
+
+            # Generate summary using GPT-5
+            combined_context = "\n".join(context_parts)
+            print(f"[Resume Editor] Context for summary (length: {len(combined_context)}): {combined_context[:200]}")
             executive_summary = await openai_service.generate_executive_summary(
-                interview_notes=candidate.interview_notes,
+                interview_notes=combined_context,
                 candidate_name=candidate.full_name,
                 target_role=candidate.target_role or "leadership position"
             )
+            print(f"[Resume Editor] Generated executive summary (length: {len(executive_summary)}): {executive_summary}")
+        except Exception as e:
+            print(f"[Resume Editor] ERROR generating summary: {e}")
+            executive_summary = "Results-driven professional with extensive experience in financial services."
 
-        # Step 5: Build resume data structure
+        # Step 5: Enrich missing job locations using Azure Maps
+        print(f"[Resume Editor] Enriching missing job locations...")
+        experience_data = extracted_data.get("jobs", extracted_data.get("experience", []))
+        enriched_experience = await location_service.enrich_job_locations(experience_data)
+
+        # Step 6: Determine candidate's current location (3-tier priority)
+        # Priority 1: Current_Location from Zoho (highest priority)
+        city_state = candidate.current_location or ""
+
+        # Priority 2: Fallback to city/state fields if Current_Location is empty
+        if not city_state:
+            city_state = f"{candidate.city or ''}, {candidate.state or ''}".strip(", ")
+
+        print(f"[Resume Editor] Using candidate location: {city_state}")
+
+        # Step 7: Build resume data structure
         resume_data = {
             "candidate_id": candidate_id,
             "candidate_name": candidate.full_name,
             "email": candidate.email or extracted_data.get("email", ""),
             "phone": candidate.phone or extracted_data.get("phone", ""),
-            "city_state": f"{candidate.city or ''}, {candidate.state or ''}".strip(", "),
+            "city_state": city_state,
             "linkedin_url": candidate.linkedin_url or extracted_data.get("linkedin_url", ""),
             "executive_summary": executive_summary,
-            "experience": extracted_data.get("jobs", extracted_data.get("experience", [])),
+            "experience": enriched_experience,
             "education": extracted_data.get("education", []),
             "skills": extracted_data.get("skills", []),
-            "logo_css": get_logo_css(),
+            "logo_base64": get_logo_base64(),
         }
 
         # Step 6: Render editor template
@@ -185,8 +250,8 @@ async def generate_pdf_from_editor(candidate_id: str, resume_data: dict):
     zoho_service = ZohoService()
 
     try:
-        # Add logo CSS to resume data
-        resume_data['logo_css'] = get_logo_css()
+        # Add logo base64 data URI to resume data
+        resume_data['logo_base64'] = get_logo_base64()
 
         # Render the edited data using the resume template
         html_content = get_template().render(**resume_data)

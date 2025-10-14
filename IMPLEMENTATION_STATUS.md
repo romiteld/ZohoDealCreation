@@ -440,7 +440,7 @@ az keyvault secret list --vault-name <vault-name> | grep -i teams
 **Resolution:**
 1. Update routes.py to publish to message bus
 2. Add `create_acknowledgment_card()` helper
-3. Add `TEAMS_USE_ASYNC_DIGEST=true` feature flag
+3. Add `USE_ASYNC_DIGEST=true` feature flag
 4. Test with 10% of users, then 50%, then 100%
 
 ---
@@ -516,10 +516,10 @@ watch -n 5 'az containerapp replica list --name teams-digest-worker'
 **Dependencies:** MessageBusService, ProactiveMessagingService
 
 **Tasks:**
-- [ ] Create `create_acknowledgment_card()` in adaptive_cards.py
-- [ ] Update routes.py digest handler to publish to message bus
-- [ ] Store conversation reference for proactive messaging
-- [ ] Add feature flag `TEAMS_USE_ASYNC_DIGEST` (default=false)
+- [x] Create `create_acknowledgment_card()` in adaptive_cards.py
+- [x] Update routes.py digest handler to publish to message bus
+- [x] Store conversation reference for proactive messaging
+- [x] Add feature flag `USE_ASYNC_DIGEST` (default=false)
 - [ ] Test with 10% rollout
 
 ---

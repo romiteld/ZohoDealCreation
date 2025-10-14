@@ -15,16 +15,18 @@ import signal
 import logging
 import json
 from typing import Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 from azure.servicebus.aio import ServiceBusClient
 from azure.servicebus import ServiceBusReceiveMode
+from azure.identity.aio import DefaultAzureCredential
 
-from teams_bot.app.services.proactive_messaging import create_proactive_messaging_service
-from teams_bot.app.services.message_bus import MessageBusService
-from teams_bot.app.models.messages import DigestRequestMessage
+from app.services.proactive_messaging import create_proactive_messaging_service
+from app.services.message_bus import MessageBusService
+from app.models.messages import DigestRequestMessage
 from app.jobs.talentwell_curator import TalentWellCurator
 from app.api.teams.adaptive_cards import create_digest_preview_card, create_error_card
 from well_shared.database.connection import get_connection_manager
+from app.utils.service_bus import normalize_message_body
 
 logger = logging.getLogger(__name__)
 
@@ -66,34 +68,49 @@ class DigestWorker:
         self.max_concurrent_messages = max_concurrent_messages
         self.max_wait_time = max_wait_time
 
-        # Service Bus connection
+        # Service Bus connection - prefer managed identity over connection string
+        self.namespace = os.getenv("AZURE_SERVICE_BUS_NAMESPACE")
         self.connection_string = os.getenv(
             "AZURE_SERVICE_BUS_CONNECTION_STRING",
             os.getenv("SERVICE_BUS_CONNECTION_STRING")
         )
-        if not self.connection_string:
-            raise ValueError("SERVICE_BUS_CONNECTION_STRING not found")
+
+        if not self.namespace and not self.connection_string:
+            raise ValueError("Either AZURE_SERVICE_BUS_NAMESPACE or SERVICE_BUS_CONNECTION_STRING required")
 
         self.queue_name = os.getenv("AZURE_SERVICE_BUS_DIGEST_QUEUE", "teams-digest-requests")
+        self.use_managed_identity = bool(self.namespace)
 
         self.client: Optional[ServiceBusClient] = None
+        self.credential: Optional[DefaultAzureCredential] = None
         self.proactive_messaging = None
         self.curator = None
 
+        auth_method = "managed identity" if self.use_managed_identity else "connection string"
         logger.info(
             f"DigestWorker initialized: queue={self.queue_name}, "
-            f"max_concurrent={max_concurrent_messages}"
+            f"max_concurrent={max_concurrent_messages}, auth={auth_method}"
         )
 
     async def initialize(self):
         """Initialize services (database, proactive messaging, curator)."""
         logger.info("Initializing DigestWorker services...")
 
-        # Create Service Bus client
-        self.client = ServiceBusClient.from_connection_string(
-            self.connection_string,
-            logging_enable=True
-        )
+        # Create Service Bus client with managed identity or connection string
+        if self.use_managed_identity:
+            self.credential = DefaultAzureCredential()
+            self.client = ServiceBusClient(
+                fully_qualified_namespace=self.namespace,
+                credential=self.credential,
+                logging_enable=True
+            )
+            logger.info(f"✅ Service Bus client initialized with managed identity: {self.namespace}")
+        else:
+            self.client = ServiceBusClient.from_connection_string(
+                self.connection_string,
+                logging_enable=True
+            )
+            logger.info("✅ Service Bus client initialized with connection string")
 
         # Initialize proactive messaging service
         self.proactive_messaging = await create_proactive_messaging_service()
@@ -104,12 +121,13 @@ class DigestWorker:
 
         logger.info("✅ DigestWorker services initialized")
 
-    async def process_message(self, message) -> bool:
+    async def process_message(self, message, digest_request: DigestRequestMessage) -> bool:
         """
         Process a single digest request message.
 
         Args:
             message: Service Bus message
+            digest_request: Pre-parsed and validated digest request model
 
         Returns:
             True if successful, False if failed (triggers dead letter)
@@ -120,9 +138,6 @@ class DigestWorker:
         logger.info(f"[{correlation_id}] Processing message {message_id}")
 
         try:
-            # Parse message body
-            body = json.loads(str(message))
-            digest_request = DigestRequestMessage(**body)
 
             logger.info(
                 f"[{correlation_id}] Digest request: "
@@ -143,19 +158,14 @@ class DigestWorker:
                     await db.execute("""
                         INSERT INTO teams_digest_requests (
                             request_id, user_id, user_email, conversation_id,
-                            audience, from_date, to_date, owner, max_candidates,
-                            dry_run, status, created_at
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, CURRENT_TIMESTAMP)
+                            audience, dry_run, status, created_at
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
                     """,
                         str(digest_request.message_id),
                         digest_request.user_email,  # Use email as user_id fallback
                         digest_request.user_email,
                         digest_request.conversation_id,
                         digest_request.audience.value,
-                        digest_request.from_date,
-                        digest_request.to_date,
-                        digest_request.owner,
-                        digest_request.max_candidates,
                         False,  # Not dry_run (actual generation)
                         "processing"
                     )
@@ -170,12 +180,16 @@ class DigestWorker:
                 # Generate digest
                 start_time = datetime.now()
 
+                # Calculate date range from date_range_days
+                to_date = datetime.now()
+                from_date = to_date - timedelta(days=digest_request.date_range_days)
+
                 result = await self.curator.run_weekly_digest(
                     audience=digest_request.audience.value,
-                    from_date=digest_request.from_date.isoformat() if digest_request.from_date else None,
-                    to_date=digest_request.to_date.isoformat() if digest_request.to_date else None,
-                    owner=digest_request.owner,
-                    max_cards=digest_request.max_candidates,
+                    from_date=from_date.isoformat(),
+                    to_date=to_date.isoformat(),
+                    owner=None,  # Use default owner from curator
+                    max_cards=20,  # Default max cards
                     dry_run=False,  # Actual generation
                     ignore_cooldown=False
                 )
@@ -255,7 +269,7 @@ class DigestWorker:
                 exc_info=True
             )
 
-            # Update request status
+            # Update request status (digest_request already parsed in _process_and_complete)
             try:
                 manager = await get_connection_manager()
                 async with manager.get_connection() as db:
@@ -267,11 +281,8 @@ class DigestWorker:
                         WHERE request_id = $2
                     """, str(e), message_id)
 
-                    # Send error card to user
+                    # Send error card to user (use pre-parsed digest_request)
                     try:
-                        body = json.loads(str(message))
-                        digest_request = DigestRequestMessage(**body)
-
                         error_card = create_error_card(
                             f"Failed to generate digest: {str(e)}"
                         )
@@ -303,7 +314,8 @@ class DigestWorker:
         async with self.client.get_queue_receiver(
             queue_name=self.queue_name,
             receive_mode=ServiceBusReceiveMode.PEEK_LOCK,
-            max_wait_time=self.max_wait_time
+            max_wait_time=self.max_wait_time,
+            prefetch_count=0  # Prevent invisible duplicates for long-running tasks
         ) as receiver:
 
             logger.info("✅ Connected to Service Bus queue, waiting for messages...")
@@ -345,8 +357,43 @@ class DigestWorker:
             message: Service Bus message
             receiver: Service Bus receiver
         """
+        delivery_count = message.delivery_count or 0
+        max_delivery_count = 3  # Service Bus queue configuration
+        digest_request = None  # Cache parsed model
+
         try:
-            success = await self.process_message(message)
+            # Check for poison message before processing (dead-letter on last attempt)
+            if delivery_count >= max_delivery_count:
+                logger.error(
+                    f"⚠️ Message {message.message_id} exceeded max delivery attempts "
+                    f"({delivery_count}/{max_delivery_count}). Dead-lettering."
+                )
+                await receiver.dead_letter_message(
+                    message,
+                    reason="MaxDeliveryAttemptsExceeded",
+                    error_description=f"Message failed after {delivery_count} delivery attempts"
+                )
+                return
+
+            # Parse and validate message body once (cache for reuse)
+            try:
+                body_bytes = normalize_message_body(message)
+                body = json.loads(body_bytes.decode('utf-8'))
+                digest_request = DigestRequestMessage(**body)  # Cache validated model
+            except (json.JSONDecodeError, ValueError, TypeError) as parse_error:
+                # Poison message - unparseable or invalid schema
+                logger.error(
+                    f"⚠️ Message {message.message_id} has invalid format: {parse_error}. Dead-lettering."
+                )
+                await receiver.dead_letter_message(
+                    message,
+                    reason="InvalidMessageFormat",
+                    error_description=str(parse_error)
+                )
+                return
+
+            # Process the message (pass cached model to avoid re-parsing)
+            success = await self.process_message(message, digest_request)
 
             if success:
                 # Complete message (remove from queue)
@@ -354,22 +401,40 @@ class DigestWorker:
                 logger.info(f"✅ Message {message.message_id} completed")
             else:
                 # Abandon message (will retry based on queue config)
+                logger.warning(
+                    f"⚠️ Message {message.message_id} abandoned (will retry). "
+                    f"Delivery attempt {delivery_count + 1}/{max_delivery_count}"
+                )
                 await receiver.abandon_message(message)
-                logger.warning(f"⚠️ Message {message.message_id} abandoned (will retry)")
 
         except Exception as e:
-            logger.error(f"Error processing message {message.message_id}: {e}", exc_info=True)
+            logger.error(
+                f"Error processing message {message.message_id}: {e}",
+                exc_info=True
+            )
             try:
-                await receiver.abandon_message(message)
+                # Check if we should dead-letter due to repeated failures
+                # Service Bus auto-dead-letters at maxDeliveryCount, so we explicit dead-letter at count >= 2
+                if delivery_count >= max_delivery_count - 1:
+                    logger.error(
+                        f"⚠️ Message {message.message_id} nearing max retries ({delivery_count}/{max_delivery_count}). Dead-lettering."
+                    )
+                    await receiver.dead_letter_message(
+                        message,
+                        reason="ProcessingException",
+                        error_description=str(e)
+                    )
+                else:
+                    await receiver.abandon_message(message)
             except Exception as abandon_error:
-                logger.error(f"Failed to abandon message: {abandon_error}")
+                logger.error(f"Failed to abandon/dead-letter message: {abandon_error}")
 
     async def close(self):
         """Clean up resources."""
         logger.info("Closing DigestWorker services...")
 
-        if self.curator:
-            await self.curator.close()
+        # Note: TalentWellCurator does not have a close() method
+        # curator resources are managed automatically
 
         if self.client:
             await self.client.close()

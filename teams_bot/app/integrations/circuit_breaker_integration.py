@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional
 from datetime import datetime, timedelta
 
 # Import circuit breaker components
-from teams_bot.app.services.circuit_breaker import (
+from app.services.circuit_breaker import (
     redis_breaker,
     postgresql_breaker,
     zoho_breaker,
@@ -286,7 +286,7 @@ class TeamsRateLimitWithCircuitBreaker:
 
         async def fallback():
             # Use in-memory rate limiting from circuit breaker module
-            from teams_bot.app.services.circuit_breaker import in_memory_sessions, InMemoryRateLimitSession
+            from app.services.circuit_breaker import in_memory_sessions, InMemoryRateLimitSession
 
             if user_id not in in_memory_sessions:
                 in_memory_sessions[user_id] = InMemoryRateLimitSession(
@@ -315,7 +315,7 @@ class TeamsRateLimitWithCircuitBreaker:
             return True
 
         async def fallback():
-            from teams_bot.app.services.circuit_breaker import in_memory_sessions, InMemoryRateLimitSession
+            from app.services.circuit_breaker import in_memory_sessions, InMemoryRateLimitSession
 
             if user_id not in in_memory_sessions:
                 in_memory_sessions[user_id] = InMemoryRateLimitSession(user_id=user_id)
