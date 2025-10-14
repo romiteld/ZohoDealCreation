@@ -6,6 +6,8 @@ Guidance for Claude Code working with the Well Intake API codebase.
 
 **Well Intake API** - Intelligent email processing system automating CRM record creation in Zoho from recruitment emails. Uses LangGraph with GPT-5 for structured data extraction (Extract → Research → Validate). Deployed on Azure Container Apps with PostgreSQL.
 
+**Dual Data Source Architecture** - Vault alerts can source from PostgreSQL (legacy) or Zoho CRM API (new) via `USE_ZOHO_API` feature flag. Schema mapping ensures 100% parity between sources with 29-column alignment.
+
 ## Quick Start
 
 ```bash
@@ -40,6 +42,8 @@ cd well_shared && pip install -e .  # Editable mode for dev
 - **Azure Container Apps** - Auto-scaling deployment
 - **Apollo.io** - Contact enrichment
 - **Firecrawl v2** - Company research
+- **httpx AsyncClient** - Non-blocking HTTP for Zoho API calls
+- **Zoho CRM API v8** - Direct vault candidate queries via custom view ID
 
 ### Key Components
 - `app/main.py` - FastAPI endpoints
@@ -100,6 +104,20 @@ curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainera
   -H "X-API-Key: your-api-key"
 ```
 
+### Zoho API Testing
+```bash
+# Toggle data source
+export USE_ZOHO_API=true  # Use Zoho API
+export USE_ZOHO_API=false # Use PostgreSQL (default)
+
+# Test boss email endpoint
+curl -X POST "http://localhost:8000/api/teams/admin/send_vault_alerts_to_bosses?from_date=2025-01-01" \
+  -H "X-API-Key: $API_KEY"
+
+# Verify schema mapping
+pytest tests/test_data_source_parity.py -v
+```
+
 ### Outlook Add-in
 ```bash
 npm run validate:all    # Validate manifests
@@ -120,6 +138,8 @@ npm run serve           # Local testing (localhost:8080)
 ⚠️ **NEVER CHANGE:**
 - AI Model: `gpt-5` with `temperature=1`
 - Owner: Use `ZOHO_DEFAULT_OWNER_EMAIL` env var (never hardcode IDs)
+  - **Default Owner**: `steve.perry@emailthewell.com` (active recruiter)
+  - **Rationale**: Daniel Romitelli is tech architect, not a recruiter. Email-processed records need a recruiter owner.
 - Zoho: Use API v8 endpoints
 - Field Names: `Source` (not `Lead_Source`), `Source_Detail` for referrers
 - Pipeline: Always "Sales Pipeline"
@@ -141,9 +161,9 @@ AZURE_OPENAI_ENDPOINT=https://eastus2.api.cognitive.microsoft.com/
 AZURE_OPENAI_DEPLOYMENT=gpt-5-mini
 
 # Zoho
-ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth.azurewebsites.net
-ZOHO_DEFAULT_OWNER_EMAIL=daniel.romitelli@emailthewell.com
-ZOHO_VAULT_VIEW_ID=6221978000090941003
+ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth-v2.azurewebsites.net
+ZOHO_DEFAULT_OWNER_EMAIL=steve.perry@emailthewell.com  # Active recruiter for email-processed records
+ZOHO_VAULT_VIEW_ID=6221978000090941003  # _Vault Candidates custom view
 
 # Zoom
 ZOOM_ACCOUNT_ID=xyz
@@ -163,6 +183,7 @@ Defaults in `app/config/feature_flags.py`, override in `.env.local`:
 - `FEATURE_GROWTH_EXTRACTION=true` - Extract growth metrics from transcripts
 - `FEATURE_LLM_SENTIMENT=true` - GPT-5 sentiment scoring (±15% boost/penalty)
 - `FEATURE_ASYNC_ZOHO=false` - ⚠️ DO NOT ENABLE (needs refactor)
+- `USE_ZOHO_API=false` - Toggle between PostgreSQL (false) and Zoho API (true) for vault candidates
 
 ## Common Patterns
 
@@ -204,6 +225,17 @@ pytest tests/ -k "shared" -v
 - **Docker WSL2 permissions** → `sudo usermod -aG docker $USER && newgrp docker`
 
 ## Recent Updates (2025-10)
+
+### Zoho API Integration (2025-01-15)
+- **Dual Data Source**: Feature flag toggle between PostgreSQL and Zoho CRM API
+- **29-Column Schema Mapping**: Complete field alignment with production Zoho API
+  - Key fields: `Candidate_Locator`, `Employer`, `Book_Size_AUM`, `Production_L12Mo`, `Desired_Comp`
+  - Special fields: `Transferable_Book_of_Business`, `Licenses_and_Exams`, `When_Available`
+  - Timestamps: `Created_Time`, `Modified_Time` preserved from Zoho
+- **Async HTTP Client**: All Zoho queries use httpx AsyncClient (no blocking)
+- **Boss Email Endpoint**: `/api/teams/admin/send_vault_alerts_to_bosses` for approval workflow
+- **Consolidated Anonymizer**: Single canonical implementation at `app/utils/anonymizer.py`
+- **Telemetry Batching**: 15-second batch interval for Application Insights
 
 ### Vault Alert System
 - **generate_boss_format_langgraph.py** - 4-agent LangGraph workflow for weekly candidate alerts
