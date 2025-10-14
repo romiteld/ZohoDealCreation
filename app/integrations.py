@@ -1255,8 +1255,8 @@ def map_to_vault_schema(zoho_candidate: Dict) -> Dict:
         'aum': zoho_candidate.get('Book_Size_AUM', ''),  # FIXED: was AUM
         'production': zoho_candidate.get('Production_L12Mo', ''),  # FIXED: was Production
         'book_size_clients': zoho_candidate.get('Book_Size_Clients', ''),
-        'transferable_book': zoho_candidate.get('Transferable_Book', ''),
-        'licenses': zoho_candidate.get('Licenses', ''),
+        'transferable_book': zoho_candidate.get('Transferable_Book_of_Business', ''),  # FIXED: was Transferable_Book
+        'licenses': zoho_candidate.get('Licenses_and_Exams', ''),  # FIXED: was Licenses
         'professional_designations': zoho_candidate.get('Professional_Designations', ''),
         'headline': zoho_candidate.get('Headline', ''),
         'interviewer_notes': zoho_candidate.get('Interviewer_Notes', ''),
@@ -1264,14 +1264,14 @@ def map_to_vault_schema(zoho_candidate: Dict) -> Dict:
         'candidate_experience': zoho_candidate.get('Candidate_Experience', ''),
         'background_notes': zoho_candidate.get('Background_Notes', ''),
         'other_screening_notes': zoho_candidate.get('Other_Screening_Notes', ''),
-        'availability': zoho_candidate.get('Availability', ''),
+        'availability': zoho_candidate.get('When_Available', ''),  # FIXED: was Availability
         'compensation': zoho_candidate.get('Desired_Comp', ''),  # FIXED: was Compensation
         'linkedin_profile': zoho_candidate.get('LinkedIn_Profile', ''),
         'zoom_meeting_id': zoho_candidate.get('Zoom_Meeting_ID', ''),
         'zoom_meeting_url': zoho_candidate.get('Zoom_Meeting_URL', ''),
         'raw_data': zoho_candidate,  # Store full Zoho record
-        'created_at': None,  # Set by database DEFAULT
-        'updated_at': None   # Set by database DEFAULT
+        'created_at': zoho_candidate.get('Created_Time'),  # FIXED: was None, now uses Zoho timestamp
+        'updated_at': zoho_candidate.get('Modified_Time')   # FIXED: was None, now uses Zoho timestamp
     }
 
 # Legacy compatibility

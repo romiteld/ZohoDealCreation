@@ -42,8 +42,8 @@ def test_zoho_field_mapping():
         'Book_Size_AUM': '$100M',  # FIXED: was AUM
         'Production_L12Mo': '$1.2M',  # FIXED: was Production
         'Book_Size_Clients': '150',
-        'Transferable_Book': '80%',
-        'Licenses': 'Series 7, 63, 65',
+        'Transferable_Book_of_Business': '80%',  # FIXED: was Transferable_Book
+        'Licenses_and_Exams': 'Series 7, 63, 65',  # FIXED: was Licenses
         'Professional_Designations': 'CFP, CFA',
         'Headline': 'Top-performing advisor',
         'Interviewer_Notes': 'Strong candidate',
@@ -51,11 +51,13 @@ def test_zoho_field_mapping():
         'Candidate_Experience': '10 years wealth management',
         'Background_Notes': 'MBA from UT Austin',
         'Other_Screening_Notes': 'Excellent communication',
-        'Availability': 'Immediately',
+        'When_Available': 'Immediately',  # FIXED: was Availability
         'Desired_Comp': '$450K',  # FIXED: was Compensation
         'LinkedIn_Profile': 'https://linkedin.com/in/johndoe',
         'Zoom_Meeting_ID': '123456789',
-        'Zoom_Meeting_URL': 'https://zoom.us/rec/123'
+        'Zoom_Meeting_URL': 'https://zoom.us/rec/123',
+        'Created_Time': '2025-01-15T10:30:00-05:00',  # NEW: Zoho timestamp
+        'Modified_Time': '2025-01-15T14:45:00-05:00'  # NEW: Zoho timestamp
     }
 
     result = map_to_vault_schema(zoho_data)
@@ -88,9 +90,9 @@ def test_zoho_field_mapping():
     # Verify raw_data stores full record
     assert result['raw_data'] == zoho_data
 
-    # Verify timestamp fields are None (set by database)
-    assert result['created_at'] is None
-    assert result['updated_at'] is None
+    # Verify timestamp fields are from Zoho (not None anymore)
+    assert result['created_at'] == '2025-01-15T10:30:00-05:00'
+    assert result['updated_at'] == '2025-01-15T14:45:00-05:00'
 
 
 def test_zoho_field_mapping_missing_fields():
