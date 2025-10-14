@@ -16,12 +16,14 @@ from typing import Dict, Any, Optional, List, Tuple
 from azure.storage.blob import BlobServiceClient
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
 from datetime import datetime, timezone
+from httpx import AsyncClient, Timeout, Limits, HTTPStatusError
 
 from app.config.candidate_keywords import (
     is_advisor_title,
     is_executive_title,
     normalize_candidate_type,
 )
+from app.utils.telemetry import telemetry
 
 # Import feature flags
 try:
@@ -1221,16 +1223,132 @@ class ZohoClient:
         except Exception as e:
             logger.warning(f"Could not attach file as note to deal {deal_id}: {e}")
 
+def parse_location(location: str) -> Tuple[str, str]:
+    """Parse 'City, State' into separate fields."""
+    if not location or ',' not in location:
+        return location or '', ''
+    parts = location.split(',', 1)
+    return parts[0].strip(), parts[1].strip()
+
+def map_to_vault_schema(zoho_candidate: Dict) -> Dict:
+    """Map Zoho API fields to PostgreSQL vault_candidates schema (29 columns)."""
+    city, state = parse_location(zoho_candidate.get('Current_Location', ''))
+
+    return {
+        'twav_number': zoho_candidate.get('TWAV_Number', ''),
+        'candidate_name': zoho_candidate.get('Full_Name', ''),
+        'title': zoho_candidate.get('Title', ''),
+        'city': city,
+        'state': state,
+        'current_location': zoho_candidate.get('Current_Location', ''),
+        'location_detail': zoho_candidate.get('Location_Detail', ''),
+        'firm': zoho_candidate.get('Firm', ''),
+        'years_experience': zoho_candidate.get('Years_of_Experience', ''),
+        'aum': zoho_candidate.get('AUM', ''),
+        'production': zoho_candidate.get('Production', ''),
+        'book_size_clients': zoho_candidate.get('Book_Size_Clients', ''),
+        'transferable_book': zoho_candidate.get('Transferable_Book', ''),
+        'licenses': zoho_candidate.get('Licenses', ''),
+        'professional_designations': zoho_candidate.get('Professional_Designations', ''),
+        'headline': zoho_candidate.get('Headline', ''),
+        'interviewer_notes': zoho_candidate.get('Interviewer_Notes', ''),
+        'top_performance': zoho_candidate.get('Top_Performance', ''),
+        'candidate_experience': zoho_candidate.get('Candidate_Experience', ''),
+        'background_notes': zoho_candidate.get('Background_Notes', ''),
+        'other_screening_notes': zoho_candidate.get('Other_Screening_Notes', ''),
+        'availability': zoho_candidate.get('Availability', ''),
+        'compensation': zoho_candidate.get('Compensation', ''),
+        'linkedin_profile': zoho_candidate.get('LinkedIn_Profile', ''),
+        'zoom_meeting_id': zoho_candidate.get('Zoom_Meeting_ID', ''),
+        'zoom_meeting_url': zoho_candidate.get('Zoom_Meeting_URL', ''),
+        'raw_data': zoho_candidate,  # Store full Zoho record
+        'created_at': None,  # Set by database DEFAULT
+        'updated_at': None   # Set by database DEFAULT
+    }
+
 # Legacy compatibility
 class ZohoApiClient(ZohoClient):
     """Legacy compatibility wrapper."""
 
     def __init__(self, oauth_service_url: str = None):
         super().__init__()
+        self.http_client = None
 
     def get_access_token(self) -> str:
         """Public method for health checks."""
         return self._get_access_token()
+
+    async def initialize(self):
+        """Initialize async HTTP client."""
+        if self.http_client is None:
+            self.http_client = AsyncClient(
+                timeout=Timeout(30.0),
+                limits=Limits(max_connections=10, max_keepalive_connections=5)
+            )
+
+    async def close(self):
+        """Close async HTTP client."""
+        if self.http_client:
+            await self.http_client.aclose()
+            self.http_client = None
+
+    def _sanitize_pii(self, text: str) -> str:
+        """Remove PII from logs."""
+        text = re.sub(r'\b[\w\.-]+@[\w\.-]+\.\w+\b', '[EMAIL]', text)
+        text = re.sub(r'\b\d{3}[-.]?\d{3}[-.]?\d{4}\b', '[PHONE]', text)
+        return text
+
+    async def _make_request_async(self, method: str, url: str, **kwargs) -> Dict:
+        """Make async HTTP request with telemetry tracking."""
+        if not self.http_client:
+            await self.initialize()
+
+        start_time = time.time()
+        success = False
+
+        try:
+            response = await self.http_client.request(method, url, **kwargs)
+            response.raise_for_status()
+            success = True
+            return response.json()
+        except HTTPStatusError as e:
+            # Log response body on errors (sanitized)
+            body = self._sanitize_pii(e.response.text)
+            logger.error(f"HTTP {e.response.status_code}: {body[:500]}")
+            raise
+        finally:
+            duration_ms = int((time.time() - start_time) * 1000)
+            telemetry.track_zoho_call(duration_ms, success, 'candidates')
+
+    def _parse_compensation(self, comp_str: str) -> int:
+        """Parse compensation string to integer."""
+        if not comp_str:
+            return 0
+        # Extract first number (e.g., "$450K" -> 450000)
+        match = re.search(r'(\d+)K', comp_str)
+        return int(match.group(1)) * 1000 if match else 0
+
+    def _apply_filters(self, candidates: List[Dict], filters: Dict) -> List[Dict]:
+        """Apply custom filters to candidate list."""
+        filtered = candidates
+
+        if filters.get('locations'):
+            filtered = [c for c in filtered if c.get('state') in filters['locations']]
+
+        if filters.get('designations'):
+            filtered = [c for c in filtered
+                       if any(d in c.get('professional_designations', '')
+                             for d in filters['designations'])]
+
+        if filters.get('compensation_min'):
+            filtered = [c for c in filtered
+                       if self._parse_compensation(c.get('compensation', '')) >= filters['compensation_min']]
+
+        if filters.get('compensation_max'):
+            filtered = [c for c in filtered
+                       if self._parse_compensation(c.get('compensation', '')) <= filters['compensation_max']]
+
+        return filtered
     
     async def create_or_update_records(self, extracted_data, sender_email: str, attachment_urls: list = None, is_duplicate: bool = False, attachment_metadata: list = None) -> dict:
         """
@@ -1890,7 +2008,8 @@ class ZohoApiClient(ZohoClient):
                               to_date: Optional[datetime] = None,
                               owner: Optional[str] = None,
                               published_to_vault: bool = None,
-                              candidate_type: Optional[str] = None) -> List[Dict[str, Any]]:
+                              candidate_type: Optional[str] = None,
+                              custom_filters: Optional[Dict] = None) -> List[Dict[str, Any]]:
         """
         Query candidates from Zoho CRM for TalentWell digest.
         Fetches all Leads (displayed as Candidates in Zoho) that are not Placed or Hired.
@@ -2099,12 +2218,19 @@ class ZohoApiClient(ZohoClient):
                 )
                 logger.debug(f"Sorted {len(processed_candidates)} vault candidates by Date_Published_to_Vault (oldest first)")
 
+                # Apply custom filters if provided
+                if custom_filters:
+                    processed_candidates = self._apply_filters(processed_candidates, custom_filters)
+                    logger.info(f"Applied custom filters: {custom_filters}, resulting in {len(processed_candidates)} candidates")
+
                 # Log filtered count if filtering was applied
                 filters_applied = []
                 if published_to_vault is not None:
                     filters_applied.append("Vault")
                 if candidate_type:
                     filters_applied.append(f"Type={candidate_type}")
+                if custom_filters:
+                    filters_applied.append("Custom")
 
                 if filters_applied:
                     logger.info(f"Filtered to {len(processed_candidates)} candidates from {len(candidates)} total (filters: {', '.join(filters_applied)})")

@@ -36,6 +36,7 @@ from langgraph.graph import StateGraph, END
 
 from well_shared.cache.redis_manager import RedisCacheManager
 from app.config import PRIVACY_MODE
+from app.utils.anonymizer import anonymize_candidate_data
 
 
 # State definition for LangGraph
@@ -71,17 +72,6 @@ EXECUTIVE_KEYWORDS = [
 
 class VaultAlertsGenerator:
     """Generate vault candidate alerts using LangGraph 4-agent workflow."""
-
-    # Company anonymization mapping for privacy (identical to TalentWellCurator)
-    FIRM_TYPE_MAP = {
-        'wirehouse': ['Merrill Lynch', 'Morgan Stanley', 'Wells Fargo', 'UBS', 'Raymond James'],
-        'ria': ['Nuance Investments', 'Gottfried & Somberg', 'Fisher Investments', 'Edelman Financial'],
-        'bank': ['JPMorgan', 'Bank of America', 'Wells Fargo Advisors', 'Citigroup'],
-        'insurance': ['Northwestern Mutual', 'MassMutual', 'New York Life', 'Prudential'],
-        'law_firm': ['Holland & Knight', 'Baker McKenzie', 'DLA Piper', 'K&L Gates', 'LLP', 'PC', 'Attorneys', 'Law'],
-        'accounting': ['Deloitte', 'PwC', 'EY', 'KPMG', 'Grant Thornton'],
-        'consulting': ['McKinsey', 'BCG', 'Bain', 'Accenture', 'Deloitte Consulting']
-    }
 
     def __init__(self, database_url: str = None, redis_connection: str = None):
         """
@@ -442,7 +432,7 @@ class VaultAlertsGenerator:
 
             # **ANONYMIZE ALL CANDIDATES** immediately after loading from database
             if PRIVACY_MODE:
-                all_candidates = [self._anonymize_candidate(c) for c in all_candidates]
+                all_candidates = [anonymize_candidate_data(c) for c in all_candidates]
 
             # Compensation range filtering (post-query parsing)
             if min_comp is not None or max_comp is not None:
@@ -924,163 +914,3 @@ Return ONLY valid JSON with 5-6 bullets. LAST bullet MUST be availability + comp
         else:
             return "Advisor Candidate Alert"
 
-    # -------------------------------------------------------------------------
-    # Anonymization Helper Methods
-    # -------------------------------------------------------------------------
-
-    def _parse_aum(self, aum_str: str) -> float:
-        """
-        Parse AUM string to float value in dollars.
-        Examples: "$1.5B" -> 1500000000, "$500M" -> 500000000, "$100K" -> 100000
-        """
-        if not aum_str:
-            return 0.0
-
-        # Remove $ and commas, clean up spaces
-        cleaned = aum_str.replace('$', '').replace(',', '').strip()
-
-        # Pattern to extract number and unit
-        pattern = r'(\d+(?:\.\d+)?)\s*([BMKbmk])?'
-        match = re.match(pattern, cleaned)
-
-        if not match:
-            return 0.0
-
-        amount = float(match.group(1))
-        unit = match.group(2)
-
-        if unit:
-            unit = unit.upper()
-            multipliers = {
-                'B': 1_000_000_000,
-                'M': 1_000_000,
-                'K': 1_000
-            }
-            return amount * multipliers.get(unit, 1)
-
-        return amount
-
-    def _round_aum_for_privacy(self, aum_value: float) -> str:
-        """
-        Round AUM to broad ranges with + suffix for privacy.
-
-        Examples: $1.5B → "$1B+ AUM", $750M → "$500M+ AUM"
-        """
-        if aum_value >= 1_000_000_000:  # $1B+
-            billions = int(aum_value / 1_000_000_000)
-            return f"${billions}B+ AUM"
-        elif aum_value >= 100_000_000:  # $100M - $999M
-            hundreds = int(aum_value / 100_000_000) * 100
-            return f"${hundreds}M+ AUM"
-        elif aum_value >= 10_000_000:  # $10M - $99M
-            tens = int(aum_value / 10_000_000) * 10
-            return f"${tens}M+ AUM"
-        else:
-            return ""  # Too small to display (identifying)
-
-    def _anonymize_company(self, company_name: str, aum: Optional[float] = None) -> str:
-        """
-        Replace firm names with generic descriptors for privacy.
-        Prevents candidate identification through company name.
-        """
-        if not company_name or company_name == "Unknown":
-            return "Not disclosed"
-
-        # Check against known firm types
-        for firm_type, firms in self.FIRM_TYPE_MAP.items():
-            if any(firm.lower() in company_name.lower() for firm in firms):
-                if firm_type == 'wirehouse':
-                    return "Major wirehouse"
-                elif firm_type == 'ria':
-                    # Use AUM to distinguish size if available
-                    if aum and aum > 1_000_000_000:  # $1B+
-                        return "Large RIA"
-                    else:
-                        return "Mid-sized RIA"
-                elif firm_type == 'bank':
-                    return "National bank"
-                elif firm_type == 'insurance':
-                    return "Insurance brokerage"
-                elif firm_type == 'law_firm':
-                    return "National law firm"
-                elif firm_type == 'accounting':
-                    return "Major accounting firm"
-                elif firm_type == 'consulting':
-                    return "Management consulting firm"
-
-        # Generic fallback based on AUM
-        if aum:
-            if aum > 500_000_000:  # $500M+
-                return "Large wealth management firm"
-            else:
-                return "Boutique advisory firm"
-
-        return "Advisory firm"
-
-    def _anonymize_candidate(self, candidate: dict) -> dict:
-        """
-        Anonymize candidate data before GPT-5 processing with audit logging.
-
-        Anonymization rules:
-        - Company names → Generic firm types (e.g., "Major wirehouse", "Large RIA")
-        - AUM values → Rounded ranges (e.g., "$1B+ AUM", "$500M+ AUM")
-        - Production → Rounded ranges
-        - Keep: Title, years experience, licenses, designations, location (city/state)
-        - Remove: Specific firm names, exact compensation, unique identifiers
-
-        Logs all anonymization operations for compliance audit trail.
-        """
-        import logging
-        logger = logging.getLogger(__name__)
-
-        twav = candidate.get('twav_number', 'UNKNOWN')
-        changes = []  # Track what was anonymized for audit log
-
-        anon_candidate = candidate.copy()
-
-        # Parse AUM for privacy-aware company anonymization
-        parsed_aum = None
-        if candidate.get('aum'):
-            parsed_aum = self._parse_aum(str(candidate['aum']))
-
-        # Anonymize company name
-        if candidate.get('firm'):
-            original_firm = candidate['firm']
-            anon_candidate['firm'] = self._anonymize_company(candidate['firm'], parsed_aum)
-
-            # Log if changed (track for audit)
-            if original_firm != anon_candidate['firm']:
-                changes.append(f"firm: '{original_firm}' → '{anon_candidate['firm']}'")
-
-        # Round AUM to privacy ranges
-        if parsed_aum and parsed_aum > 0:
-            original_aum = candidate.get('aum')
-            anon_candidate['aum'] = self._round_aum_for_privacy(parsed_aum)
-
-            # Log if changed
-            if original_aum != anon_candidate['aum']:
-                changes.append(f"aum: '{original_aum}' → '{anon_candidate['aum']}'")
-
-        # Round production to ranges (if present)
-        if candidate.get('production'):
-            original_production = candidate['production']
-
-            # Extract numeric value from production string
-            prod_match = re.search(r'\$?(\d+(?:\.\d+)?)\s*([BMKbmk])?', str(candidate['production']))
-            if prod_match:
-                prod_value = self._parse_aum(candidate['production'])
-                if prod_value >= 1_000_000:
-                    prod_rounded = int(prod_value / 100_000) * 100_000
-                    anon_candidate['production'] = f"${prod_rounded // 1_000}K+" if prod_rounded < 1_000_000 else f"${prod_rounded // 1_000_000}M+"
-
-                    # Log if changed
-                    if original_production != anon_candidate['production']:
-                        changes.append(f"production: '{original_production}' → '{anon_candidate['production']}'")
-
-        # Write audit log entry if any changes were made
-        if changes:
-            logger.info(f"🔐 Anonymized {twav}: {', '.join(changes)}")
-        else:
-            logger.debug(f"🔐 Anonymized {twav}: No changes needed (already anonymized or no sensitive data)")
-
-        return anon_candidate

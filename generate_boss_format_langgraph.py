@@ -35,6 +35,7 @@ load_dotenv('.env.local')
 # Redis cache manager
 sys.path.insert(0, '/home/romiteld/Development/Desktop_Apps/outlook/well_shared')
 from well_shared.cache.redis_manager import RedisCacheManager
+from app.utils.anonymizer import anonymize_candidate_data
 
 # Privacy mode flag
 PRIVACY_MODE = os.getenv('PRIVACY_MODE', 'true').lower() == 'true'
