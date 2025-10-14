@@ -25,7 +25,7 @@ from typing import List, Dict, Any
 project_root = Path(__file__).parent
 sys.path.insert(0, str(project_root))
 
-from app.jobs.anonymizer import CandidateAnonymizer
+from app.utils.anonymizer import anonymize_candidate_data
 
 
 class AnonymizerTestSuite:
@@ -34,7 +34,6 @@ class AnonymizerTestSuite:
     def __init__(self, database_url: str):
         """Initialize test suite with database connection."""
         self.database_url = database_url
-        self.anonymizer = CandidateAnonymizer()
         self.test_results = []
 
     async def run_tests(self, sample_size: int = 10) -> Dict[str, Any]:
@@ -149,7 +148,7 @@ class AnonymizerTestSuite:
         original = candidate.copy()
 
         # Apply anonymization
-        anonymized = self.anonymizer.anonymize_candidate(candidate)
+        anonymized = anonymize_candidate_data(candidate)
 
         # Check each rule
         failures = []

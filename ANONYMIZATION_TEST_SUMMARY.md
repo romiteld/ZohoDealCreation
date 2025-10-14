@@ -206,12 +206,12 @@ AUM_RANGES = [
 
 ## Files Created
 
-### 1. `/app/jobs/anonymizer.py`
-**Core anonymization module** with:
-- `CandidateAnonymizer` class
-- 6 anonymization methods (_anonymize_firm, _anonymize_aum, etc.)
+### 1. `/app/utils/anonymizer.py`
+**Core anonymization module (CANONICAL)** with:
+- Function-based API: `anonymize_candidate_data(candidate: Dict) -> Dict`
+- Comprehensive anonymization logic for firm, AUM, location, education
 - Comprehensive firm/location mappings
-- Convenience function: `anonymize_candidate(candidate_dict)`
+- Privacy-first data transformation
 
 ### 2. `/test_anonymizer.py`
 **Test suite** with:
@@ -229,13 +229,10 @@ AUM_RANGES = [
 ## Usage Example
 
 ```python
-from app.jobs.anonymizer import CandidateAnonymizer
-
-# Initialize anonymizer
-anonymizer = CandidateAnonymizer()
+from app.utils.anonymizer import anonymize_candidate_data
 
 # Anonymize candidate
-anonymized = anonymizer.anonymize_candidate({
+anonymized = anonymize_candidate_data({
     'twav_number': 'TWAV117895',
     'firm': 'Avantia: A Family Office',
     'aum': '300000000',
@@ -257,10 +254,12 @@ anonymized = anonymizer.anonymize_candidate({
 ## Integration Points
 
 ### 1. Vault Alerts Generator
-The anonymizer is already integrated into `vault_alerts_generator.py`:
+The anonymizer is integrated into `vault_alerts_generator.py`:
 ```python
+from app.utils.anonymizer import anonymize_candidate_data
+
 if PRIVACY_MODE:
-    all_candidates = [self._anonymize_candidate(c) for c in all_candidates]
+    all_candidates = [anonymize_candidate_data(c) for c in all_candidates]
 ```
 
 ### 2. Weekly Digests

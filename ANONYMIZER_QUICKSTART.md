@@ -5,10 +5,10 @@
 ### Basic Usage
 
 ```python
-from app.jobs.anonymizer import anonymize_candidate
+from app.utils.anonymizer import anonymize_candidate_data
 
 # Anonymize a single candidate
-anonymized = anonymize_candidate({
+anonymized = anonymize_candidate_data({
     'firm': 'Merrill Lynch',
     'aum': '$1.68B',
     'city': 'Frisco',
@@ -29,13 +29,12 @@ anonymized = anonymize_candidate({
 ### Bulk Anonymization
 
 ```python
-from app.jobs.anonymizer import CandidateAnonymizer
+from app.utils.anonymizer import anonymize_candidate_data
 
-anonymizer = CandidateAnonymizer()
 candidates = load_candidates_from_db()
 
 anonymized_candidates = [
-    anonymizer.anonymize_candidate(candidate)
+    anonymize_candidate_data(candidate)
     for candidate in candidates
 ]
 ```
@@ -164,15 +163,13 @@ if PRIVACY_MODE:
 ### 2. Weekly Digests
 
 ```python
-from app.jobs.anonymizer import CandidateAnonymizer
-
-anonymizer = CandidateAnonymizer()
+from app.utils.anonymizer import anonymize_candidate_data
 
 # Load candidates
 candidates = await load_vault_candidates()
 
 # Anonymize for privacy-safe digest
-anonymized = [anonymizer.anonymize_candidate(c) for c in candidates]
+anonymized = [anonymize_candidate_data(c) for c in candidates]
 
 # Generate digest
 digest_html = generate_digest(anonymized)
@@ -181,7 +178,7 @@ digest_html = generate_digest(anonymized)
 ### 3. Teams Bot Responses
 
 ```python
-from app.jobs.anonymizer import anonymize_candidate
+from app.utils.anonymizer import anonymize_candidate_data
 
 @router.post("/teams/query")
 async def query_candidates(query: str):
@@ -190,7 +187,7 @@ async def query_candidates(query: str):
 
     # Anonymize results for privacy
     anonymized_results = [
-        anonymize_candidate(candidate)
+        anonymize_candidate_data(candidate)
         for candidate in results
     ]
 
@@ -224,11 +221,10 @@ async def query_candidates(query: str):
 ### Check Anonymization Quality
 
 ```python
-from app.jobs.anonymizer import CandidateAnonymizer
+from app.utils.anonymizer import anonymize_candidate_data
 
-anonymizer = CandidateAnonymizer()
 original = load_candidate('TWAV117895')
-anonymized = anonymizer.anonymize_candidate(original)
+anonymized = anonymize_candidate_data(original)
 
 # Verify firm anonymization
 assert 'Avantia' not in anonymized['firm']
@@ -319,7 +315,7 @@ def _anonymize_education(self, education: str) -> str:
 
 ## 📚 Related Files
 
-- `/app/jobs/anonymizer.py` - Core anonymization module
+- `/app/utils/anonymizer.py` - Core anonymization module (CANONICAL)
 - `/test_anonymizer.py` - Test suite
 - `/anonymization_test_report.txt` - Latest test results
 - `/ANONYMIZATION_TEST_SUMMARY.md` - Detailed test summary
@@ -329,6 +325,6 @@ def _anonymize_education(self, education: str) -> str:
 
 For questions or issues:
 1. Check test report: `anonymization_test_report.txt`
-2. Review code: `app/jobs/anonymizer.py`
+2. Review code: `app/utils/anonymizer.py`
 3. Run test suite: `python3 test_anonymizer.py`
 4. Contact development team

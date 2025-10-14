@@ -111,139 +111,6 @@ def get_alert_type(title: str) -> str:
     else:
         return "Advisor Candidate Alert"
 
-# Company anonymization mapping for privacy
-FIRM_TYPE_MAP = {
-    'wirehouse': ['Merrill Lynch', 'Morgan Stanley', 'Wells Fargo', 'UBS', 'Raymond James'],
-    'ria': ['Nuance Investments', 'Gottfried & Somberg', 'Fisher Investments', 'Edelman Financial'],
-    'bank': ['JPMorgan', 'Bank of America', 'Wells Fargo Advisors', 'Citigroup'],
-    'insurance': ['Northwestern Mutual', 'MassMutual', 'New York Life', 'Prudential'],
-    'law_firm': ['Holland & Knight', 'Baker McKenzie', 'DLA Piper', 'K&L Gates', 'LLP', 'PC', 'Attorneys', 'Law'],
-    'accounting': ['Deloitte', 'PwC', 'EY', 'KPMG', 'Grant Thornton'],
-    'consulting': ['McKinsey', 'BCG', 'Bain', 'Accenture', 'Deloitte Consulting']
-}
-
-def parse_aum(aum_str: str) -> float:
-    """Parse AUM string to float value in dollars."""
-    if not aum_str:
-        return 0.0
-
-    # Remove $ and commas, clean up spaces
-    cleaned = aum_str.replace('$', '').replace(',', '').strip()
-
-    # Pattern to extract number and unit
-    pattern = r'(\d+(?:\.\d+)?)\s*([BMKbmk])?'
-    import re
-    match = re.match(pattern, cleaned)
-
-    if not match:
-        return 0.0
-
-    amount = float(match.group(1))
-    unit = match.group(2)
-
-    if unit:
-        unit = unit.upper()
-        multipliers = {
-            'B': 1_000_000_000,
-            'M': 1_000_000,
-            'K': 1_000
-        }
-        return amount * multipliers.get(unit, 1)
-
-    return amount
-
-def round_aum_for_privacy(aum_value: float) -> str:
-    """Round AUM to broad ranges with + suffix for privacy."""
-    if aum_value >= 1_000_000_000:  # $1B+
-        billions = int(aum_value / 1_000_000_000)
-        return f"${billions}B+ AUM"
-    elif aum_value >= 100_000_000:  # $100M - $999M
-        hundreds = int(aum_value / 100_000_000) * 100
-        return f"${hundreds}M+ AUM"
-    elif aum_value >= 10_000_000:  # $10M - $99M
-        tens = int(aum_value / 10_000_000) * 10
-        return f"${tens}M+ AUM"
-    else:
-        return ""  # Too small to display (identifying)
-
-def anonymize_company(company_name: str, aum: float = None) -> str:
-    """
-    Replace firm names with generic descriptors for privacy.
-    Prevents candidate identification through company name.
-    """
-    if not company_name or company_name == "Unknown":
-        return "Not disclosed"
-
-    # Check against known firm types
-    for firm_type, firms in FIRM_TYPE_MAP.items():
-        if any(firm.lower() in company_name.lower() for firm in firms):
-            if firm_type == 'wirehouse':
-                return "Major wirehouse"
-            elif firm_type == 'ria':
-                # Use AUM to distinguish size if available
-                if aum and aum > 1_000_000_000:  # $1B+
-                    return "Large RIA"
-                else:
-                    return "Mid-sized RIA"
-            elif firm_type == 'bank':
-                return "National bank"
-            elif firm_type == 'insurance':
-                return "Insurance brokerage"
-            elif firm_type == 'law_firm':
-                return "National law firm"
-            elif firm_type == 'accounting':
-                return "Major accounting firm"
-            elif firm_type == 'consulting':
-                return "Management consulting firm"
-
-    # Generic fallback based on AUM
-    if aum:
-        if aum > 500_000_000:  # $500M+
-            return "Large wealth management firm"
-        else:
-            return "Boutique advisory firm"
-
-    return "Advisory firm"
-
-def anonymize_candidate_data(candidate: dict) -> dict:
-    """
-    Anonymize candidate data before GPT-5 processing.
-
-    Anonymization rules:
-    - Company names → Generic firm types (e.g., "Major wirehouse", "Large RIA")
-    - AUM values → Rounded ranges (e.g., "$1B+ AUM", "$500M+ AUM")
-    - Production → Rounded ranges
-    - Keep: Title, years experience, licenses, designations, location (city/state)
-    - Remove: Specific firm names, exact compensation, unique identifiers
-    """
-    anon_candidate = candidate.copy()
-
-    # Parse AUM for privacy-aware company anonymization
-    parsed_aum = None
-    if candidate.get('aum'):
-        parsed_aum = parse_aum(str(candidate['aum']))
-
-    # Anonymize company name
-    if PRIVACY_MODE and candidate.get('firm'):
-        anon_candidate['firm'] = anonymize_company(candidate['firm'], parsed_aum)
-
-    # Round AUM to privacy ranges
-    if PRIVACY_MODE and parsed_aum and parsed_aum > 0:
-        anon_candidate['aum'] = round_aum_for_privacy(parsed_aum)
-
-    # Round production to ranges (if present)
-    if PRIVACY_MODE and candidate.get('production'):
-        # Extract numeric value from production string
-        import re
-        prod_match = re.search(r'\$?(\d+(?:\.\d+)?)\s*([BMKbmk])?', str(candidate['production']))
-        if prod_match:
-            prod_value = parse_aum(candidate['production'])
-            if prod_value >= 1_000_000:
-                prod_rounded = int(prod_value / 100_000) * 100_000
-                anon_candidate['production'] = f"${prod_rounded // 1_000}K+" if prod_rounded < 1_000_000 else f"${prod_rounded // 1_000_000}M+"
-
-    return anon_candidate
-
 def post_process_bullets(bullets: list) -> list:
     """
     Post-process GPT-5 generated bullets to remove any leaked confidential information.
@@ -262,20 +129,28 @@ def post_process_bullets(bullets: list) -> list:
 
     import re
 
-    # Build comprehensive firm name patterns from FIRM_TYPE_MAP
-    all_firms = []
-    for firms_list in FIRM_TYPE_MAP.values():
-        all_firms.extend(firms_list)
-
-    # Additional known firms not in type map
-    additional_firms = [
+    # Build comprehensive firm name patterns for post-processing
+    all_firms = [
+        # Wirehouses
+        'Merrill Lynch', 'Morgan Stanley', 'Wells Fargo', 'UBS', 'Raymond James',
+        # RIAs
+        'Nuance Investments', 'Gottfried & Somberg', 'Fisher Investments', 'Edelman Financial',
+        # Banks
+        'JPMorgan', 'Bank of America', 'Wells Fargo Advisors', 'Citigroup',
+        # Insurance
+        'Northwestern Mutual', 'MassMutual', 'New York Life', 'Prudential',
+        # Law firms
+        'Holland & Knight', 'Baker McKenzie', 'DLA Piper', 'K&L Gates',
+        # Accounting
+        'Deloitte', 'PwC', 'EY', 'KPMG', 'Grant Thornton',
+        # Consulting
+        'McKinsey', 'BCG', 'Bain', 'Accenture', 'Deloitte Consulting',
+        # Additional known firms
         'TD Ameritrade', 'Schwab', 'Charles Schwab', 'Fidelity', 'Vanguard',
-        'Edward Jones', 'LPL Financial', 'Ameriprise', 'Northwestern',
-        'Mass Mutual', 'Prudential', 'New York Life', 'Cresset', 'USAA',
+        'Edward Jones', 'LPL Financial', 'Ameriprise', 'Cresset', 'USAA',
         'Regions Bank', 'Truist', 'PNC', 'US Bank', 'Citibank',
         'Chase', 'Goldman Sachs', 'Credit Suisse', 'Deutsche Bank'
     ]
-    all_firms.extend(additional_firms)
 
     # University patterns
     universities = [
