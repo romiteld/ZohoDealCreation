@@ -2338,7 +2338,7 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
         deal_id = str(uuid.uuid4())  # Generate new deal ID
         deal_name = request.subject or "Unknown Deal"
         account_name = enhanced_data.company_name or "Unknown Company"
-        owner_email = os.environ.get('ZOHO_DEFAULT_OWNER_EMAIL', 'daniel.romitelli@emailthewell.com')
+        owner_email = os.environ.get('ZOHO_DEFAULT_OWNER_EMAIL', 'steve.perry@emailthewell.com')
         
         # If dry_run, return preview without creating Zoho records
         if getattr(request, 'dry_run', False):

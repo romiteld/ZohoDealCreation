@@ -48,7 +48,7 @@ az containerapp create \
     MICROSOFT_APP_PASSWORD=secretref:bot-app-password \
     MICROSOFT_APP_TENANT_ID=29ee1479-b5f7-48c5-b665-7de9a8a9033e \
     ZOHO_OAUTH_SERVICE_URL=https://well-zoho-oauth-v2.azurewebsites.net \
-    ZOHO_DEFAULT_OWNER_EMAIL=daniel.romitelli@emailthewell.com \
+    ZOHO_DEFAULT_OWNER_EMAIL=steve.perry@emailthewell.com \
     ZOHO_VAULT_VIEW_ID=6221978000090941003 \
     ACS_EMAIL_CONNECTION_STRING="endpoint=https://well-communication-services.unitedstates.communication.azure.com/;accesskey=FPOJad6EvdZwIeEjBTMykP7dn4B1M6NBNbuKqnuVWu6M3s8Rn4FMJQQJ99BIACULyCpW8ypnAAAAAZCS8yrU" \
     SMTP_FROM_EMAIL=noreply@emailthewell.com \
