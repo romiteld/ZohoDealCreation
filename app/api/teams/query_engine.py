@@ -1,9 +1,10 @@
 """
 Natural Language Query Engine for Teams Bot.
 
-Provides intelligent query processing with tiered access control:
-- Executive users: Full access to all business data
-- Regular users: Filtered by owner_email to their own records
+Provides intelligent query processing with role-based financial data access:
+- ALL users: Full access to all business data (no owner filtering)
+- Executive users (Steve, Brandon, Daniel): See all fields including financial data
+- Regular recruiters: See all data but financial fields are redacted
 """
 import logging
 import json
@@ -11,10 +12,11 @@ import os
 from typing import Dict, Any, Optional, List, Tuple
 from datetime import datetime, timedelta, timezone
 import asyncpg
-from openai import AsyncOpenAI
+from openai import AsyncAzureOpenAI
 
 from app.config.candidate_keywords import normalize_candidate_type
 from app.integrations import ZohoApiClient
+from app.api.teams.zoho_module_registry import get_module_registry, is_executive
 
 logger = logging.getLogger(__name__)
 
@@ -22,9 +24,14 @@ class QueryEngine:
     """Natural language query engine for Teams Bot - all users have full access."""
 
     def __init__(self):
-        """Initialize query engine with OpenAI client."""
-        self.client = AsyncOpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-        self.model = "gpt-5-mini"  # Fast model for query classification
+        """Initialize query engine with Azure OpenAI client."""
+        # Use Azure OpenAI (not regular OpenAI API)
+        self.client = AsyncAzureOpenAI(
+            api_key=os.getenv("AZURE_OPENAI_KEY"),
+            api_version=os.getenv("AZURE_OPENAI_API_VERSION", "2024-08-01-preview"),
+            azure_endpoint=os.getenv("AZURE_OPENAI_ENDPOINT")
+        )
+        self.model = os.getenv("AZURE_OPENAI_DEPLOYMENT", "gpt-5-mini")
         self.redis_manager = None
         self._initialized = False
 
@@ -53,13 +60,26 @@ class QueryEngine:
             # Don't raise - allow degraded operation
             self._initialized = True  # Mark as initialized to prevent retry loops
 
+    def _check_user_role(self, user_email: str) -> str:
+        """
+        Check if user is executive (full financial access) or recruiter (no financial data).
+
+        Args:
+            user_email: User's email address
+
+        Returns:
+            "executive" if Steve/Brandon/Daniel, "recruiter" otherwise
+        """
+        return "executive" if is_executive(user_email) else "recruiter"
+
     async def process_query(
         self,
         query: str,
         user_email: str,
         db: asyncpg.Connection = None,  # Optional for backward compatibility
         conversation_context: Optional[str] = None,  # Conversation history for context
-        override_intent: Optional[Dict[str, Any]] = None  # NEW: Skip classification if provided
+        override_intent: Optional[Dict[str, Any]] = None,  # Skip classification if provided
+        activity: Optional[Any] = None  # Bot Framework Activity for proactive messaging
     ) -> Dict[str, Any]:
         """
         Process natural language query using ZohoClient - all users have full access.
@@ -70,6 +90,7 @@ class QueryEngine:
             db: Database connection (no longer used, kept for compatibility)
             conversation_context: Optional conversation history for context-aware classification
             override_intent: Optional intent to skip classification (used after clarification)
+            activity: Optional Bot Framework Activity for proactive messaging support
 
         Returns:
             Dict with:
@@ -94,10 +115,21 @@ class QueryEngine:
             if intent.get("intent_type") == "transcript_summary":
                 return await self._handle_transcript_summary(intent)
 
-            # Step 3: No owner filtering - all users see all data
-            intent["owner_filter"] = None
+            # Step 2.5: Handle email query requests separately
+            if intent.get("intent_type") == "email_query":
+                return await self._handle_email_query(intent, user_email)
 
-            # Step 4: Build and execute Zoho query
+            # Step 2.6: Handle marketable candidates requests separately
+            if intent.get("intent_type") == "marketable_candidates":
+                return await self._handle_marketable_candidates(intent, user_email, activity)
+
+            # Step 3: Determine user role for financial data filtering
+            user_role = self._check_user_role(user_email)
+            intent["user_role"] = user_role
+            intent["user_email"] = user_email  # Pass for redaction
+            logger.info(f"User {user_email} role: {user_role}")
+
+            # Step 4: Build and execute Zoho query (NO owner filtering)
             results, _ = await self._build_query(intent)
             if intent.get("validation_error"):
                 logger.info("Validation error detected during query build; returning user message")
@@ -160,30 +192,66 @@ class QueryEngine:
                 "filters": {}
             }, 0.3
 
-        system_prompt = """You are a query classifier for a recruitment CRM system.
+        # Dynamically load all 68 Zoho modules from registry
+        registry = get_module_registry()
+        queryable_modules = registry.get_queryable_modules()
+
+        # Build module descriptions
+        module_descriptions = []
+        for module_name in queryable_modules[:20]:  # Show top 20 to avoid token limits
+            meta = registry.get_module_metadata(module_name)
+            singular = meta.get("singular_label", module_name)
+            plural = meta.get("plural_label", module_name)
+            field_count = len(meta.get("fields", {}))
+            module_descriptions.append(f"- {module_name} ({singular}/{plural}): {field_count} fields available")
+
+        # Add special data sources
+        module_descriptions.extend([
+            "- emails: User inbox via Microsoft Graph (subject, from_address, body, attachments)",
+            "\nNote: 68 total Zoho modules available - use module aliases like 'candidates'→Leads, 'jobs'→Jobs, 'submissions'→Submissions"
+        ])
+
+        available_modules_text = "\n".join(module_descriptions)
+
+        system_prompt = f"""You are a query classifier for a recruitment CRM system with access to ALL Zoho CRM modules.
 Classify the user's intent and extract key entities.
 
-Available data sources:
-- vault_candidates: Published candidates with Zoom interviews (candidate_name, candidate_locator, job_title, location, date_published, transcript_url, meeting_id)
-- deals: Candidate deals in pipeline (deal_name, stage, contact_name, account_name, owner_email, created_at, modified_at)
-- meetings: Events and meetings (subject, meeting_date, attendees, owner_email, related_to, location, created_at)
+Available data sources (top 20 shown, 68 total available):
+{available_modules_text}
+
+Common module aliases (user-friendly names):
+- candidates/candidate → Leads
+- jobs/job/positions → Jobs
+- submissions/submission → Submissions
+- contacts/contact → Contacts
+- accounts/companies → Accounts
+- deals/opportunities → Deals
+- tasks/todos → Tasks
+- events/meetings → Events
+- calls → Calls
+- invoices/bills → Invoices
+- payments → Payments
+- campaigns → Campaigns
 
 Pipeline Stages (for deals):
 - Lead, Engaged, Meeting Booked, Meetings Completed, Awaiting Offer, Offer Extended, Closed Won, Closed Lost
 
 Intent Types:
-- count: Count records ("how many interviews", "total deals", "how many meetings")
-- list: Show records ("show me candidates", "list deals", "list meetings")
-- aggregate: Group by field ("breakdown by stage", "deals by owner")
-- search: Find specific records ("find John Smith", "deals with Morgan Stanley", "meetings with Goldman Sachs")
+- count: Count records ("how many interviews", "total deals", "how many meetings", "how many emails")
+- list: Show records ("show me candidates", "list deals", "list meetings", "show my emails")
+- aggregate: Group by field ("breakdown by stage", "deals by owner", "emails by sender")
+- search: Find specific records ("find John Smith", "deals with Morgan Stanley", "meetings with Goldman Sachs", "emails from recruiter@company.com")
 - transcript_summary: Zoom interview summary for ONE specific candidate ("summarize interview with John Smith")
+- email_query: Search user's inbox via Microsoft Graph ("show my recent emails", "emails about candidates", "find emails from Morgan Stanley")
+- marketable_candidates: Find top N most marketable vault candidates ("give me the 10 most marketable candidates", "top 5 marketable advisors", "best candidates from the vault")
 
 IMPORTANT: "summarize candidates" or "summarize advisors" = list intent (not transcript_summary)
 
 Return JSON with:
 {
-    "intent_type": "count|list|aggregate|search|transcript_summary",
-    "table": "vault_candidates|deals|meetings",
+    "intent_type": "count|list|aggregate|search|transcript_summary|email_query|marketable_candidates|query_module",
+    "table": "Leads|Jobs|Submissions|Contacts|Accounts|Deals|Tasks|Events|Calls|Invoices|Payments|Campaigns|<any_zoho_module>|emails",
+    "module_alias": "user's friendly name if provided (e.g., 'candidates', 'jobs')",
     "entities": {
         "timeframe": "last week|this month|Q4|September|etc",
         "entity_name": "person/company name",
@@ -191,7 +259,11 @@ Return JSON with:
         "candidate_name": "if specific candidate name",
         "candidate_locator": "if TWAV ID mentioned (e.g., TWAV118252)",
         "meeting_id": "if Zoom meeting ID",
-        "stage": "pipeline stage if mentioned"
+        "stage": "pipeline stage if mentioned",
+        "email_sender": "if filtering by email sender",
+        "email_subject": "if searching by subject",
+        "hours_back": 24,  // Hours to look back for emails (default: 24)
+        "limit": 10  // For marketable_candidates: number of candidates to return (default: 10)
     },
     "filters": {
         "stage": "pipeline stage filter",
@@ -211,6 +283,38 @@ Examples:
 - "find deals with Goldman Sachs" → intent_type: "search", table: "deals", search_terms: ["Goldman Sachs"]
 - "summarize financial advisor candidates" → intent_type: "list", table: "vault_candidates", candidate_type: "advisors"
 - "summarize interview with John Smith" → intent_type: "transcript_summary", candidate_name: "John Smith"
+- "show my recent emails" → intent_type: "email_query", table: "emails", hours_back: 24
+- "emails about candidates from last week" → intent_type: "email_query", table: "emails", search_terms: ["candidates"], timeframe: "last week"
+- "find emails from Morgan Stanley" → intent_type: "email_query", table: "emails", email_sender: "Morgan Stanley"
+- "give me the 10 most marketable candidates" → intent_type: "marketable_candidates", table: "vault_candidates", limit: 10
+- "top 5 marketable advisors from the vault" → intent_type: "marketable_candidates", table: "vault_candidates", limit: 5
+- "show me the best candidates" → intent_type: "marketable_candidates", table: "vault_candidates", limit: 10
+
+NEW MODULES (use exact module names or resolve aliases):
+- "show me jobs in Texas" → intent_type: "list", table: "Jobs", search_terms: ["Texas"]
+- "find open positions" → intent_type: "list", table: "Jobs", filters: {"status": "Open"}
+- "submissions for TWAV109867" → intent_type: "search", table: "Submissions", search_terms: ["TWAV109867"]
+- "pending submissions" → intent_type: "list", table: "Submissions", filters: {"status": "Pending"}
+- "contacts at Morgan Stanley" → intent_type: "search", table: "Contacts", search_terms: ["Morgan Stanley"]
+- "show me accounts" → intent_type: "list", table: "Accounts"
+- "invoices from last quarter" → intent_type: "list", table: "Invoices", timeframe: "Q4"
+- "unpaid invoices" → intent_type: "list", table: "Invoices", filters: {"status": "Unpaid"}
+- "my pending tasks" → intent_type: "list", table: "Tasks", filters: {"status": "Pending"}
+- "high priority tasks" → intent_type: "list", table: "Tasks", filters: {"priority": "High"}
+- "active campaigns" → intent_type: "list", table: "Campaigns", filters: {"status": "Active"}
+- "payments from last month" → intent_type: "list", table: "Payments", timeframe: "last month"
+
+OWNER/EMPLOYEE NAME RECOGNITION:
+When a query mentions a person's name (e.g., "Jay", "Steve", "Brandon", "Daniel"), treat it as an owner/person search:
+- "How many deals has Jay made?" → intent_type: "count", table: "Deals", search_terms: ["Jay"], entity_name: "Jay"
+- "Show me Jay's jobs" → intent_type: "list", table: "Jobs", search_terms: ["Jay"], entity_name: "Jay"
+- "Submissions by Brandon" → intent_type: "list", table: "Submissions", search_terms: ["Brandon"], entity_name: "Brandon"
+- "Daniel's deals" → intent_type: "list", table: "Deals", search_terms: ["Daniel"], entity_name: "Daniel"
+
+IMPORTANT:
+1. For any module query, resolve user-friendly aliases to official module names using the mapping above
+2. When a person's name appears in the query, add it to both search_terms and entity_name for owner filtering
+3. Be confident (>0.7) when recognizing common first names as employee references
 """
 
         # Build user prompt with conversation context if available
@@ -270,7 +374,8 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
         """
         intent_type = intent.get("intent_type", "list")
         filters = intent.get("filters", {})
-        owner_filter = intent.get("owner_filter")
+        user_role = intent.get("user_role", "recruiter")  # For financial redaction
+        user_email = intent.get("user_email", "")  # For financial redaction
         table = intent.get("table", "vault_candidates")  # Determine which table to query
 
         zoho_client = ZohoApiClient()
@@ -285,9 +390,7 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
                 "limit": 500
             }
 
-            # Apply owner filtering for regular users (not executives)
-            if owner_filter:
-                deal_filters["owner_email"] = owner_filter
+            # NO owner filtering - all users see all deals
 
             # Parse timeframe entity and convert to dates
             if "timeframe" in entities and entities["timeframe"]:
@@ -370,9 +473,7 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
                 "limit": 500
             }
 
-            # Apply owner filtering for regular users (not executives)
-            if owner_filter:
-                meeting_filters["owner_email"] = owner_filter
+            # NO owner filtering - all users see all meetings
 
             # Parse timeframe entity and convert to dates
             if "timeframe" in entities and entities["timeframe"]:
@@ -440,16 +541,14 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
                 logger.error(f"Error querying Zoho meetings: {e}", exc_info=True)
                 return [], []
 
-        else:  # vault_candidates (default)
-            # Build Zoho query filters for candidates
+        elif table in ["vault_candidates", "vault", "candidates"]:  # vault_candidates
+            # Build Zoho API query filters for vault candidates (REAL-TIME DATA)
             zoho_filters = {
-                "published_to_vault": True,  # Always query vault
-                "limit": 500  # ✅ Handle all 144 vault candidates with headroom
+                "limit": 500,  # Fetch up to 500 candidates
+                "published_to_vault": True  # Only vault candidates
             }
 
-            # Apply owner filtering for regular users (not executives)
-            if owner_filter:
-                zoho_filters["owner"] = owner_filter
+            # NO owner filtering - all users see all vault candidates
 
             # Parse timeframe entity and convert to dates
             if "timeframe" in entities and entities["timeframe"]:
@@ -458,46 +557,58 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
                 # 7-day windows
                 if any(token in timeframe for token in ["7d", "last_week", "this_week"]):
-                    filters["created_after"] = (now - timedelta(days=7)).isoformat()
-                    filters["created_before"] = now.isoformat()
+                    zoho_filters["from_date"] = now - timedelta(days=7)
+                    zoho_filters["to_date"] = now
 
                 # 30-day windows
                 elif "30d" in timeframe:
-                    filters["created_after"] = (now - timedelta(days=30)).isoformat()
-                    filters["created_before"] = now.isoformat()
+                    zoho_filters["from_date"] = now - timedelta(days=30)
+                    zoho_filters["to_date"] = now
 
                 # Current month
                 elif "this_month" in timeframe:
-                    filters["created_after"] = now.replace(day=1, hour=0, minute=0, second=0).isoformat()
-                    filters["created_before"] = now.isoformat()
+                    zoho_filters["from_date"] = now.replace(day=1, hour=0, minute=0, second=0)
+                    zoho_filters["to_date"] = now
 
                 # Previous month
                 elif "last_month" in timeframe:
                     last_month = now.replace(day=1) - timedelta(days=1)
-                    filters["created_after"] = last_month.replace(day=1, hour=0, minute=0, second=0).isoformat()
-                    filters["created_before"] = last_month.replace(hour=23, minute=59, second=59).isoformat()
+                    zoho_filters["from_date"] = last_month.replace(day=1, hour=0, minute=0, second=0)
+                    zoho_filters["to_date"] = last_month.replace(hour=23, minute=59, second=59)
 
                 # Q4 (Oct-Dec)
                 elif "q4" in timeframe:
-                    filters["created_after"] = datetime(now.year, 10, 1).isoformat()
-                    filters["created_before"] = datetime(now.year, 12, 31, 23, 59, 59).isoformat()
+                    zoho_filters["from_date"] = datetime(now.year, 10, 1)
+                    zoho_filters["to_date"] = datetime(now.year, 12, 31, 23, 59, 59)
 
                 # Specific months
                 elif "september" in timeframe or "sep" in timeframe:
-                    filters["created_after"] = f"{now.year}-09-01"
-                    filters["created_before"] = f"{now.year}-09-30"
+                    zoho_filters["from_date"] = datetime(now.year, 9, 1)
+                    zoho_filters["to_date"] = datetime(now.year, 9, 30, 23, 59, 59)
                 elif "october" in timeframe or "oct" in timeframe:
-                    filters["created_after"] = f"{now.year}-10-01"
-                    filters["created_before"] = f"{now.year}-10-31"
+                    zoho_filters["from_date"] = datetime(now.year, 10, 1)
+                    zoho_filters["to_date"] = datetime(now.year, 10, 31, 23, 59, 59)
 
-            # Date filters
-            if "created_after" in filters:
-                zoho_filters["from_date"] = filters["created_after"]
+            # Date filters from SQL generation (override timeframe if present)
+            if "created_after" in filters and filters["created_after"]:
+                created_after = filters["created_after"]
+                if isinstance(created_after, str) and created_after.strip():
+                    # Handle ISO format with 'Z' suffix (replace with +00:00)
+                    created_after = created_after.replace('Z', '+00:00')
+                    zoho_filters["from_date"] = datetime.fromisoformat(created_after)
+                elif isinstance(created_after, datetime):
+                    zoho_filters["from_date"] = created_after
 
-            if "created_before" in filters:
-                zoho_filters["to_date"] = filters["created_before"]
+            if "created_before" in filters and filters["created_before"]:
+                created_before = filters["created_before"]
+                if isinstance(created_before, str) and created_before.strip():
+                    # Handle ISO format with 'Z' suffix (replace with +00:00)
+                    created_before = created_before.replace('Z', '+00:00')
+                    zoho_filters["to_date"] = datetime.fromisoformat(created_before)
+                elif isinstance(created_before, datetime):
+                    zoho_filters["to_date"] = created_before
 
-            # Candidate type filter (advisors, executives, global)
+            # Candidate type filter (advisors, c_suite, global)
             raw_candidate_type = entities.get("candidate_type")
             if isinstance(raw_candidate_type, list):
                 raw_candidate_type = raw_candidate_type[0] if raw_candidate_type else None
@@ -506,61 +617,187 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             if normalized_candidate_type:
                 if raw_candidate_type and raw_candidate_type != normalized_candidate_type:
                     logger.info(
-                        "Normalized candidate_type '%s' to '%s' for Zoho vault query",
+                        "Normalized candidate_type '%s' to '%s' for vault query",
                         raw_candidate_type,
                         normalized_candidate_type,
                     )
                 zoho_filters["candidate_type"] = normalized_candidate_type
-            elif raw_candidate_type:
-                logger.warning(
-                    "Ignoring unrecognized candidate_type '%s'; returning all vault candidates",
-                    raw_candidate_type,
-                )
+                logger.info(f"Filtering by candidate type: {normalized_candidate_type}")
 
-            # Candidate Locator ID filter (exact match, highest priority)
+            # Build custom filters for client-side filtering
+            custom_filters = {}
+
+            # Candidate Locator ID filter (TWAV number - exact match, highest priority)
             if "candidate_locator" in entities and entities["candidate_locator"]:
-                # Don't need large limit for exact ID match
-                zoho_filters["limit"] = 10
+                custom_filters["candidate_locator"] = entities["candidate_locator"].upper()
+                zoho_filters["limit"] = 10  # Don't need large limit for exact ID match
                 logger.info(f"Searching by Candidate Locator ID: {entities['candidate_locator']}")
 
-            # Increase limit if searching by name (need more candidates to search through)
+            # Candidate name filter (partial match)
             elif "entity_name" in entities or "candidate_name" in entities:
+                search_name = entities.get("entity_name") or entities.get("candidate_name")
+                custom_filters["candidate_name"] = search_name
                 zoho_filters["limit"] = 500  # Fetch more for name search
+                logger.info(f"Searching by candidate name: {search_name}")
+
+            # Location filter (city, state, or location)
+            if "location" in entities and entities["location"]:
+                custom_filters["location"] = entities["location"]
+
+            # Company/Firm filter
+            if "firm" in entities and entities["firm"]:
+                custom_filters["company_name"] = entities["firm"]
+
+            # Add custom filters if any
+            if custom_filters:
+                zoho_filters["custom_filters"] = custom_filters
 
             # Remove None values
             zoho_filters = {k: v for k, v in zoho_filters.items() if v is not None}
 
-            logger.info(f"Querying Zoho vault candidates with filters: {zoho_filters}")
+            logger.info(f"Querying Zoho CRM vault_candidates with filters: {zoho_filters}")
 
             try:
+                # Query Zoho CRM directly for REAL-TIME data
+                zoho_client = ZohoApiClient()
                 results = await zoho_client.query_candidates(**zoho_filters)
 
-                # Client-side filtering by candidate locator ID (exact match, highest priority)
-                candidate_locator = entities.get("candidate_locator")
-                if candidate_locator and results:
-                    locator_upper = candidate_locator.upper()
-                    filtered = [
-                        c for c in results
-                        if c.get('candidate_locator', '').upper() == locator_upper
-                    ]
-                    logger.info(f"Filtered {len(results)} → {len(filtered)} by Candidate Locator '{candidate_locator}'")
-                    results = filtered
-
-                # Client-side filtering by candidate name if specified
-                elif entities.get("entity_name") or entities.get("candidate_name"):
-                    search_name = entities.get("entity_name") or entities.get("candidate_name")
-                    search_lower = search_name.lower()
-                    filtered = [
-                        c for c in results
-                        if search_lower in c.get('candidate_name', '').lower()
-                    ]
-                    logger.info(f"Filtered {len(results)} → {len(filtered)} by name '{search_name}'")
-                    results = filtered
-
+                logger.info(f"Found {len(results)} vault candidates from Zoho CRM (real-time)")
                 return results, []
+
             except Exception as e:
-                logger.error(f"Error querying Zoho CRM: {e}", exc_info=True)
+                logger.error(f"Error querying Zoho CRM vault_candidates: {e}", exc_info=True)
                 return [], []
+
+        else:
+            # NEW: Generic module query handler for all other 65 modules
+            # Resolve module alias to official name
+            registry = get_module_registry()
+            module_name = registry.resolve_module_alias(table)
+
+            if not module_name:
+                # Try using table name as-is (might already be official name)
+                module_name = table
+
+            logger.info(f"Querying generic Zoho module: {module_name}")
+
+            # Build filters using FilterBuilder
+            from app.api.teams.filter_builder import FilterBuilder
+            builder = FilterBuilder(module_name)
+
+            try:
+                filter_params = builder.build_filters(entities, additional_filters=filters)
+
+                # Query using new universal method
+                results = await zoho_client.query_module(
+                    module_name=module_name,
+                    **filter_params,
+                    limit=500
+                )
+
+                logger.info(f"Retrieved {len(results)} records from {module_name}")
+                return results, []
+
+            except Exception as e:
+                logger.error(f"Error querying Zoho module '{module_name}': {e}", exc_info=True)
+                return [], []
+
+    def _normalize_module_name(self, table: str) -> str:
+        """
+        Normalize legacy module names to Zoho PascalCase format.
+
+        Args:
+            table: Module name from intent (e.g., "deals", "meetings", "vault_candidates")
+
+        Returns:
+            PascalCase module name (e.g., "Deals", "Events", "Leads")
+        """
+        module_mapping = {
+            "deals": "Deals",
+            "meetings": "Events",
+            "vault_candidates": "Leads",
+            "deal_notes": "Notes"
+        }
+        return module_mapping.get(table, table.title())
+
+    def _convert_field_name_to_pascal_case(self, field_name: str) -> str:
+        """
+        Convert a single field name from snake_case to PascalCase.
+
+        Args:
+            field_name: Field name in snake_case (e.g., "stage", "invoice_status")
+
+        Returns:
+            Field name in PascalCase (e.g., "Stage", "Invoice_Status")
+        """
+        # Common field mappings (snake_case → PascalCase)
+        field_mapping = {
+            # Deal fields
+            "deal_name": "Deal_Name",
+            "contact_name": "Contact_Name",
+            "account_name": "Account_Name",
+            "stage": "Stage",
+            "amount": "Amount",
+            "created_at": "Created_Time",
+            "modified_at": "Modified_Time",
+
+            # Owner fields - ALWAYS map to safe keys in NEVER_REDACT_FIELDS
+            # This prevents "Owner" from being flagged as financial
+            "owner_email": "Owner_Email",  # Safe: in NEVER_REDACT_FIELDS
+            "owner_name": "Owner_Name",    # Safe: in NEVER_REDACT_FIELDS
+            "owner_id": "Owner_Id",        # Safe: in NEVER_REDACT_FIELDS
+            "owner": "Owner_Email",        # Map generic "owner" to safe key
+
+            # Meeting fields
+            "subject": "Event_Title",
+            "meeting_date": "Start_DateTime",
+            "attendees": "Participants",
+
+            # Candidate fields
+            "candidate_name": "Full_Name",
+            "job_title": "Designation",
+            "location": "Current_Location",
+            "date_published": "Date_Published_to_Vault",
+            "transcript_url": "Zoom_Transcript_URL",
+
+            # Common fields
+            "id": "id",
+            "note_content": "Note_Content",
+            "created_by": "Created_By",
+
+            # Status/state fields
+            "status": "Status",
+            "invoice_status": "Invoice_Status",
+            "submission_status": "Submission_Status",
+            "job_status": "Job_Status"
+        }
+
+        # Use mapping if available, otherwise convert snake_case to PascalCase
+        if field_name in field_mapping:
+            return field_mapping[field_name]
+        else:
+            # Convert snake_case to PascalCase: "my_field_name" → "My_Field_Name"
+            return "_".join(word.capitalize() for word in field_name.split("_"))
+
+    def _convert_to_pascal_case(self, record: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Convert snake_case field names to PascalCase for registry compatibility.
+
+        Handles legacy snake_case payloads from query_deals/query_meetings.
+
+        Args:
+            record: Record dict with snake_case keys
+
+        Returns:
+            Record dict with PascalCase keys
+        """
+        converted = {}
+        for key, value in record.items():
+            # Use the field name converter
+            new_key = self._convert_field_name_to_pascal_case(key)
+            converted[new_key] = value
+
+        return converted
 
     async def _format_response(
         self,
@@ -569,122 +806,111 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
         intent: Dict[str, Any]
     ) -> Dict[str, Any]:
         """
-        Format query results into user-friendly response.
+        Format query results into user-friendly response with financial data redaction.
 
         Returns:
             Dict with text, card (optional), and data
         """
+        from app.api.teams.response_formatter import ResponseFormatter
+        from app.api.teams.zoho_module_registry import filter_financial_data
+
         intent_type = intent.get("intent_type", "list")
-        table = intent.get("table", "vault_candidates") or "vault_candidates"  # Default to vault_candidates, handle None
+        table = intent.get("table", "vault_candidates") or "vault_candidates"
+        user_email = intent.get("user_email", "")
+
+        # Normalize module name to PascalCase for registry compatibility
+        normalized_module = self._normalize_module_name(table)
+
+        # Convert asyncpg.Record to dict if needed (for PostgreSQL results)
+        results_as_dicts = []
+        for row in results:
+            if isinstance(row, dict):
+                results_as_dicts.append(row)
+            else:
+                # asyncpg.Record - convert to dict
+                results_as_dicts.append(dict(row))
 
         # Handle empty results
-        if not results:
-            # More helpful error message with table name
-            table_display = "vault candidates" if table == "vault_candidates" else table
+        if not results_as_dicts:
+            # Use ResponseFormatter for consistent empty response
+            formatter = ResponseFormatter(normalized_module, user_email=user_email)
             return {
-                "text": f"I didn't find any {table_display} matching your query.",
+                "text": formatter._format_empty_response(intent_type),
                 "card": None,
                 "data": None
             }
 
+        # Convert snake_case fields to PascalCase for registry compatibility
+        # This is needed for legacy paths (deals, meetings, vault_candidates)
+        # that normalize Zoho payloads to snake_case
+        pascal_case_results = []
+        for record in results_as_dicts:
+            # Detect if record has snake_case keys (contains underscore in non-capitalized position)
+            has_snake_case = any(
+                "_" in key and not key[0].isupper()
+                for key in record.keys()
+                if key not in ["id"]  # Skip "id" which is lowercase in both formats
+            )
+
+            if has_snake_case:
+                # Convert to PascalCase for registry compatibility
+                converted = self._convert_to_pascal_case(record)
+                pascal_case_results.append(converted)
+                logger.debug(f"Converted snake_case record to PascalCase: {list(record.keys())[:3]} → {list(converted.keys())[:3]}")
+            else:
+                # Already in PascalCase (from new query_module path)
+                pascal_case_results.append(record)
+
+        # Apply financial field redaction for non-executives
+        # This ensures recruiters see "---" for financial fields
+        # IMPORTANT: Use normalized_module (PascalCase) and pascal_case_results
+        filtered_results = [
+            filter_financial_data(record, normalized_module, user_email)
+            for record in pascal_case_results
+        ]
+
+        # Use ResponseFormatter for consistent formatting
+        # IMPORTANT: Use normalized_module (PascalCase) for proper module detection
+        formatter = ResponseFormatter(normalized_module, user_email=user_email)
+
         # Format based on intent type
         if intent_type == "count":
-            # For Zoho API, results is a list of records, not a count aggregate
-            count = len(results)
-            # Use correct table name in response
-            table_labels = {
-                "vault_candidates": "vault candidates",
-                "deals": "deals",
-                "meetings": "meetings",
-                "deal_notes": "notes"
-            }
-            label = table_labels.get(table, "records")
+            count = len(filtered_results)
+            text = formatter.format_count_response(count)
             return {
-                "text": f"Found {count} {label}.",
+                "text": text,
                 "card": None,
                 "data": {"count": count}
             }
 
         elif intent_type == "aggregate":
-            # Format stage aggregation
-            text = "Here's the breakdown:\n\n"
-            for row in results:
-                text += f"- {row['stage']}: {row['count']}\n"
+            # For aggregate queries, get the group_by field from intent
+            group_by = intent.get("group_by", "stage")
+
+            # Convert group_by field to PascalCase to match converted record keys
+            # This ensures record.get(group_by) finds the field after casing conversion
+            group_by_pascal = self._convert_field_name_to_pascal_case(group_by)
+            logger.debug(f"Converted group_by field: {group_by} → {group_by_pascal}")
+
+            text = formatter.format_aggregate_response(filtered_results, group_by_pascal)
             return {
                 "text": text,
                 "card": None,
-                "data": [dict(row) for row in results]
+                "data": filtered_results
             }
 
         else:  # list or search
-            # Format based on table
-            if table == "deals":
-                text = f"Found {len(results)} deals:\n\n"
-                for i, row in enumerate(results[:5], 1):
-                    text += f"{i}. {row['deal_name']}\n"
-                    text += f"   Contact: {row['contact_name'] or 'N/A'}\n"
-                    text += f"   Company: {row['account_name'] or 'N/A'}\n"
-                    text += f"   Stage: {row['stage'] or 'N/A'}\n"
-                    # Safe datetime formatting with fallback
-                    created_date = row.get('created_at')
-                    created_str = created_date.strftime('%Y-%m-%d') if created_date else 'N/A'
-                    text += f"   Created: {created_str}\n\n"
-
-                if len(results) > 5:
-                    text += f"\n...and {len(results) - 5} more."
-
-            elif table == "deal_notes":
-                text = f"Found {len(results)} notes:\n\n"
-                for i, row in enumerate(results[:5], 1):
-                    text += f"{i}. {row['note_content'][:100]}...\n"
-                    text += f"   By: {row['created_by'] or 'N/A'}\n"
-                    # Safe datetime formatting with fallback
-                    created_date = row.get('created_at')
-                    created_str = created_date.strftime('%Y-%m-%d') if created_date else 'N/A'
-                    text += f"   Date: {created_str}\n\n"
-
-                if len(results) > 5:
-                    text += f"\n...and {len(results) - 5} more."
-
-            elif table == "meetings":
-                text = f"Found {len(results)} meetings:\n\n"
-                for i, row in enumerate(results[:5], 1):
-                    text += f"{i}. {row['subject']}\n"
-                    # Safe datetime formatting with fallback
-                    meeting_date = row.get('meeting_date')
-                    date_str = meeting_date.strftime('%Y-%m-%d %H:%M') if meeting_date else 'N/A'
-                    text += f"   Date: {date_str}\n"
-                    if row.get('attendees'):
-                        text += f"   Attendees: {', '.join(row['attendees'][:3])}\n"
-                    text += "\n"
-
-                if len(results) > 5:
-                    text += f"\n...and {len(results) - 5} more."
-
-            else:  # Default: vault candidates (from Zoho API)
-                text = f"Found {len(results)} vault candidates:\n\n"
-                for i, row in enumerate(results[:5], 1):
-                    name = row.get('candidate_name', 'Unknown')
-                    title = row.get('job_title', 'No title')
-                    location = row.get('location', 'No location')
-                    pub_date = row.get('date_published', 'No date')
-                    transcript = row.get('transcript_url', '')
-
-                    text += f"{i}. {name}\n"
-                    text += f"   Title: {title}\n"
-                    text += f"   Location: {location}\n"
-                    text += f"   Published: {pub_date}\n"
-                    if transcript:
-                        text += f"   📹 Zoom transcript available\n"
-                    text += "\n"
-
-                if len(results) > 5:
-                    text += f"\n...and {len(results) - 5} more."
+            # Use ResponseFormatter's module-aware formatting
+            text = formatter.format_list_response(
+                filtered_results,
+                max_items=5,
+                intent_type=intent_type
+            )
 
             return {
                 "text": text,
                 "card": None,  # TODO: Implement Adaptive Card formatting
-                "data": results if isinstance(results, list) else [dict(row) for row in results]
+                "data": filtered_results
             }
 
     def _validate_date_range(
@@ -916,13 +1142,259 @@ Candidate: {candidate_name if candidate_name else 'Unknown'}"""
             logger.error(f"Error generating summary: {e}", exc_info=True)
             return f"❌ Error generating summary: {str(e)}"
 
+    async def _handle_email_query(
+        self,
+        intent: Dict[str, Any],
+        user_email: str
+    ) -> Dict[str, Any]:
+        """
+        Handle email query requests by fetching from Microsoft Graph API.
+
+        Args:
+            intent: Classified intent with email filters
+            user_email: Email of requesting user
+
+        Returns:
+            Response dict with email results
+        """
+        from app.microsoft_graph_client import MicrosoftGraphClient
+        entities = intent.get("entities", {})
+
+        # Extract search parameters
+        search_terms = entities.get("search_terms", [])
+        email_sender = entities.get("email_sender")
+        email_subject = entities.get("email_subject")
+        hours_back = entities.get("hours_back", 24)
+
+        # Convert timeframe to hours_back if specified
+        timeframe = entities.get("timeframe")
+        if timeframe:
+            timeframe_lower = str(timeframe).lower().replace(" ", "_")
+            if any(token in timeframe_lower for token in ["7d", "last_week", "this_week"]):
+                hours_back = 168  # 7 days
+            elif "30d" in timeframe_lower or "month" in timeframe_lower:
+                hours_back = 720  # 30 days
+
+        logger.info(f"Email query request: search_terms={search_terms}, sender={email_sender}, hours_back={hours_back}")
+
+        try:
+            # Step 1: Initialize Microsoft Graph client
+            try:
+                graph_client = MicrosoftGraphClient()
+            except ValueError as e:
+                # Microsoft Graph credentials not configured
+                logger.warning(f"Microsoft Graph credentials not configured: {e}")
+                return {
+                    "text": "❌ Email queries require Microsoft Graph API configuration. Please contact your administrator to set up AZURE_TENANT_ID, AZURE_CLIENT_ID, and AZURE_CLIENT_SECRET.",
+                    "card": None,
+                    "data": None
+                }
+
+            # Step 2: Fetch emails for user
+            emails = await graph_client.get_user_emails(
+                user_email=user_email,
+                filter_recruitment=True,  # Apply recruitment filtering
+                hours_back=hours_back,
+                max_emails=50
+            )
+
+            if not emails:
+                return {
+                    "text": f"📧 No emails found in the last {hours_back} hours.",
+                    "card": None,
+                    "data": []
+                }
+
+            # Step 3: Apply additional filters
+            filtered_emails = emails
+
+            # Filter by sender if specified
+            if email_sender:
+                filtered_emails = [
+                    email for email in filtered_emails
+                    if email_sender.lower() in email.from_address.lower() or
+                       email_sender.lower() in email.from_name.lower()
+                ]
+
+            # Filter by subject if specified
+            if email_subject:
+                filtered_emails = [
+                    email for email in filtered_emails
+                    if email_subject.lower() in email.subject.lower()
+                ]
+
+            # Filter by search terms if specified
+            if search_terms:
+                filtered_emails = [
+                    email for email in filtered_emails
+                    if any(term.lower() in email.subject.lower() or
+                          term.lower() in email.body.lower()
+                          for term in search_terms)
+                ]
+
+            # Step 4: Format response
+            if not filtered_emails:
+                return {
+                    "text": f"📧 No matching emails found with the specified filters.",
+                    "card": None,
+                    "data": []
+                }
+
+            # Build response text
+            response_text = f"📧 **Found {len(filtered_emails)} email(s)**\n\n"
+
+            for idx, email in enumerate(filtered_emails[:10], 1):  # Limit to 10 emails
+                response_text += f"**{idx}. {email.subject}**\n"
+                response_text += f"   From: {email.from_name} <{email.from_address}>\n"
+                response_text += f"   Received: {email.received_time}\n"
+                if email.has_attachments:
+                    response_text += f"   📎 Attachments: {len(email.attachments)}\n"
+                response_text += "\n"
+
+            if len(filtered_emails) > 10:
+                response_text += f"_...and {len(filtered_emails) - 10} more emails_"
+
+            return {
+                "text": response_text,
+                "card": None,
+                "data": [email.to_dict() for email in filtered_emails]
+            }
+
+        except Exception as e:
+            logger.error(f"Error handling email query: {e}", exc_info=True)
+            return {
+                "text": f"❌ Error querying emails: {str(e)}",
+                "card": None,
+                "data": None
+            }
+
+    async def _handle_marketable_candidates(
+        self,
+        intent: Dict[str, Any],
+        user_email: str,
+        activity: Optional[Any] = None
+    ) -> Dict[str, Any]:
+        """
+        Handle marketable candidates query by queuing Service Bus request.
+
+        Args:
+            intent: Classified intent with limit parameter
+            user_email: Email of requesting user
+            activity: Optional Bot Framework Activity for proactive messaging
+
+        Returns:
+            Response dict acknowledging the query
+        """
+        from azure.servicebus.aio import ServiceBusClient
+        from azure.servicebus import ServiceBusMessage
+        import json
+
+        entities = intent.get("entities", {})
+        limit = entities.get("limit", 10)
+
+        logger.info(f"Marketable candidates query from {user_email}: limit={limit}")
+
+        try:
+            # Step 1: Send initial acknowledgment
+            acknowledgment_text = f"⚡ **Analyzing vault candidates for marketability...**\n\n"
+            acknowledgment_text += f"📊 Fetching all vault candidates from Zoho CRM\n"
+            acknowledgment_text += f"🔍 Scoring based on: AUM (40%), Production (30%), Credentials (15%), Availability (15%)\n"
+            acknowledgment_text += f"📈 Will return top {limit} most marketable candidates\n\n"
+            acknowledgment_text += f"_This may take 30-60 seconds. I'll send updates as I progress..._"
+
+            # Step 2: Queue Service Bus message for async processing
+            connection_string = os.getenv("SERVICE_BUS_CONNECTION_STRING") or os.getenv("AZURE_SERVICE_BUS_CONNECTION_STRING")
+
+            if not connection_string:
+                logger.error("SERVICE_BUS_CONNECTION_STRING not configured")
+                return {
+                    "text": "❌ Service Bus not configured. Please contact your administrator.",
+                    "card": None,
+                    "data": None
+                }
+
+            queue_name = "vault-marketability-analysis"
+
+            # Prepare conversation reference for proactive messaging
+            conversation_reference = None
+            if activity:
+                try:
+                    from botbuilder.core import TurnContext
+                    # Create conversation reference from activity
+                    conv_ref = TurnContext.get_conversation_reference(activity)
+
+                    # Helper to safely get attribute or dict value
+                    def safe_get(obj, key, default=None):
+                        """Get value from object attribute or dict key"""
+                        if isinstance(obj, dict):
+                            return obj.get(key, default)
+                        return getattr(obj, key, default)
+
+                    # Serialize to dict (handle both object and dict formats)
+                    conversation_reference = {
+                        "service_url": safe_get(conv_ref, 'service_url'),
+                        "channel_id": safe_get(conv_ref, 'channel_id'),
+                        "user": {
+                            "id": safe_get(safe_get(conv_ref, 'user'), 'id'),
+                            "name": safe_get(safe_get(conv_ref, 'user'), 'name', "")
+                        } if safe_get(conv_ref, 'user') else None,
+                        "conversation": {
+                            "id": safe_get(safe_get(conv_ref, 'conversation'), 'id'),
+                            "is_group": safe_get(safe_get(conv_ref, 'conversation'), 'is_group', False)
+                        } if safe_get(conv_ref, 'conversation') else None,
+                        "bot": {
+                            "id": safe_get(safe_get(conv_ref, 'bot'), 'id'),
+                            "name": safe_get(safe_get(conv_ref, 'bot'), 'name', "")
+                        } if safe_get(conv_ref, 'bot') else None
+                    }
+
+                    conv_id = safe_get(safe_get(conv_ref, 'conversation'), 'id', 'unknown')
+                    logger.info(f"Created conversation reference for proactive messaging: {conv_id}")
+                except Exception as e:
+                    logger.warning(f"Failed to create conversation reference: {e}", exc_info=True)
+
+            # Prepare query data
+            query_data = {
+                "limit": limit,
+                "user_id": user_email,
+                "requested_at": datetime.now(timezone.utc).isoformat(),
+                "conversation_reference": conversation_reference
+            }
+
+            # Send to Service Bus
+            async with ServiceBusClient.from_connection_string(connection_string) as client:
+                sender = client.get_queue_sender(queue_name=queue_name)
+                async with sender:
+                    message = ServiceBusMessage(
+                        body=json.dumps({"query_data": query_data}),
+                        content_type="application/json",
+                        subject="marketable_candidates_query"
+                    )
+                    await sender.send_messages(message)
+                    logger.info(f"Queued marketability query for {user_email}")
+
+            return {
+                "text": acknowledgment_text,
+                "card": None,
+                "data": {"queued": True, "limit": limit}
+            }
+
+        except Exception as e:
+            logger.error(f"Error handling marketable candidates query: {e}", exc_info=True)
+            return {
+                "text": f"❌ Error processing marketability query: {str(e)}",
+                "card": None,
+                "data": None
+            }
+
 
 async def process_natural_language_query(
     query: str,
     user_email: str,
     db: asyncpg.Connection,
     conversation_context: Optional[str] = None,
-    override_intent: Optional[Dict[str, Any]] = None
+    override_intent: Optional[Dict[str, Any]] = None,
+    activity: Optional[Any] = None  # Bot Framework Activity for proactive messaging
 ) -> Dict[str, Any]:
     """
     Convenience function to process natural language queries.
@@ -933,9 +1405,10 @@ async def process_natural_language_query(
         db: Database connection
         conversation_context: Optional conversation history for context
         override_intent: Optional intent to skip classification (used after clarification)
+        activity: Optional Bot Framework Activity for proactive messaging support
 
     Returns:
         Response dict with text, card, and data
     """
     engine = QueryEngine()
-    return await engine.process_query(query, user_email, db, conversation_context, override_intent)
+    return await engine.process_query(query, user_email, db, conversation_context, override_intent, activity)

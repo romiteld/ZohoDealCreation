@@ -7,7 +7,7 @@ import uuid
 import json
 import os
 import unicodedata
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime, timedelta
 from fastapi import APIRouter, HTTPException, Depends, Request, Header
 from fastapi.responses import JSONResponse
@@ -162,7 +162,7 @@ def normalize_command_text(text: str) -> str:
 
 # Helper function for audit logging
 async def log_bot_audit(
-    db: asyncpg.Connection,
+    db: Optional[asyncpg.Connection],
     activity_id: str,
     event_type: str,
     user_id: Optional[str] = None,
@@ -174,7 +174,7 @@ async def log_bot_audit(
     Log bot processing events to teams_bot_audit table.
 
     Args:
-        db: Database connection
+        db: Database connection (optional - if None, skip logging)
         activity_id: Teams activity ID
         event_type: Event type (processing_started, send_success, etc.)
         user_id: Optional user ID
@@ -182,6 +182,10 @@ async def log_bot_audit(
         event_data: Optional JSON data with additional context
         error_message: Optional error message for failures
     """
+    if db is None:
+        # Database unavailable, skip audit logging
+        return
+
     try:
         await db.execute("""
             INSERT INTO teams_bot_audit
@@ -259,116 +263,128 @@ async def teams_webhook(request: Request):
             user_id = turn_context.activity.from_property.id if turn_context.activity.from_property else None
             conversation_id = turn_context.activity.conversation.id if turn_context.activity.conversation else None
 
+            print(f"BOT_LOGIC: Starting for activity_id={activity_id}, user={user_id}", flush=True)
+
             try:
-                # Get database connection for this request
-                from well_shared.database.connection import get_connection_manager
-                manager = await get_connection_manager()
-                async with manager.get_connection() as db:
+                # Try to get database connection (optional)
+                db = None
+                try:
+                    print("BOT_LOGIC: Attempting database connection...", flush=True)
+                    from well_shared.database.connection import get_connection_manager
+                    manager = await get_connection_manager()
+                    db = await manager.get_connection().__aenter__()
+                    print("BOT_LOGIC: Database connected successfully", flush=True)
                     # Log: bot_logic started
                     await log_bot_audit(db, activity_id, "bot_logic_started", user_id, conversation_id)
+                except Exception as db_error:
+                    print(f"BOT_LOGIC: Database connection failed: {db_error}", flush=True)
+                    logger.warning(f"Database unavailable, continuing without it: {db_error}")
+                    db = None  # Continue without database
 
-                    # Route activity based on type
-                    if turn_context.activity.type == ActivityTypes.message:
-                        response = await handle_message_activity(turn_context.activity, db)
-                        logger.info(f"Response from handle_message_activity: {type(response)}")
+                # Continue with bot logic regardless of database status
 
-                        # Log: message handler completed
-                        await log_bot_audit(
-                            db, activity_id, "message_handler_completed", user_id, conversation_id,
-                            event_data={"response_type": str(type(response).__name__)}
-                        )
+                # Route activity based on type
+                if turn_context.activity.type == ActivityTypes.message:
+                    response = await handle_message_activity(turn_context.activity, db)
+                    logger.info(f"Response from handle_message_activity: {type(response)}")
 
-                        if response:
-                            print(f"About to send activity response: {response}", flush=True)
-                            logger.info(f"Sending activity response: {response}")
+                    # Log: message handler completed
+                    await log_bot_audit(
+                        db, activity_id, "message_handler_completed", user_id, conversation_id,
+                        event_data={"response_type": str(type(response).__name__)}
+                    )
 
-                            # Convert dict responses to proper Activity objects
-                            if isinstance(response, dict):
-                                # Preserve all metadata by constructing Activity with all fields
-                                response_dict = response  # Keep reference to original dict
+                    if response:
+                        print(f"About to send activity response: {response}", flush=True)
+                        logger.info(f"Sending activity response: {response}")
 
-                                if "attachments" in response_dict and response_dict["attachments"]:
-                                    # Multiple attachments: use MessageFactory.carousel or list
-                                    if len(response_dict["attachments"]) > 1:
-                                        response = MessageFactory.carousel(response_dict["attachments"])
-                                    else:
-                                        response = MessageFactory.attachment(response_dict["attachments"][0])
+                        # Convert dict responses to proper Activity objects
+                        if isinstance(response, dict):
+                            # Preserve all metadata by constructing Activity with all fields
+                            response_dict = response  # Keep reference to original dict
 
-                                    # Preserve additional fields like channelData, suggestedActions
-                                    if "channelData" in response_dict:
-                                        response.channel_data = response_dict["channelData"]
-                                    if "suggestedActions" in response_dict:
-                                        response.suggested_actions = response_dict["suggestedActions"]
-                                elif "text" in response_dict:
-                                    # Simple text message
-                                    response = MessageFactory.text(response_dict["text"])
+                            if "attachments" in response_dict and response_dict["attachments"]:
+                                # Multiple attachments: use MessageFactory.carousel or list
+                                if len(response_dict["attachments"]) > 1:
+                                    response = MessageFactory.carousel(response_dict["attachments"])
+                                else:
+                                    response = MessageFactory.attachment(response_dict["attachments"][0])
 
-                            # Trust the service URL before sending (required for Bot Framework)
-                            try:
-                                service_url = turn_context.activity.service_url
-                                MicrosoftAppCredentials.trust_service_url(service_url)
-                                print(f"Trusted service URL: {service_url}", flush=True)
-                                logger.info(f"Trusted service URL: {service_url}")
+                                # Preserve additional fields like channelData, suggestedActions
+                                if "channelData" in response_dict:
+                                    response.channel_data = response_dict["channelData"]
+                                if "suggestedActions" in response_dict:
+                                    response.suggested_actions = response_dict["suggestedActions"]
+                            elif "text" in response_dict:
+                                # Simple text message
+                                response = MessageFactory.text(response_dict["text"])
 
-                                # Log: service URL trusted
-                                await log_bot_audit(
-                                    db, activity_id, "service_url_trusted", user_id, conversation_id,
-                                    event_data={"service_url": service_url}
-                                )
-                            except Exception as trust_error:
-                                logger.error(f"Error trusting service URL: {trust_error}", exc_info=True)
-                                print(f"SERVICE URL TRUST FAILED: {trust_error}", flush=True)
-                                await log_bot_audit(
-                                    db, activity_id, "trust_error", user_id, conversation_id,
-                                    error_message=str(trust_error)
-                                )
+                        # Trust the service URL before sending (required for Bot Framework)
+                        try:
+                            service_url = turn_context.activity.service_url
+                            MicrosoftAppCredentials.trust_service_url(service_url)
+                            print(f"Trusted service URL: {service_url}", flush=True)
+                            logger.info(f"Trusted service URL: {service_url}")
 
-                            # Send activity with comprehensive error handling
-                            try:
-                                # Log: attempting send
-                                await log_bot_audit(
-                                    db, activity_id, "send_activity_attempting", user_id, conversation_id
-                                )
-
-                                result = await turn_context.send_activity(response)
-                                print(f"✅ Activity send result: {result}", flush=True)
-                                logger.info(f"✅ Activity send result: {result}")
-
-                                # Log: send successful
-                                await log_bot_audit(
-                                    db, activity_id, "send_activity_success", user_id, conversation_id,
-                                    event_data={"result": str(result)}
-                                )
-                            except Exception as send_error:
-                                logger.error(f"❌ CRITICAL: Failed to send activity: {send_error}", exc_info=True)
-                                print(f"❌ SEND ACTIVITY FAILED: {send_error}", flush=True)
-                                # Try to log the error details
-                                print(f"Error type: {type(send_error).__name__}", flush=True)
-                                print(f"Error details: {str(send_error)}", flush=True)
-
-                                # Log: send failed with error
-                                await log_bot_audit(
-                                    db, activity_id, "send_activity_failed", user_id, conversation_id,
-                                    error_message=f"{type(send_error).__name__}: {str(send_error)}"
-                                )
-                                raise  # Re-raise to ensure it's logged
-
-                    elif turn_context.activity.type == ActivityTypes.invoke:
-                        # Invoke activities require InvokeResponse, not regular messages
-                        # The handler will send messages directly via turn_context
-                        await handle_invoke_activity(turn_context, db)
-                    elif turn_context.activity.type == ActivityTypes.conversation_update:
-                        response = await handle_conversation_update(turn_context.activity, db)
-                        if response:
-                            # Create proper Activity from response dict
-                            activity_response = Activity(
-                                type=response.get("type", "message"),
-                                text=response.get("text"),
-                                attachments=response.get("attachments")
+                            # Log: service URL trusted
+                            await log_bot_audit(
+                                db, activity_id, "service_url_trusted", user_id, conversation_id,
+                                event_data={"service_url": service_url}
                             )
-                            await turn_context.send_activity(activity_response)
-                    else:
-                        logger.warning(f"Unhandled activity type: {turn_context.activity.type}")
+                        except Exception as trust_error:
+                            logger.error(f"Error trusting service URL: {trust_error}", exc_info=True)
+                            print(f"SERVICE URL TRUST FAILED: {trust_error}", flush=True)
+                            await log_bot_audit(
+                                db, activity_id, "trust_error", user_id, conversation_id,
+                                error_message=str(trust_error)
+                            )
+
+                        # Send activity with comprehensive error handling
+                        try:
+                            # Log: attempting send
+                            await log_bot_audit(
+                                db, activity_id, "send_activity_attempting", user_id, conversation_id
+                            )
+
+                            result = await turn_context.send_activity(response)
+                            print(f"✅ Activity send result: {result}", flush=True)
+                            logger.info(f"✅ Activity send result: {result}")
+
+                            # Log: send successful
+                            await log_bot_audit(
+                                db, activity_id, "send_activity_success", user_id, conversation_id,
+                                event_data={"result": str(result)}
+                            )
+                        except Exception as send_error:
+                            logger.error(f"❌ CRITICAL: Failed to send activity: {send_error}", exc_info=True)
+                            print(f"❌ SEND ACTIVITY FAILED: {send_error}", flush=True)
+                            # Try to log the error details
+                            print(f"Error type: {type(send_error).__name__}", flush=True)
+                            print(f"Error details: {str(send_error)}", flush=True)
+
+                            # Log: send failed with error
+                            await log_bot_audit(
+                                db, activity_id, "send_activity_failed", user_id, conversation_id,
+                                error_message=f"{type(send_error).__name__}: {str(send_error)}"
+                            )
+                            raise  # Re-raise to ensure it's logged
+
+                elif turn_context.activity.type == ActivityTypes.invoke:
+                    # Invoke activities require InvokeResponse, not regular messages
+                    # The handler will send messages directly via turn_context
+                    await handle_invoke_activity(turn_context, db)
+                elif turn_context.activity.type == ActivityTypes.conversation_update:
+                    response = await handle_conversation_update(turn_context.activity, db)
+                    if response:
+                        # Create proper Activity from response dict
+                        activity_response = Activity(
+                            type=response.get("type", "message"),
+                            text=response.get("text"),
+                            attachments=response.get("attachments")
+                        )
+                        await turn_context.send_activity(activity_response)
+                else:
+                    logger.warning(f"Unhandled activity type: {turn_context.activity.type}")
             except Exception as inner_e:
                 logger.error(f"Error in bot_logic: {inner_e}", exc_info=True)
 
@@ -385,60 +401,52 @@ async def teams_webhook(request: Request):
         )
 
 
-async def handle_message_activity(
+async def handle_slash_command(
+    message_text: str,
+    user_id: str,
+    user_name: str,
+    user_email: str,
+    conversation_id: str,
     activity: Activity,
     db: asyncpg.Connection
 ) -> Dict[str, Any]:
-    """Handle incoming text message from Teams user with dual-mode support."""
+    """Handle slash commands (messages starting with /).
 
-    # Extract user info
-    user_id = activity.from_property.id if activity.from_property else ""
-    user_name = activity.from_property.name if activity.from_property else ""
-    user_email = extract_user_email(activity)  # Use helper to get real email, not GUID
-    conversation_id = activity.conversation.id if activity.conversation else ""
+    Supported commands:
+    - /help - Show help card
+    - /digest [audience] - Generate candidate digest
+    - /preferences - User preferences and subscriptions
+    - /analytics - Usage statistics
+    - /vault_alerts - Vault alerts builder (executives only)
 
-    # Store conversation
-    await db.execute("""
-        INSERT INTO teams_conversations (
-            conversation_id, user_id, user_name, user_email,
-            conversation_type, activity_id, message_text,
-            created_at
-        ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
-    """, conversation_id, user_id, user_name, user_email, "personal",
-        activity.id, activity.text)
+    Args:
+        message_text: The normalized message text (with / prefix)
+        user_id: User ID from Teams
+        user_name: User display name
+        user_email: User email address
+        conversation_id: Conversation ID
+        activity: Full activity object
+        db: Database connection
 
-    # Parse command - strip bot mentions first (handles @TalentWell mentions)
-    raw_text = activity.text or ""
-    cleaned_text = remove_mention_text(raw_text, activity.entities)
-    message_text = normalize_command_text(cleaned_text)
+    Returns:
+        Response dictionary or MessageFactory object
+    """
+    # Extract command (remove leading / and get first word)
+    command_parts = message_text[1:].split()  # Remove "/" and split
+    command = command_parts[0].lower() if command_parts else ""
+    args = command_parts[1:] if len(command_parts) > 1 else []
 
-    logger.info(
-        "Message received - Raw: '%s' | Cleaned: '%s' | Normalized: '%s' | From: %s",
-        raw_text,
-        cleaned_text,
-        message_text,
-        user_email,
-    )
+    logger.info(f"Processing slash command: /{command} with args: {args}")
 
-    # ========================================
-    # STEP 1: Check for COMMANDS first (anyone can use)
-    # ========================================
-    if any(greeting in message_text for greeting in ["hello", "hi", "hey"]):
-        # Welcome card
-        card = create_welcome_card(user_name.split()[0] if user_name else "there")
-        attachment = CardFactory.adaptive_card(card["content"])
-        return MessageFactory.attachment(attachment)
-
-    elif message_text.startswith("help"):
+    # Route to appropriate handler
+    if command == "help":
         card = create_help_card()
-        # Use CardFactory to create proper Attachment, passing card content only
         attachment = CardFactory.adaptive_card(card["content"])
         return MessageFactory.attachment(attachment)
 
-    elif message_text.startswith("digest"):
-        # Parse audience from message (e.g., "digest advisors", "digest c_suite", or "digest daniel.romitelli@emailthewell.com")
-        parts = message_text.split()
-        audience_input = parts[1] if len(parts) > 1 else "global"
+    elif command == "digest":
+        # Parse audience from args (e.g., "/digest advisors" or "/digest daniel.romitelli@emailthewell.com")
+        audience_input = args[0] if args else "global"
 
         # Check if input is an email address (test mode)
         test_email = None
@@ -529,19 +537,85 @@ async def handle_message_activity(
             test_recipient_email=test_email
         )
 
-    elif message_text.startswith("preferences"):
+    elif command == "preferences":
         return await show_user_preferences(user_id, user_email, user_name, db)
 
-    elif message_text.startswith("vault alerts"):
+    elif command == "vault_alerts" or command == "vaultalerts":
         # Executive-only feature
         return await show_vault_alerts_builder(user_id, user_email, user_name, db)
 
-    elif message_text.startswith("analytics"):
+    elif command == "analytics":
         return await show_analytics(user_id, user_email, db)
 
+    else:
+        # Unknown slash command
+        return {
+            "type": "message",
+            "text": f"❌ Unknown command: `/{command}`\n\nTry `/help` to see available commands."
+        }
+
+
+async def handle_message_activity(
+    activity: Activity,
+    db: asyncpg.Connection
+) -> Dict[str, Any]:
+    """Handle incoming text message from Teams user with dual-mode support.
+
+    Routing Logic:
+    - Messages starting with "/" are treated as slash commands
+    - All other messages are processed as natural language queries
+    """
+
+    # Extract user info
+    user_id = activity.from_property.id if activity.from_property else ""
+    user_name = activity.from_property.name if activity.from_property else ""
+    user_email = extract_user_email(activity)  # Use helper to get real email, not GUID
+    conversation_id = activity.conversation.id if activity.conversation else ""
+
+    # Store conversation
+    await db.execute("""
+        INSERT INTO teams_conversations (
+            conversation_id, user_id, user_name, user_email,
+            conversation_type, activity_id, message_text,
+            created_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, CURRENT_TIMESTAMP)
+    """, conversation_id, user_id, user_name, user_email, "personal",
+        activity.id, activity.text)
+
+    # Parse command - strip bot mentions first (handles @TalentWell mentions)
+    raw_text = activity.text or ""
+    cleaned_text = remove_mention_text(raw_text, activity.entities)
+    message_text = normalize_command_text(cleaned_text)
+
+    logger.info(
+        "Message received - Raw: '%s' | Cleaned: '%s' | Normalized: '%s' | From: %s",
+        raw_text,
+        cleaned_text,
+        message_text,
+        user_email,
+    )
+
     # ========================================
-    # STEP 2: If NOT a command → Process as natural language query with conversation memory
+    # NEW ROUTING: Slash commands vs NLP queries
     # ========================================
+    if message_text.startswith("/"):
+        # Slash command: route to command handler
+        logger.info(f"Routing to slash command handler: {message_text}")
+        return await handle_slash_command(message_text, user_id, user_name, user_email, conversation_id, activity, db)
+
+    # ========================================
+    # SPECIAL CASE: Greetings (for friendly UX)
+    # ========================================
+    if any(greeting in message_text for greeting in ["hello", "hi", "hey"]):
+        # Welcome card
+        card = create_welcome_card(user_name.split()[0] if user_name else "there")
+        attachment = CardFactory.adaptive_card(card["content"])
+        return MessageFactory.attachment(attachment)
+
+    # ========================================
+    # DEFAULT: Process as natural language query
+    # ========================================
+    # All other messages (not starting with /) are treated as NLP queries
     else:
         # All users have full access to data
         logger.info(f"Natural language query from {user_email}: {cleaned_text}")
@@ -564,7 +638,8 @@ async def handle_message_activity(
                 query=cleaned_text,
                 user_email=user_email,
                 db=db,
-                conversation_context=conversation_context
+                conversation_context=conversation_context,
+                activity=activity  # Pass activity for proactive messaging support
             )
 
             # Extract confidence score
@@ -917,6 +992,17 @@ async def handle_invoke_activity(
                     clarification_response=clarification_response,
                     db=db
                 )
+
+        elif action == "email_marketability_report":
+            # Email marketability report to user
+            candidate_ids = final_data.get("candidate_ids", [])
+            logger.info(f"Email marketability report request from {user_email} for {len(candidate_ids)} candidates")
+
+            response = await email_marketability_report(
+                user_email=user_email,
+                candidate_ids=candidate_ids,
+                db=db
+            )
 
         else:
             logger.warning(f"Unknown invoke action: {action}")
@@ -1396,6 +1482,202 @@ async def show_analytics(
         error_card = create_error_card(str(e))
         attachment = CardFactory.adaptive_card(error_card["content"])
         return MessageFactory.attachment(attachment)
+
+
+async def email_marketability_report(
+    user_email: str,
+    candidate_ids: List[str],
+    db: asyncpg.Connection
+) -> Activity:
+    """
+    Email marketability report to user via Azure Communication Services.
+
+    Args:
+        user_email: Email address to send report to
+        candidate_ids: List of TWAV candidate IDs
+        db: Database connection
+
+    Returns:
+        Activity with confirmation message
+    """
+    try:
+        from app.integrations import ZohoApiClient
+        from app.jobs.marketability_scorer import MarketabilityScorer
+        from app.utils.anonymizer import anonymize_candidate
+        from azure.communication.email import EmailClient
+
+        logger.info(f"Generating email report for {len(candidate_ids)} candidates to {user_email}")
+
+        # Step 1: Fetch candidate data from Zoho
+        zoho_client = ZohoApiClient()
+        scorer = MarketabilityScorer()
+
+        candidates = []
+        for twav_id in candidate_ids:
+            # Query Zoho for each candidate
+            results = await zoho_client.query_candidates(
+                candidate_locator=twav_id,
+                limit=1
+            )
+            if results:
+                candidate = results[0]
+                # Score candidate
+                score, breakdown = scorer.score_candidate(candidate)
+                candidate['score'] = score
+                candidate['score_breakdown'] = breakdown
+                candidates.append(candidate)
+
+        if not candidates:
+            return MessageFactory.text("❌ Could not fetch candidate data. Please try again.")
+
+        # Step 2: Generate HTML email in boss's format
+        html_body = generate_marketability_email_html(candidates)
+
+        # Step 3: Send via Azure Communication Services
+        connection_string = os.getenv("ACS_EMAIL_CONNECTION_STRING")
+        if not connection_string:
+            logger.error("ACS_EMAIL_CONNECTION_STRING not configured")
+            return MessageFactory.text("❌ Email service not configured. Please contact administrator.")
+
+        email_client = EmailClient.from_connection_string(connection_string)
+
+        message = {
+            "senderAddress": os.getenv("ACS_SENDER_ADDRESS", "DoNotReply@emailthewell.com"),
+            "recipients": {
+                "to": [{"address": user_email}]
+            },
+            "content": {
+                "subject": f"🏆 Top {len(candidates)} Most Marketable Vault Candidates",
+                "html": html_body
+            }
+        }
+
+        poller = email_client.begin_send(message)
+        result = poller.result()
+
+        logger.info(f"Email sent successfully to {user_email}, message_id={result.get('id')}")
+
+        # Return success message
+        return MessageFactory.text(
+            f"✅ **Email sent successfully!**\n\n"
+            f"📧 Sent to: {user_email}\n"
+            f"📊 Candidates: {len(candidates)}\n\n"
+            f"_Check your inbox for the full marketability report._"
+        )
+
+    except Exception as e:
+        logger.error(f"Error sending marketability email: {e}", exc_info=True)
+        return MessageFactory.text(f"❌ Error sending email: {str(e)}")
+
+
+def generate_marketability_email_html(candidates: List[Dict[str, Any]]) -> str:
+    """
+    Generate HTML email body in boss's format.
+
+    Args:
+        candidates: List of scored and anonymized candidates
+
+    Returns:
+        HTML string
+    """
+    from app.utils.anonymizer import anonymize_candidate
+
+    html = """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <style>
+            body {
+                font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+                max-width: 800px;
+                margin: 0 auto;
+                padding: 20px;
+                background-color: #f5f5f5;
+            }
+            .header {
+                background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                color: white;
+                padding: 30px;
+                border-radius: 10px 10px 0 0;
+                text-align: center;
+            }
+            .candidate-card {
+                background: white;
+                margin: 20px 0;
+                padding: 25px;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+                page-break-inside: avoid;
+            }
+            .rank-badge {
+                display: inline-block;
+                background: #667eea;
+                color: white;
+                padding: 5px 15px;
+                border-radius: 20px;
+                font-weight: bold;
+                margin-bottom: 10px;
+            }
+            .score {
+                font-size: 24px;
+                font-weight: bold;
+                color: #667eea;
+            }
+            .twav-code {
+                color: #666;
+                font-style: italic;
+            }
+            .bullet {
+                margin: 8px 0;
+                padding-left: 20px;
+                position: relative;
+            }
+            .bullet:before {
+                content: "•";
+                position: absolute;
+                left: 0;
+                color: #667eea;
+                font-weight: bold;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🏆 Top Marketable Vault Candidates</h1>
+            <p>Comprehensive Marketability Analysis</p>
+        </div>
+    """
+
+    for idx, candidate in enumerate(candidates, 1):
+        anonymized = anonymize_candidate(candidate)
+        score = candidate.get('score', 0)
+        twav = candidate.get('Candidate_Locator', 'Unknown')
+        location = anonymized.get('location', 'Unknown')
+        aum = anonymized.get('book_size_aum', 'Not disclosed')
+        production = anonymized.get('production_l12mo', 'Not disclosed')
+        firm = anonymized.get('current_employer', 'Advisory firm')
+        availability = candidate.get('When_Available', 'TBD')
+
+        rank_emoji = "⭐" if idx <= 3 else "🌟"
+
+        html += f"""
+        <div class="candidate-card">
+            <div class="rank-badge">#{idx} {rank_emoji}</div>
+            <div class="score">{score:.0f}/100</div>
+            <p><strong>📍 {location}</strong></p>
+            <div class="bullet">Manages {aum} in client assets at {firm}</div>
+            <div class="bullet">Generated {production} in trailing 12-month production</div>
+            <div class="bullet">Available: {availability}</div>
+            <p class="twav-code">Ref: {twav}</p>
+        </div>
+        """
+
+    html += """
+    </body>
+    </html>
+    """
+
+    return html
 
 
 # REST API endpoints for external access

@@ -30,6 +30,8 @@ COPY teams_bot/app/ ./app/
 # Note: teams_bot/app/api/teams/__init__.py contains import shim that re-exports
 COPY app/api/ ./app/api/
 COPY app/jobs/ ./app/jobs/
+COPY app/workers/ ./app/workers/
+COPY app/services/ ./app/services/
 COPY app/templates/ ./app/templates/
 COPY app/bandits/ ./app/bandits/
 COPY app/config/ ./app/config/

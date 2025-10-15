@@ -7,6 +7,7 @@ Shows progress of each candidate as it's being processed.
 import asyncio
 import os
 import sys
+import logging
 from datetime import datetime
 from dotenv import load_dotenv
 
@@ -19,6 +20,18 @@ load_dotenv('.env.local')
 
 # Ensure PRIVACY_MODE is enabled
 os.environ['PRIVACY_MODE'] = 'true'
+
+# Configure logging to output to stdout with immediate flushing
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+# Force immediate log flushing
+for handler in logging.root.handlers:
+    handler.flush = lambda: sys.stdout.flush()
 
 # Import after env is set
 from app.jobs.vault_alerts_generator import VaultAlertsGenerator
@@ -46,10 +59,13 @@ async def send_boss_approval_email():
     # Initialize generator
     print("\n📦 Initializing VaultAlertsGenerator...", flush=True)
     generator = VaultAlertsGenerator()
+    await generator.initialize()  # Initialize async clients (Zoho API, etc.)
+    print("✅ Generator initialized successfully", flush=True)
 
     print("\n🎯 Starting vault alerts generation...", flush=True)
     print("="*70, flush=True)
     print("⏰ ESTIMATED TIME:", flush=True)
+    print("   Processing ALL 160 candidates from vault", flush=True)
     print("   First run (cache empty): 2-3 HOURS", flush=True)
     print("   - Database load: ~30 seconds", flush=True)
     print("   - Per candidate: 10-15 minutes (GPT-5 bullet generation)", flush=True)
@@ -63,13 +79,11 @@ async def send_boss_approval_email():
 
     try:
         # Generate alerts
-        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting generation...\n", flush=True)
+        print(f"[{datetime.now().strftime('%H:%M:%S')}] 🚀 Starting generation for ALL candidates...\n", flush=True)
 
         result = await generator.generate_alerts(
-            max_candidates=10,  # Target 10 candidates
-            custom_filters={
-                'date_range_days': 30,
-            },
+            max_candidates=None,  # Process ALL candidates (no limit)
+            custom_filters=None,  # No date filter - get all vault candidates
             save_files=False
         )
 
@@ -290,7 +304,7 @@ async def send_boss_approval_email():
         print("📧 SENDING EMAIL VIA AZURE COMMUNICATION SERVICES", flush=True)
         print(f"{'='*70}", flush=True)
 
-        subject = f"Vault Alerts Test - {total_candidates} Candidates (Anonymized) - Approval Needed"
+        subject = f"Vault Alerts - ALL {total_candidates} Candidates (Anonymized) - Ready for Review"
 
         recipients = [
             "steve@emailthewell.com",
@@ -300,20 +314,26 @@ async def send_boss_approval_email():
 
         print(f"\n📧 Recipients: {', '.join(recipients)}", flush=True)
         print(f"📝 Subject: {subject}", flush=True)
-        print("\n🚀 Sending...", flush=True)
+        print("\n🚀 Sending to all recipients...", flush=True)
 
-        message_id = scheduler.send_email(
-            to_email=recipients[0],
-            subject=subject,
-            html_body=email_html,
-            user_name="Boss Approval Team"
-        )
+        # Send to all three recipients
+        message_ids = []
+        for recipient in recipients:
+            print(f"   📤 Sending to {recipient}...", flush=True)
+            message_id = scheduler.send_email(
+                to_email=recipient,
+                subject=subject,
+                html_body=email_html,
+                user_name=recipient.split('@')[0].title()
+            )
+            message_ids.append(message_id)
+            print(f"      ✅ Sent (ID: {message_id[:20]}...)", flush=True)
 
         print(f"\n{'='*70}", flush=True)
-        print("✅ EMAIL SENT SUCCESSFULLY!", flush=True)
+        print("✅ EMAILS SENT SUCCESSFULLY TO ALL RECIPIENTS!", flush=True)
         print(f"{'='*70}", flush=True)
-        print(f"📨 Message ID: {message_id}", flush=True)
-        print(f"📬 From: noreply@emailthewell.com", flush=True)
+        print(f"📨 Message IDs: {len(message_ids)} emails sent", flush=True)
+        print(f"📬 From: DoNotReply@389fbf3b-307d-4882-af6a-d86d98329028.azurecomm.net", flush=True)
         print(f"📬 To: {', '.join(recipients)}", flush=True)
         print(f"📊 Candidates: {total_candidates}", flush=True)
         print(f"📝 Cards: {advisor_count} advisor, {executive_count} executive", flush=True)

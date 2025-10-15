@@ -1,9 +1,0 @@
-properties:
-  template:
-    containers:
-      - name: weekly-digest-scheduler
-        image: wellintakeacr0903.azurecr.io/well-intake-api:digest-fix-20251007-010607
-        command:
-          - python
-          - -m
-          - app.jobs.weekly_digest_scheduler

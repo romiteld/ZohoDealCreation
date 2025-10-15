@@ -325,8 +325,18 @@ UNIVERSITY_REMOVAL_PATTERNS = [
     # "MBA ([University])" → "MBA"
     (re.compile(r'\b(MBA|MS|MA|BS|BA|PhD|JD|MD|CFA|CFP|ChFC|CLU)\s*\([^\)]+\)', re.IGNORECASE), r'\1'),
 
-    # Remove standalone university mentions
-    (re.compile(r'\b(Harvard|Stanford|MIT|Yale|Penn State|LSU|UCLA|USC|NYU|Columbia|Cornell|Duke|Northwestern|Georgetown|Rice|Vanderbilt|Emory|Carnegie Mellon|IE University|INSEAD|Wharton|Kellogg|Booth|Sloan|Louisiana State University|University of\s+\w+)\b', re.IGNORECASE), ''),
+    # Remove standalone university mentions - handles both "University of X" and "X University" patterns
+    # Match specific universities and common patterns
+    (re.compile(r'\b(?:'
+        # Major named universities
+        r'Harvard|Stanford|MIT|Yale|Penn State|LSU|UCLA|USC|NYU|Columbia|Cornell|Duke|Northwestern|Georgetown|Rice|Vanderbilt|Emory|Carnegie Mellon|IE University|INSEAD|Wharton|Kellogg|Booth|Sloan|'
+        # "University of X Y Z" pattern
+        r'University\s+of\s+[\w\s,\-–]+?|'
+        # "X State University" pattern
+        r'[\w\s]+?\s+State\s+University|'
+        # "X University" pattern (but not too broad - 1-3 words before University)
+        r'(?:\w+\s+)?(?:\w+\s+)?\w+\s+University'
+        r')(?=\s*[;,\.\(]|$)', re.IGNORECASE), ''),
 ]
 
 # Achievement patterns
@@ -391,8 +401,10 @@ def anonymize_firm_name(text: str) -> str:
     sorted_firms = sorted(ALL_FIRMS.items(), key=lambda x: len(x[0]), reverse=True)
 
     for firm_name, classification in sorted_firms:
-        # Use word boundaries to avoid partial matches
-        pattern = re.compile(r'\b' + re.escape(firm_name) + r'\b', re.IGNORECASE)
+        # Replace spaces in firm name with \s+ to match any whitespace (including newlines, tabs, multiple spaces)
+        # This ensures we catch "Morgan Stanley" even if rendered as "Morgan\nStanley" in HTML
+        firm_pattern = re.escape(firm_name).replace(r'\ ', r'\s+')
+        pattern = re.compile(r'\b' + firm_pattern + r'\b', re.IGNORECASE)
         result = pattern.sub(classification, result)
 
     return result

@@ -63,7 +63,7 @@ async def get_zoho_headers(access_token: Optional[str] = None) -> Dict[str, str]
     """Get Zoho API headers with authentication - async version"""
     if not access_token:
         # Get token from OAuth service
-        oauth_url = f"{os.getenv('ZOHO_OAUTH_SERVICE_URL', '')}/api/token"
+        oauth_url = f"{os.getenv('ZOHO_OAUTH_SERVICE_URL', '')}/oauth/token"
         try:
             async with aiohttp.ClientSession() as session:
                 async with session.get(oauth_url) as response:
@@ -82,7 +82,7 @@ def get_zoho_headers_sync(access_token: Optional[str] = None) -> Dict[str, str]:
     """Get Zoho API headers with authentication - synchronous version for backwards compatibility"""
     if not access_token:
         # Get token from OAuth service
-        oauth_url = f"{os.getenv('ZOHO_OAUTH_SERVICE_URL', '')}/api/token"
+        oauth_url = f"{os.getenv('ZOHO_OAUTH_SERVICE_URL', '')}/oauth/token"
         try:
             response = requests.get(oauth_url)
             if response.status_code == 200:
@@ -1286,6 +1286,12 @@ class ZohoApiClient(ZohoClient):
         """Public method for health checks."""
         return self._get_access_token()
 
+    async def _get_access_token_async(self) -> str:
+        """Async version of get_access_token for async operations."""
+        # For now, use synchronous version since OAuth proxy is fast
+        # TODO: Migrate to fully async httpx client for OAuth proxy calls
+        return self._get_access_token()
+
     async def initialize(self):
         """Initialize async HTTP client."""
         if self.http_client is None:
@@ -1311,11 +1317,25 @@ class ZohoApiClient(ZohoClient):
         if not self.http_client:
             await self.initialize()
 
+        # Construct full URL if relative path provided
+        if not url.startswith('http'):
+            full_url = f"{self.base_url}/{url.lstrip('/')}"
+        else:
+            full_url = url
+
+        # Get access token
+        token = await self._get_access_token_async()
+
+        # Set headers with auth token
+        headers = kwargs.get('headers', {})
+        headers['Authorization'] = f'Zoho-oauthtoken {token}'
+        kwargs['headers'] = headers
+
         start_time = time.time()
         success = False
 
         try:
-            response = await self.http_client.request(method, url, **kwargs)
+            response = await self.http_client.request(method, full_url, **kwargs)
             response.raise_for_status()
             success = True
             return response.json()
@@ -2296,3 +2316,153 @@ class ZohoApiClient(ZohoClient):
         except Exception as e:
             logger.error(f"Error fetching candidates from Zoho API: {e}")
             raise
+
+    async def query_module(
+        self,
+        module_name: str,
+        filters: Optional[Dict[str, Any]] = None,
+        criteria: Optional[str] = None,
+        fields: Optional[List[str]] = None,
+        sort_by: Optional[str] = None,
+        sort_order: str = "desc",
+        limit: int = 100,
+        page: int = 1,
+        cvid: Optional[str] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Universal query method for all 68 Zoho modules.
+
+        NO OWNER FILTERING - All users can query all records.
+
+        Args:
+            module_name: Zoho module name (e.g., "Leads", "Jobs", "Contacts")
+            filters: Dictionary of filters to apply (will be converted to criteria)
+                Examples:
+                - {"status": "Open", "location__contains": "Texas"}
+                - {"created_time__gte": "2025-01-01T00:00:00Z"}
+                - {"owner.email": "recruiter@emailthewell.com"}
+            criteria: Pre-built Zoho criteria string (takes precedence over filters)
+                Example: "(Status:equals:Open)and(Location:contains:Texas)"
+                If provided, filters parameter is ignored.
+            fields: List of specific fields to return (field projection)
+            sort_by: Field to sort by
+            sort_order: "asc" or "desc" (default: "desc")
+            limit: Maximum records to return
+            page: Page number for pagination
+            cvid: Custom view ID (optional)
+
+        Returns:
+            List of records from the module
+
+        Example:
+            # Query with filters dict
+            jobs = await client.query_module(
+                module_name="Jobs",
+                filters={"status": "Open", "location__contains": "Texas"},
+                limit=50
+            )
+
+            # Query with pre-built criteria (from FilterBuilder)
+            submissions = await client.query_module(
+                module_name="Submissions",
+                criteria="(Submission_Status:equals:Pending)",
+                fields=["id", "Candidate_Name", "Job_Title", "Submitted_Date"]
+            )
+        """
+        try:
+            # Build query parameters
+            params = {
+                "page": page,
+                "per_page": min(limit, 200)  # Zoho max is 200 per page
+            }
+
+            # Add custom view ID if provided
+            if cvid:
+                params["cvid"] = cvid
+
+            # Add field projection if specified
+            if fields:
+                params["fields"] = ",".join(fields)
+
+            # Add sort parameters
+            if sort_by:
+                params["sort_by"] = sort_by
+                params["sort_order"] = sort_order
+
+            # Handle criteria parameter
+            if criteria:
+                # Pre-built criteria string provided (e.g., from FilterBuilder)
+                params["criteria"] = criteria
+                logger.debug(f"Using pre-built criteria: {criteria}")
+            elif filters:
+                # Build criteria filter from filters dict
+                criteria_parts = []
+                for key, value in filters.items():
+                    # Handle different filter operators
+                    if "__" in key:
+                        field, operator = key.rsplit("__", 1)
+
+                        operator_map = {
+                            "contains": "contains",
+                            "starts_with": "starts_with",
+                            "ends_with": "ends_with",
+                            "eq": "equals",
+                            "ne": "not_equals",
+                            "gt": "greater_than",
+                            "gte": "greater_equal",
+                            "lt": "less_than",
+                            "lte": "less_equal",
+                            "in": "in",
+                            "not_in": "not_in",
+                            "is_null": "is_null",
+                            "is_not_null": "is_not_null"
+                        }
+
+                        zoho_operator = operator_map.get(operator, "equals")
+
+                        # Handle list values for in/not_in operators (Fix for line 2391 issue)
+                        if operator in ["in", "not_in"] and isinstance(value, list):
+                            # Convert list to comma-separated string for Zoho API
+                            value = ",".join(str(v) for v in value)
+
+                        criteria_parts.append(f"({field}:{zoho_operator}:{value})")
+                    else:
+                        # Simple equality filter
+                        criteria_parts.append(f"({key}:equals:{value})")
+
+                if criteria_parts:
+                    # Combine criteria with AND logic
+                    built_criteria = "(" + "and".join(criteria_parts) + ")"
+                    params["criteria"] = built_criteria
+                    logger.debug(f"Built criteria from filters: {built_criteria}")
+
+            logger.info(f"Querying module '{module_name}' with params: {params}")
+
+            # Make async request
+            response = await self._make_request_async(
+                "GET",
+                module_name,
+                params=params
+            )
+
+            # Extract data array
+            records = response.get("data", [])
+
+            logger.info(f"Retrieved {len(records)} records from {module_name}")
+
+            return records
+
+        except HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.warning(f"Module '{module_name}' not found or not accessible")
+                return []
+            elif e.response.status_code == 204:
+                # No content (no records found)
+                logger.info(f"No records found in {module_name}")
+                return []
+            else:
+                logger.error(f"HTTP error querying {module_name}: {e}")
+                raise
+        except Exception as e:
+            logger.error(f"Error querying module '{module_name}': {e}", exc_info=True)
+            return []

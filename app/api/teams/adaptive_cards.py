@@ -121,6 +121,13 @@ def create_help_card() -> Dict[str, Any]:
                 },
                 {
                     "type": "TextBlock",
+                    "text": "**Commands start with `/`** — Everything else is treated as a natural language query!",
+                    "wrap": True,
+                    "weight": "Bolder",
+                    "spacing": "Small"
+                },
+                {
+                    "type": "TextBlock",
                     "text": "Use these commands to generate candidate digests, manage settings, and view analytics.",
                     "wrap": True,
                     "isSubtle": True,
@@ -148,11 +155,11 @@ def create_help_card() -> Dict[str, Any]:
                         {
                             "type": "FactSet",
                             "facts": [
-                                {"title": "`digest`", "value": "Use your default audience"},
-                                {"title": "`digest advisors`", "value": "Financial advisors only"},
-                                {"title": "`digest c_suite`", "value": "Executives only (CEO, CFO, VP, etc.)"},
-                                {"title": "`digest global`", "value": "All candidates"},
-                                {"title": "`digest <email>`", "value": "Test mode - sends to your email"}
+                                {"title": "`/digest`", "value": "Use your default audience"},
+                                {"title": "`/digest advisors`", "value": "Financial advisors only"},
+                                {"title": "`/digest c_suite`", "value": "Executives only (CEO, CFO, VP, etc.)"},
+                                {"title": "`/digest global`", "value": "All candidates"},
+                                {"title": "`/digest <email>`", "value": "Test mode - sends to your email"}
                             ]
                         }
                     ]
@@ -179,7 +186,7 @@ def create_help_card() -> Dict[str, Any]:
                         {
                             "type": "FactSet",
                             "facts": [
-                                {"title": "`preferences`", "value": "View and edit your settings"}
+                                {"title": "`/preferences`", "value": "View and edit your settings"}
                             ]
                         }
                     ]
@@ -206,7 +213,7 @@ def create_help_card() -> Dict[str, Any]:
                         {
                             "type": "FactSet",
                             "facts": [
-                                {"title": "`analytics`", "value": "Show conversation count, digest requests, and recent activity"}
+                                {"title": "`/analytics`", "value": "Show conversation count, digest requests, and recent activity"}
                             ]
                         }
                     ]

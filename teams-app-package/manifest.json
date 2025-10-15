@@ -1,7 +1,7 @@
 {
   "$schema": "https://developer.microsoft.com/json-schemas/teams/v1.23/MicrosoftTeams.schema.json",
   "manifestVersion": "1.17",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "id": "34d9338f-ba4e-4a68-9a22-b01892afba83",
   "developer": {
     "name": "The Well",
@@ -14,8 +14,8 @@
     "full": "TalentWell Candidate Digest Assistant"
   },
   "description": {
-    "short": "AI-powered candidate digest generator",
-    "full": "TalentWell Assistant helps financial advisors discover and track top talent through intelligent candidate digests powered by GPT-5 and comprehensive scoring algorithms."
+    "short": "AI-powered candidate digest & natural language queries",
+    "full": "TalentWell Assistant helps recruiters discover and track top talent through intelligent candidate digests and natural language queries. Use slash commands (/) for built-in features or just ask questions in plain English about candidates, deals, and meetings."
   },
   "icons": {
     "color": "color-icon.png",
@@ -40,23 +40,19 @@
           "commands": [
             {
               "title": "help",
-              "description": "Show available commands and help"
+              "description": "Show available slash commands and NLP query examples"
             },
             {
               "title": "digest",
-              "description": "Generate candidate digest (e.g., 'digest steve_perry')"
-            },
-            {
-              "title": "digest global",
-              "description": "Generate digest for all advisors"
+              "description": "Generate candidate digest - use /digest advisors, /digest c_suite, or /digest global"
             },
             {
               "title": "preferences",
-              "description": "View and update your settings"
+              "description": "View and update your notification preferences and settings"
             },
             {
               "title": "analytics",
-              "description": "View usage statistics"
+              "description": "View your usage statistics and activity history"
             }
           ]
         }
@@ -68,6 +64,6 @@
     "messageTeamMembers"
   ],
   "validDomains": [
-    "well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainerapps.io"
+    "teams-bot.wittyocean-dfae0f9b.eastus.azurecontainerapps.io"
   ]
 }

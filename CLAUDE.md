@@ -106,16 +106,23 @@ curl -X POST "https://well-intake-api.wittyocean-dfae0f9b.eastus.azurecontainera
 
 ### Zoho API Testing
 ```bash
-# Toggle data source
-export USE_ZOHO_API=true  # Use Zoho API
-export USE_ZOHO_API=false # Use PostgreSQL (default)
+# Test OAuth token retrieval
+curl "https://well-zoho-oauth-v2.azurewebsites.net/oauth/token"
 
-# Test boss email endpoint
-curl -X POST "http://localhost:8000/api/teams/admin/send_vault_alerts_to_bosses?from_date=2025-01-01" \
-  -H "X-API-Key: $API_KEY"
+# Test vault candidates query (164 candidates from Leads module)
+python3 <<EOF
+import requests
+token = requests.get("https://well-zoho-oauth-v2.azurewebsites.net/oauth/token").json()['access_token']
+headers = {"Authorization": f"Bearer {token}"}
+url = "https://www.zohoapis.com/crm/v8/Leads"
+params = {"cvid": "6221978000090941003", "per_page": 10}
+response = requests.get(url, headers=headers, params=params)
+print(f"Status: {response.status_code}")
+print(f"Candidates: {len(response.json().get('data', []))}")
+EOF
 
-# Verify schema mapping
-pytest tests/test_data_source_parity.py -v
+# Test vault marketability worker
+python3 test_vault_marketability.py  # Sends message to Service Bus queue
 ```
 
 ### Outlook Add-in
@@ -183,7 +190,7 @@ Defaults in `app/config/feature_flags.py`, override in `.env.local`:
 - `FEATURE_GROWTH_EXTRACTION=true` - Extract growth metrics from transcripts
 - `FEATURE_LLM_SENTIMENT=true` - GPT-5 sentiment scoring (±15% boost/penalty)
 - `FEATURE_ASYNC_ZOHO=false` - ⚠️ DO NOT ENABLE (needs refactor)
-- `USE_ZOHO_API=false` - Toggle between PostgreSQL (false) and Zoho API (true) for vault candidates
+- `USE_ZOHO_API=false` - Toggle for vault alert email generation only (deprecated for queries)
 
 ## Common Patterns
 
@@ -226,12 +233,23 @@ pytest tests/ -k "shared" -v
 
 ## Recent Updates (2025-10)
 
-### Zoho API Integration (2025-01-15)
-- **Dual Data Source**: Feature flag toggle between PostgreSQL and Zoho CRM API
-- **29-Column Schema Mapping**: Complete field alignment with production Zoho API
-  - Key fields: `Candidate_Locator`, `Employer`, `Book_Size_AUM`, `Production_L12Mo`, `Desired_Comp`
-  - Special fields: `Transferable_Book_of_Business`, `Licenses_and_Exams`, `When_Available`
-  - Timestamps: `Created_Time`, `Modified_Time` preserved from Zoho
+### Zoho API Integration (2025-10-15)
+- **Vault Candidates Module**: Stored in Zoho **Leads** module (NOT "Candidates" module)
+  - Custom View ID: `6221978000090941003` ("_Vault Candidates")
+  - Filter: `Publish_to_Vault = true`
+  - Current Count: 164 live candidates from Zoho CRM
+- **Field Mapping**: Complete alignment with Zoho CRM API v8
+  - Core fields: `Candidate_Locator`, `Full_Name`, `Employer`, `Current_Location`, `Designation`
+  - Financial: `Book_Size_AUM`, `Production_L12Mo`, `Desired_Comp`
+  - Availability: `When_Available`, `Is_Mobile`, `Remote`, `Open_to_Hybrid`
+  - Special: `Transferable_Book_of_Business`, `Licenses_and_Exams`, `Professional_Designations`
+  - Metadata: `Owner`, `Created_Time`, `Modified_Time`, `Date_Published_to_Vault`
+- **Canonical Mapping System** (Single Source of Truth):
+  - `zoho_field_mappings.json` (954 KB) - All 68 modules, 1,518 fields, 159 custom views
+  - `ZOHO_MAPPINGS_README.md` - Comprehensive documentation with code examples
+  - `ZOHO_MAPPINGS_SUMMARY.txt` - Quick reference statistics
+  - `generate_zoho_mappings.py` - Script to regenerate from live Zoho API (~30-45s runtime)
+  - **ALWAYS reference these files** for Zoho field/module names - no guessing!
 - **Async HTTP Client**: All Zoho queries use httpx AsyncClient (no blocking)
 - **Boss Email Endpoint**: `/api/teams/admin/send_vault_alerts_to_bosses` for approval workflow
 - **Consolidated Anonymizer**: Single canonical implementation at `app/utils/anonymizer.py`
@@ -242,7 +260,7 @@ pytest tests/ -k "shared" -v
 - Format: `‼️ [Alert Type] 🔔 [Location] 📍 [Availability/Compensation]` + 5-6 bullets
 - NO candidate names, NO firm names in output
 - CSS: `page-break-inside: avoid` prevents card splitting
-- Database: 146 vault candidates in `vault_candidates` table
+- **Data Source**: Zoho CRM Leads module (164 vault candidates via custom view)
 - Redis: 24hr bullet caching with `vault:bullets:{twav}` keys
 
 ### Zoom Integration
@@ -257,11 +275,17 @@ pytest tests/ -k "shared" -v
 - Database: `teams_user_preferences`, `weekly_digest_deliveries`, `subscription_confirmations`
 - Scheduler: `app/jobs/weekly_digest_scheduler.py` (hourly background job)
 
-### Teams Bot Natural Language
-- GPT-5-mini intent classification → SQL query builder
-- Executive access (steve@, brandon@, daniel.romitelli@): Full data
-- Regular recruiters: Filtered by `owner_email`
-- Supports: deals, deal_notes, meetings, vault_candidates tables
+### Teams Bot Natural Language & Vault Marketability
+- **Natural Language Queries**: GPT-5-mini intent classification → SQL query builder
+  - Executive access (steve@, brandon@, daniel.romitelli@): Full data
+  - Regular recruiters: Filtered by `owner_email`
+  - Supports: deals, deal_notes, meetings tables
+- **Vault Marketability Worker**: Service Bus queue-based processing
+  - Query: "Give me 10 most marketable candidates from vault"
+  - Worker: `app/workers/vault_marketability_worker.py`
+  - Data: Real-time from Zoho Leads module (164 candidates)
+  - Scoring: MarketabilityScorer with weighted algorithm
+  - Results: Anonymized adaptive cards in Teams
 
 ## Git Guidelines
 

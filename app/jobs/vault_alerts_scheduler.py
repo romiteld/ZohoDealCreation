@@ -215,9 +215,16 @@ class VaultAlertsScheduler:
                 logger.error(f"   Blocking email for security - contains identifiable firm information")
                 return False
 
-        # University patterns
+        # University patterns - matches both "University of X" and "X University" patterns
         UNIVERSITY_PATTERNS = [
-            r'University\s+of\s+\w+', r'\bLSU\b', r'Penn\s+State', r'Louisiana\s+State',
+            # "University of X Y Z" patterns (multiple words)
+            r'University\s+of\s+[\w\s,\-–]+',
+            # "X State University" patterns
+            r'[\w\s]+\s+State\s+University',
+            # "X University" patterns (1-3 words before University)
+            r'(?:\w+\s+)?(?:\w+\s+)?\w+\s+University',
+            # Named universities
+            r'\bLSU\b', r'Penn\s+State', r'Louisiana\s+State',
             r'Harvard', r'Stanford', r'MIT\b', r'Yale', r'Princeton',
             r'Columbia', r'Cornell', r'Duke', r'Northwestern', r'Georgetown',
             r'Vanderbilt', r'Emory', r'Rice', r'Notre\s+Dame',

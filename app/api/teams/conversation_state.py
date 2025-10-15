@@ -82,8 +82,8 @@ class ClarificationSession(TypedDict):
 
 
 # Confidence thresholds for clarification
-CONFIDENCE_THRESHOLD_LOW = 0.5   # Below this: Always ask clarification
-CONFIDENCE_THRESHOLD_MED = 0.8   # 0.5-0.8: Suggest options but proceed
+CONFIDENCE_THRESHOLD_LOW = 0.3   # Below this: Always ask clarification (lowered from 0.5 for better UX)
+CONFIDENCE_THRESHOLD_MED = 0.7   # 0.3-0.7: Suggest options but proceed (lowered from 0.8)
 # Above 0.8: Execute directly (no separate HIGH threshold needed)
 
 # Conversation memory limits

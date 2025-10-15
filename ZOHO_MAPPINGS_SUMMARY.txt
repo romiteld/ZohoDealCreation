@@ -1,0 +1,173 @@
+================================================================================
+ZOHO CRM FIELD MAPPINGS - CANONICAL SOURCE OF TRUTH
+================================================================================
+
+✅ COMPLETED: 2025-10-15T21:02:11Z
+
+📁 FILE: zoho_field_mappings.json (976 KB)
+   - Auto-generated from live Zoho CRM API v8
+   - 68 API-accessible modules
+   - 1,518 total fields
+   - 159 custom views
+   - All picklist values included
+   - All lookup relationships mapped
+
+🔧 GENERATOR SCRIPT: generate_zoho_mappings.py
+   - Queries Zoho CRM metadata API
+   - Fetches all modules, fields, custom views
+   - Includes picklist values and lookup details
+   - Runtime: ~30-45 seconds
+
+📚 DOCUMENTATION: ZOHO_MAPPINGS_README.md
+   - Complete usage guide
+   - Python examples
+   - Field structure reference
+   - Common patterns
+
+================================================================================
+KEY MODULES (Top 10 by field count)
+================================================================================
+
+1.  Leads (Candidates)          - 136 fields - /crm/v8/Leads
+2.  Jobs                         - 107 fields - /crm/v8/Jobs  
+3.  Contacts                     -  50 fields - /crm/v8/Contacts
+4.  Invoices                     -  49 fields - /crm/v8/Invoices
+5.  Deals                        -  48 fields - /crm/v8/Deals
+6.  Campaigns                    -  44 fields - /crm/v8/Campaigns
+7.  Accounts (Companies)         -  43 fields - /crm/v8/Accounts
+8.  Sales_Orders                 -  42 fields - /crm/v8/Sales_Orders
+9.  Submissions                  -  40 fields - /crm/v8/Submissions
+10. Purchase_Orders              -  40 fields - /crm/v8/Purchase_Orders
+
+================================================================================
+CRITICAL INFORMATION - VAULT CANDIDATES
+================================================================================
+
+⚠️  MODULE: Leads (NOT "Candidates" - that module doesn't exist)
+⚠️  CUSTOM VIEW ID: 6221978000090941003
+⚠️  VIEW NAME: _Vault Candidates
+⚠️  FILTER: Publish_to_Vault = true (NOT Candidate_Type = Vault)
+⚠️  CURRENT COUNT: 164 vault candidates
+
+API ENDPOINT:
+  GET https://www.zohoapis.com/crm/v8/Leads?cvid=6221978000090941003&per_page=200
+
+CRITICAL FIELDS (17 total):
+  ✅ Candidate_Locator (autonumber) - TWAV number
+  ✅ Full_Name (text)
+  ✅ First_Name (text)
+  ✅ Last_Name (text)
+  ✅ Email (email)
+  ✅ Phone (phone)
+  ✅ Current_Location (text) - City, State
+  ✅ Date_Published_to_Vault (date)
+  ✅ Publish_to_Vault (boolean) - Filter field
+  ✅ Pipeline_Stage (picklist) - 14 options
+  ✅ Interview_Recording_Link (url) - Zoom URL
+  ✅ Full_Interview_URL (url)
+  ✅ Designation (text) - Title
+  ✅ Mobility_Details (text)
+  ✅ Is_Mobile (picklist) - Yes/No
+  ✅ Candidate_Type (multiselectpicklist) - 7 options
+  ✅ Owner (ownerlookup)
+
+================================================================================
+REMOVED FILES (Old/Duplicate)
+================================================================================
+
+The following 11 files have been DELETED to eliminate confusion:
+
+  ❌ zoho_leads_custom_views.json
+  ❌ zoho_sample_vault_candidate.json
+  ❌ zoho_payment_findings.json
+  ❌ zoho_leads_all_fields_complete.json
+  ❌ zoho_deals_fields.json
+  ❌ zoho_custom_views.json
+  ❌ zoho_vault_candidates_detailed.json
+  ❌ zoho_lead_fields.json
+  ❌ zoho_payment_modules.json
+  ❌ zoho_notes_fields.json
+  ❌ zoho_leads_fields.json
+
+================================================================================
+USAGE - PYTHON EXAMPLES
+================================================================================
+
+# Load mappings
+import json
+with open('zoho_field_mappings.json', 'r') as f:
+    zoho = json.load(f)
+
+# Get module metadata
+leads = zoho['modules']['Leads']
+print(f"Endpoint: {leads['api_endpoint']}")
+print(f"Fields: {len(leads['fields'])}")
+
+# Get field info
+email_field = leads['fields']['Email']
+print(f"Type: {email_field['data_type']}")
+print(f"Required: {email_field['required']}")
+
+# Get vault view ID
+vault_views = [v for v in zoho['custom_views']['Leads'] 
+               if v['name'] == '_Vault Candidates']
+vault_view_id = vault_views[0]['id']  # 6221978000090941003
+
+# Query vault candidates
+import requests
+token_response = requests.get(
+    "https://well-zoho-oauth-v2.azurewebsites.net/oauth/token"
+)
+token = token_response.json()['access_token']
+
+response = requests.get(
+    "https://www.zohoapis.com/crm/v8/Leads",
+    headers={"Authorization": f"Bearer {token}"},
+    params={"cvid": vault_view_id, "per_page": 200}
+)
+candidates = response.json().get('data', [])
+
+================================================================================
+REGENERATION
+================================================================================
+
+To regenerate after Zoho schema changes:
+
+  $ python3 generate_zoho_mappings.py
+
+This will:
+  1. Query all 68 API-accessible modules
+  2. Fetch field metadata (1,518 fields)
+  3. Retrieve custom views (159 views)
+  4. Generate zoho_field_mappings.json
+
+Duration: ~30-45 seconds
+Auth: OAuth service (no API key needed)
+
+================================================================================
+VALIDATION SUMMARY
+================================================================================
+
+✅ All 68 modules verified
+✅ All 1,518 fields verified
+✅ All 159 custom views verified
+✅ Vault Candidates view ID confirmed: 6221978000090941003
+✅ All 17 critical vault fields present
+✅ All picklist values included (21 picklist fields in Leads)
+✅ All lookup relationships mapped (4 lookup fields in Leads)
+✅ OAuth service endpoint verified
+✅ File size: 976 KB (0.93 MB)
+✅ Format: Valid JSON (validated)
+
+================================================================================
+
+⚠️  IMPORTANT RULES:
+
+1. ALWAYS use zoho_field_mappings.json as single source of truth
+2. NEVER create duplicate mapping files
+3. Vault candidates are in Leads module (NOT "Candidates")
+4. Use custom view ID 6221978000090941003 for vault queries
+5. Filter by Publish_to_Vault = true (NOT Candidate_Type)
+6. Regenerate mappings if Zoho schema changes
+
+================================================================================
