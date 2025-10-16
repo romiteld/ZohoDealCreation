@@ -353,6 +353,7 @@ flowchart TB
     classDef ops fill:#DCFCE7,stroke:#15803D,color:#064E3B,stroke-width:2px;
     classDef intelligent fill:#FED7D7,stroke:#E53E3E,color:#742A2A,stroke-width:2px;
     classDef infra fill:#E0E7FF,stroke:#4338CA,color:#1E1B4B,stroke-width:2px;
+    classDef shared fill:#F0FDFA,stroke:#14B8A6,color:#134E4A,stroke-width:2px;
 
     subgraph Users["User Layer"]
         Recruiter["Recruiters\n(Outlook Desktop/Web/Teams)"]
@@ -363,19 +364,30 @@ flowchart TB
 
     subgraph ClientApps["Client Applications"]
         OutlookAddin["Outlook Add-in\n(Office.js, Manifest v1.1)"]
-        TeamsBot["Teams Bot\n(TalentWell Assistant)\nNatural language queries + digests"]
+        TeamsClient["Teams Client\n(Microsoft Teams UI)"]
         WebHooks["Webhook Handlers\n(Inbound integrations)"]
     end
-    class OutlookAddin,TeamsBot,WebHooks platform;
+    class OutlookAddin,TeamsClient,WebHooks platform;
 
     subgraph AzureInfra["Azure Infrastructure"]
         FrontDoor["Azure Front Door CDN\nwell-intake-api-dnajdub4azhjcgc3"]
-        ContainerApp["Container Apps\nwell-intake-api\n(Multi-revision with traffic split)"]
+        MainContainer["Container Apps\nwell-intake-api (Port 8000)\n(Multi-revision with traffic split)"]
+        TeamsContainer["Container Apps\nteams-bot (Port 8001)\n(Bot Framework SDK)"]
         ACR["Azure Container Registry\nwellintakeacr0903"]
         KeyVault["Azure Key Vault\nwell-intake-kv"]
         AppInsights["Application Insights\n(Telemetry + Alerts)"]
     end
-    class FrontDoor,ContainerApp,ACR,KeyVault,AppInsights infra;
+    class FrontDoor,MainContainer,TeamsContainer,ACR,KeyVault,AppInsights infra;
+
+    subgraph SharedLib["Shared Library (well_shared/)"]
+        SharedCache["Redis Manager\n(cache/redis_manager.py)"]
+        SharedDB["Database Connection\n(database/connection.py)"]
+        SharedMail["Email Sender\n(mail/sender.py)"]
+        SharedVoIT["VoIT Config\n(config/voit_config.py)"]
+        SharedC3["C³ Cache\n(cache/c3.py)"]
+        SharedTelemetry["Telemetry\n(telemetry/insights.py)"]
+    end
+    class SharedLib,SharedCache,SharedDB,SharedMail,SharedVoIT,SharedC3,SharedTelemetry shared;
 
     subgraph NovelAlgorithms["🚨 Revolutionary Optimization Layer (Novel Algorithms)"]
         VoIT["VoIT Algorithm\n(Value of Insight Time)\nAdaptive reasoning allocation"]
@@ -383,7 +395,7 @@ flowchart TB
     end
     class NovelAlgorithms,VoIT,C3 intelligent;
 
-    subgraph CoreServices["Core Application Services"]
+    subgraph CoreServices["Core Application Services (Main API - Port 8000)"]
         FastAPI["FastAPI Core\n50+ endpoints"]
         OAuth["OAuth Proxy\n(Zoho token broker)"]
         VaultAgent["Candidate Vault Agent\n(CRM aggregation + formatting)"]
@@ -394,11 +406,21 @@ flowchart TB
     end
     class FastAPI,OAuth,VaultAgent,DigestScheduler,LangGraph,StreamAPI,GraphClient platform;
 
+    subgraph TeamsBotServices["Teams Bot Services (Port 8001)"]
+        BotFramework["Bot Framework SDK\n(Adaptive Cards + Dialog)"]
+        NLPEngine["Natural Language Engine\n(GPT-5-mini intent classification)"]
+        DigestWorker["Digest Worker\n(Service Bus consumer)"]
+        MarketabilityWorker["Vault Marketability Worker\n(Service Bus consumer)"]
+        UserPrefs["User Preferences Manager\n(PostgreSQL storage)"]
+        Analytics["Analytics Tracker\n(Conversation metrics)"]
+    end
+    class TeamsBotServices,BotFramework,NLPEngine,DigestWorker,MarketabilityWorker,UserPrefs,Analytics platform;
+
     subgraph DataLayer["Data & Persistence Layer"]
         RedisCache["Azure Cache for Redis\n(C³ + standard cache)"]
         PostgreSQL["Azure PostgreSQL Flexible\nwell-intake-db\n(pgvector + 400K context)"]
         BlobStorage["Azure Blob Storage\n(Attachments + manifests)"]
-        ServiceBus["Azure Service Bus\n(Batch queues)"]
+        ServiceBus["Azure Service Bus\n(email-batch-queue, digest-queue,\nvault-marketability-queue)"]
         AISearch["Azure AI Search\n(Semantic patterns)"]
     end
     class RedisCache,PostgreSQL,BlobStorage,ServiceBus,AISearch datastore;
@@ -413,7 +435,7 @@ flowchart TB
     class AzureOpenAI,Firecrawl,ApolloIO,AzureMaps,Zoom external;
 
     subgraph ExternalSystems["External Business Systems"]
-        ZohoCRM["Zoho CRM v8 API\n(Accounts/Contacts/Deals)"]
+        ZohoCRM["Zoho CRM v8 API\n(Accounts/Contacts/Deals/Leads)"]
         ACS["Azure Communication Services\n(Weekly digest emails)"]
         TeamsAPI["Microsoft Teams API\n(Bot Framework + Adaptive Cards)"]
     end
@@ -427,24 +449,39 @@ flowchart TB
 
     %% User flows
     Recruiter -->|"Open add-in"| OutlookAddin
-    Recruiter -->|"Chat + commands"| TeamsBot
-    Recruiter -->|"Subscribe to digests"| TeamsBot
+    Recruiter -->|"Chat in Teams"| TeamsClient
+    Recruiter -->|"Subscribe to digests"| TeamsClient
     Executives -->|"Receive digests"| ACS
 
     %% Client to infrastructure
     OutlookAddin -->|"HTTPS/WSS"| FrontDoor
-    TeamsBot -->|"Bot Framework"| FrontDoor
+    TeamsClient -->|"Bot Framework"| TeamsAPI
     WebHooks -->|"HTTPS"| FrontDoor
     Admin -->|"Admin APIs"| FrontDoor
 
     %% Infrastructure routing
-    FrontDoor -->|"Route + TLS"| ContainerApp
-    ContainerApp -->|"Pull images"| ACR
-    ContainerApp -->|"Fetch secrets"| KeyVault
-    ContainerApp -->|"Telemetry"| AppInsights
+    FrontDoor -->|"Route + TLS"| MainContainer
+    FrontDoor -->|"Route + TLS"| TeamsContainer
+    TeamsAPI -->|"Messages"| TeamsContainer
+    MainContainer -->|"Pull images"| ACR
+    TeamsContainer -->|"Pull images"| ACR
+    MainContainer -->|"Fetch secrets"| KeyVault
+    TeamsContainer -->|"Fetch secrets"| KeyVault
+    MainContainer -->|"Telemetry"| AppInsights
+    TeamsContainer -->|"Telemetry"| AppInsights
 
-    %% Core service interactions
-    ContainerApp -->|"Host"| FastAPI
+    %% Shared library usage
+    MainContainer -.->|"Uses"| SharedLib
+    TeamsContainer -.->|"Uses"| SharedLib
+    SharedCache -->|"Connects to"| RedisCache
+    SharedDB -->|"Connects to"| PostgreSQL
+    SharedMail -->|"Sends via"| ACS
+    SharedVoIT -->|"Configures"| VoIT
+    SharedC3 -->|"Implements"| C3
+    SharedTelemetry -->|"Reports to"| AppInsights
+
+    %% Core service interactions (Main API)
+    MainContainer -->|"Host"| FastAPI
     FastAPI -->|"Delegate"| OAuth
     FastAPI -->|"Orchestrate"| LangGraph
     FastAPI -->|"Stream"| StreamAPI
@@ -452,41 +489,64 @@ flowchart TB
     FastAPI -->|"Schedule digests"| DigestScheduler
     FastAPI -->|"Read emails"| GraphClient
 
+    %% Teams Bot service interactions
+    TeamsContainer -->|"Host"| BotFramework
+    BotFramework -->|"Process NLP"| NLPEngine
+    BotFramework -->|"Manage prefs"| UserPrefs
+    BotFramework -->|"Track usage"| Analytics
+    DigestWorker -->|"Consume queue"| ServiceBus
+    MarketabilityWorker -->|"Consume queue"| ServiceBus
+
     %% Novel algorithms as cross-cutting layer
     FastAPI -.->|"Uses VoIT for\nall AI calls"| VoIT
     LangGraph -.->|"Optimized by"| VoIT
     VaultAgent -.->|"Optimized by"| VoIT
+    NLPEngine -.->|"Optimized by"| VoIT
+    DigestWorker -.->|"Optimized by"| VoIT
     VoIT -->|"Selects tier"| AzureOpenAI
 
     FastAPI -.->|"Uses C³ for\nall caching"| C3
     LangGraph -.->|"Optimized by"| C3
     VaultAgent -.->|"Optimized by"| C3
+    DigestWorker -.->|"Optimized by"| C3
     C3 -->|"Manages"| RedisCache
 
-    %% Data layer connections
+    %% Data layer connections (Main API)
     FastAPI -->|"Cache I/O"| RedisCache
     FastAPI -->|"Persist"| PostgreSQL
     FastAPI -->|"Enqueue"| ServiceBus
     FastAPI -->|"Store files"| BlobStorage
     FastAPI -->|"Semantic search"| AISearch
 
+    %% Data layer connections (Teams Bot)
+    BotFramework -->|"Cache I/O"| RedisCache
+    UserPrefs -->|"Store prefs"| PostgreSQL
+    Analytics -->|"Store metrics"| PostgreSQL
+    DigestWorker -->|"Query data"| PostgreSQL
+    MarketabilityWorker -->|"Query vault"| ZohoCRM
+
     %% AI enrichment
     LangGraph -->|"Research"| Firecrawl
     FastAPI -->|"Enrich"| ApolloIO
     FastAPI -->|"Geocode"| AzureMaps
     VaultAgent -->|"Transcripts"| Zoom
+    NLPEngine -->|"Intent classification"| AzureOpenAI
+    DigestWorker -->|"Generate content"| AzureOpenAI
 
     %% External systems
     FastAPI -->|"Create records"| ZohoCRM
-    FastAPI -->|"Bot messages"| TeamsAPI
+    BotFramework -->|"Send cards"| TeamsAPI
     OAuth -->|"Token refresh"| ZohoCRM
     VaultAgent -->|"Query candidates"| ZohoCRM
     DigestScheduler -->|"Send emails"| ACS
+    DigestWorker -->|"Send emails"| ACS
 
     %% CI/CD
     GitHub -->|"Build + Push"| ACR
-    GitHub -->|"Deploy"| ContainerApp
+    GitHub -->|"Deploy"| MainContainer
+    GitHub -->|"Deploy"| TeamsContainer
     Scripts -->|"Warmup"| FastAPI
+    Scripts -->|"Warmup"| BotFramework
     Scripts -->|"Migrations"| PostgreSQL
 ```
 
@@ -596,6 +656,144 @@ sequenceDiagram
     Vault-->>Client: {published, results, cache_status}
 ```
 
+### Service Bus Async Processing Flow
+**Azure Service Bus message queues for batch processing and async workflows**
+
+```mermaid
+sequenceDiagram
+    participant Client as API Client/Scheduler
+    participant MainAPI as Main API (Port 8000)
+    participant ServiceBus as Azure Service Bus
+    participant EmailQueue as email-batch-queue
+    participant DigestQueue as digest-queue
+    participant VaultQueue as vault-marketability-queue
+    participant DeadLetter as Dead Letter Queue
+    participant TeamsWorker as Teams Bot Worker
+    participant VaultWorker as Vault Worker (Main API)
+    participant KEDA as KEDA Scaler
+    participant PostgreSQL as PostgreSQL
+    participant Redis as Redis Cache
+    participant ZohoCRM as Zoho CRM
+
+    Note over Client,ZohoCRM: Email Batch Processing Flow
+
+    Client->>MainAPI: POST /batch/submit<br/>{emails: [50 emails]}
+    MainAPI->>PostgreSQL: Create batch_job record<br/>status: pending
+    PostgreSQL-->>MainAPI: batch_id: abc-123
+
+    loop For each email in batch
+        MainAPI->>EmailQueue: Send message<br/>{email_id, batch_id}
+    end
+
+    MainAPI-->>Client: 202 Accepted<br/>{batch_id: "abc-123"}
+
+    Note over ServiceBus,KEDA: KEDA Auto-Scaling
+
+    KEDA->>EmailQueue: Poll queue depth
+    EmailQueue-->>KEDA: 50 messages pending
+    KEDA->>MainAPI: Scale to 3 replicas
+
+    Note over VaultWorker: Batch Worker Processing
+
+    loop Process messages (batch=10)
+        VaultWorker->>EmailQueue: Receive 10 messages<br/>(PeekLock mode)
+        EmailQueue-->>VaultWorker: Message batch
+
+        loop For each message
+            VaultWorker->>VaultWorker: Extract + enrich email
+
+            alt Success
+                VaultWorker->>ZohoCRM: Create CRM records
+                VaultWorker->>PostgreSQL: Update batch_item<br/>status: success
+                VaultWorker->>EmailQueue: Complete message
+            else Transient Error
+                VaultWorker->>VaultWorker: Retry (3 attempts)
+                alt Max retries exceeded
+                    VaultWorker->>EmailQueue: Abandon message
+                    EmailQueue->>DeadLetter: Move to dead letter
+                    VaultWorker->>PostgreSQL: Update batch_item<br/>status: failed, error_details
+                end
+            end
+        end
+    end
+
+    VaultWorker->>PostgreSQL: Update batch_job<br/>status: completed
+    VaultWorker->>Redis: Invalidate cache keys
+
+    Note over Client,ZohoCRM: Teams Digest Generation Flow
+
+    Client->>TeamsWorker: Chat message: "digest advisors"
+    TeamsWorker->>TeamsWorker: Parse intent (GPT-5-mini)
+    TeamsWorker->>DigestQueue: Send message<br/>{user_id, audience: "advisors"}
+    TeamsWorker-->>Client: "Generating digest..."
+
+    TeamsWorker->>DigestQueue: Receive message
+    DigestQueue-->>TeamsWorker: {user_id, audience}
+
+    TeamsWorker->>Redis: Check cache<br/>key: vault:digest:advisors
+
+    alt Cache miss
+        TeamsWorker->>ZohoCRM: Query vault candidates<br/>(Leads module, custom view)
+        ZohoCRM-->>TeamsWorker: 164 vault records
+        TeamsWorker->>TeamsWorker: Apply VoIT/C³ optimization
+        TeamsWorker->>TeamsWorker: Generate digest cards
+        TeamsWorker->>Redis: Cache digest (24h TTL)
+    else Cache hit
+        Redis-->>TeamsWorker: Cached digest
+    end
+
+    TeamsWorker->>Client: Send Adaptive Card<br/>(Microsoft Teams API)
+    TeamsWorker->>PostgreSQL: Record delivery<br/>weekly_digest_deliveries
+    TeamsWorker->>DigestQueue: Complete message
+
+    Note over Client,ZohoCRM: Vault Marketability Worker Flow
+
+    Client->>TeamsWorker: "Give me 10 most marketable candidates"
+    TeamsWorker->>VaultQueue: Send message<br/>{user_id, query_text}
+    TeamsWorker-->>Client: "Analyzing vault..."
+
+    VaultWorker->>VaultQueue: Receive message
+    VaultQueue-->>VaultWorker: {user_id, query_text}
+
+    VaultWorker->>ZohoCRM: Query all vault candidates<br/>(GET /crm/v8/Leads?cvid=6221978000090941003)
+    ZohoCRM-->>VaultWorker: 164 candidates
+
+    VaultWorker->>VaultWorker: Score candidates<br/>(MarketabilityScorer algorithm)
+    VaultWorker->>VaultWorker: Rank by composite score<br/>(financial + evidence + sentiment)
+    VaultWorker->>VaultWorker: Take top 10
+    VaultWorker->>VaultWorker: Anonymize data (PRIVACY_MODE)
+
+    VaultWorker->>Client: Send ranked results<br/>(Adaptive Card with 10 candidates)
+    VaultWorker->>PostgreSQL: Record analytics
+    VaultWorker->>VaultQueue: Complete message
+
+    Note over DeadLetter: Dead Letter Queue Processing
+
+    Client->>MainAPI: POST /batch/deadletter/process
+    MainAPI->>DeadLetter: Receive failed messages
+    DeadLetter-->>MainAPI: {failed_messages: []}
+
+    loop For each failed message
+        MainAPI->>MainAPI: Analyze error
+
+        alt Retriable error
+            MainAPI->>EmailQueue: Re-enqueue message
+            MainAPI->>DeadLetter: Complete DLQ message
+        else Permanent error
+            MainAPI->>PostgreSQL: Log permanent failure
+            MainAPI->>DeadLetter: Complete DLQ message
+        end
+    end
+
+    MainAPI-->>Client: {reprocessed: 15, skipped: 3}
+
+    Note over KEDA: Auto-scaling Down
+
+    KEDA->>EmailQueue: Poll queue depth
+    EmailQueue-->>KEDA: 0 messages pending
+    KEDA->>MainAPI: Scale to 0 replicas<br/>(idle workers terminated)
+```
+
 ### Container Responsibilities (C4 Level 2)
 
 ```mermaid
@@ -642,6 +840,18 @@ flowchart TB
         Validator["Format Validator\n(Emoji + bullet rules)"]
     end
     class VaultAgent,Aggregator,Formatter,Validator container;
+
+    subgraph TeamsBotContainer["Teams Bot Service (Port 8001)"]
+        BotSDK["Bot Framework SDK\n(Activity handlers, Dialog state)"]
+        NLPEngine["Natural Language Engine\n(Intent classification, GPT-5-mini)"]
+        CommandHandler["Command Handlers\n(/digest, /preferences, /analytics, /help)"]
+        DigestWorker["Digest Worker\n(Service Bus consumer)"]
+        MarketWorker["Marketability Worker\n(Vault candidate ranking)"]
+        UserPrefs["User Preferences Manager\n(PostgreSQL + Teams state)"]
+        Analytics["Analytics Tracker\n(Conversation metrics)"]
+        ProactiveMsg["Proactive Messaging\n(Weekly digest delivery)"]
+    end
+    class TeamsBotContainer,BotSDK,NLPEngine,CommandHandler,DigestWorker,MarketWorker,UserPrefs,Analytics,ProactiveMsg container;
 
     subgraph DataPlane["Data Plane"]
         RedisNode["Redis\n(C³ entries + standard cache)"]
@@ -701,6 +911,326 @@ flowchart TB
     TokenSvc --> ZohoAPI
     Router --> Telemetry
     Telemetry --> Insights
+
+    %% Teams Bot connections
+    BotSDK --> NLPEngine
+    BotSDK --> CommandHandler
+    NLPEngine -.->|"Uses"| VoITLayer
+    CommandHandler --> DigestWorker
+    CommandHandler --> UserPrefs
+    DigestWorker -.->|"Uses"| VoITLayer
+    DigestWorker -.->|"Uses"| C3Layer
+    DigestWorker --> ZohoAPI
+    MarketWorker -.->|"Uses"| VoITLayer
+    MarketWorker --> ZohoAPI
+    UserPrefs --> Postgres
+    Analytics --> Postgres
+    ProactiveMsg --> UserPrefs
+    ProactiveMsg --> DigestWorker
+    DigestWorker --> RedisNode
+    MarketWorker --> RedisNode
+    NLPEngine --> Postgres
+    NLPEngine --> RedisNode
+```
+
+### Teams Bot Service Architecture (C4 Level 2)
+**Dedicated container service for Microsoft Teams integration**
+
+```mermaid
+flowchart TB
+    classDef container fill:#FFFFFF,stroke:#0F172A,color:#111827,stroke-width:2px;
+    classDef ext fill:#F3E8FF,stroke:#7C3AED,color:#4C1D95,stroke-width:2px;
+    classDef data fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px;
+    classDef intelligent fill:#FED7D7,stroke:#E53E3E,color:#742A2A,stroke-width:2px;
+    classDef shared fill:#F0FDFA,stroke:#14B8A6,color:#134E4A,stroke-width:2px;
+
+    subgraph TeamsClient["Microsoft Teams Client"]
+        UserChat["User Chat Interface"]
+        BotConversation["Bot Conversation Thread"]
+        AdaptiveCardsUI["Adaptive Cards Renderer"]
+    end
+    class TeamsClient,UserChat,BotConversation,AdaptiveCardsUI ext;
+
+    subgraph TeamsBotContainer["Teams Bot Container (Port 8001)\nteams_bot/app/"]
+        direction TB
+
+        subgraph APILayer["API Layer (teams_bot/app/api/)"]
+            HealthEndpoint["health_check.py\n(Health probe)"]
+            TeamsRoutes["teams/routes.py\n(Bot endpoints)"]
+        end
+
+        subgraph BotCore["Bot Framework Layer"]
+            BotFramework["Bot Framework SDK\n(Activity handler)"]
+            DialogManager["Dialog Manager\n(Conversation state)"]
+            AdaptiveCardsBuilder["Adaptive Cards Builder\n(Dynamic card generation)"]
+        end
+
+        subgraph NLPLayer["Natural Language Processing"]
+            IntentClassifier["Intent Classifier\n(GPT-5-mini)\nclassify user intent"]
+            QueryBuilder["SQL Query Builder\n(Dynamic query generation)"]
+            ResponseFormatter["Response Formatter\n(Natural language output)"]
+        end
+
+        subgraph CommandHandlers["Command Handlers"]
+            DigestCmd["Digest Command\n(/digest [audience])"]
+            PrefsCmd["Preferences Command\n(/preferences)"]
+            AnalyticsCmd["Analytics Command\n(/analytics)"]
+            HelpCmd["Help Command\n(/help)"]
+        end
+
+        subgraph Workers["Service Bus Workers (teams_bot/app/workers/)"]
+            DigestWorker["digest_worker.py\n(Consume digest-queue)"]
+            MarketabilityWorker["nlp_worker.py\n(Consume vault-marketability-queue)"]
+        end
+
+        subgraph Services["Business Services (teams_bot/app/services/)"]
+            ProactiveMsg["proactive_messaging.py\n(Send cards without user prompt)"]
+            MessageBus["message_bus.py\n(Service Bus integration)"]
+            CircuitBreaker["circuit_breaker.py\n(Fault tolerance)"]
+        end
+
+        subgraph DataLayer["Data Access"]
+            UserPrefsRepo["User Preferences Repository\n(PostgreSQL)"]
+            AnalyticsRepo["Analytics Repository\n(Conversation metrics)"]
+            DeliveryRepo["Digest Delivery Repository\n(Tracking)"]
+        end
+    end
+    class TeamsRoutes,HealthEndpoint,BotFramework,DialogManager,AdaptiveCardsBuilder,IntentClassifier,QueryBuilder,ResponseFormatter,DigestCmd,PrefsCmd,AnalyticsCmd,HelpCmd,DigestWorker,MarketabilityWorker,ProactiveMsg,MessageBus,CircuitBreaker,UserPrefsRepo,AnalyticsRepo,DeliveryRepo container;
+
+    subgraph SharedLibrary["Shared Library (well_shared/)"]
+        SharedRedis["cache/redis_manager.py"]
+        SharedDB["database/connection.py"]
+        SharedMail["mail/sender.py"]
+        SharedVoIT["config/voit_config.py"]
+        SharedC3["cache/c3.py"]
+    end
+    class SharedLibrary,SharedRedis,SharedDB,SharedMail,SharedVoIT,SharedC3 shared;
+
+    subgraph OptimizationLayer["Optimization Algorithms"]
+        VoITOpt["VoIT Algorithm\n(Adaptive model selection)"]
+        C3Opt["C³ Algorithm\n(Probabilistic caching)"]
+    end
+    class OptimizationLayer,VoITOpt,C3Opt intelligent;
+
+    subgraph ExternalDeps["External Dependencies"]
+        TeamsAPI["Microsoft Teams API\n(Bot Framework + Cards)"]
+        PostgreSQL["Azure PostgreSQL\n(User prefs, analytics)"]
+        RedisCache["Azure Redis\n(Cache + sessions)"]
+        ServiceBusQueue["Azure Service Bus\n(digest-queue,\nvault-marketability-queue)"]
+        MainAPI["Main API\n(well-intake-api)\nPort 8000"]
+        ZohoCRM["Zoho CRM\n(Vault candidates)"]
+        AzureOpenAI["Azure OpenAI\n(Intent classification)"]
+        ACS["Azure Communication Services\n(Email delivery)"]
+    end
+    class TeamsAPI,PostgreSQL,RedisCache,ServiceBusQueue,MainAPI,ZohoCRM,AzureOpenAI,ACS ext;
+
+    %% User interaction flows
+    UserChat -->|"Send message"| TeamsAPI
+    TeamsAPI -->|"Activity events"| BotFramework
+    BotFramework -->|"Parse intent"| IntentClassifier
+
+    %% Command routing
+    IntentClassifier -->|"/digest"| DigestCmd
+    IntentClassifier -->|"/preferences"| PrefsCmd
+    IntentClassifier -->|"/analytics"| AnalyticsCmd
+    IntentClassifier -->|"/help"| HelpCmd
+    IntentClassifier -->|"Natural language"| QueryBuilder
+
+    %% Natural language processing
+    QueryBuilder -->|"SQL query"| UserPrefsRepo
+    QueryBuilder -->|"SQL query"| AnalyticsRepo
+    QueryBuilder -.->|"Uses VoIT"| VoITOpt
+    VoITOpt -->|"Select model"| AzureOpenAI
+    AzureOpenAI -->|"Results"| ResponseFormatter
+    ResponseFormatter -->|"Format response"| BotFramework
+
+    %% Command execution
+    DigestCmd -->|"Enqueue request"| MessageBus
+    MessageBus -->|"Send message"| ServiceBusQueue
+    PrefsCmd -->|"Read/Write"| UserPrefsRepo
+    AnalyticsCmd -->|"Query"| AnalyticsRepo
+    HelpCmd -->|"Static response"| BotFramework
+
+    %% Worker processing
+    DigestWorker -->|"Consume"| ServiceBusQueue
+    MarketabilityWorker -->|"Consume"| ServiceBusQueue
+    DigestWorker -->|"Query vault"| ZohoCRM
+    DigestWorker -.->|"Uses VoIT/C³"| VoITOpt
+    DigestWorker -.->|"Uses C³"| C3Opt
+    DigestWorker -->|"Generate digest"| AdaptiveCardsBuilder
+    MarketabilityWorker -->|"Query vault"| ZohoCRM
+    MarketabilityWorker -.->|"Uses VoIT"| VoITOpt
+    MarketabilityWorker -->|"Rank candidates"| ResponseFormatter
+
+    %% Adaptive Cards generation
+    AdaptiveCardsBuilder -->|"Build card JSON"| BotFramework
+    BotFramework -->|"Send activity"| TeamsAPI
+    TeamsAPI -->|"Render cards"| AdaptiveCardsUI
+
+    %% Proactive messaging
+    ProactiveMsg -->|"Send without prompt"| TeamsAPI
+    ProactiveMsg -->|"Track delivery"| DeliveryRepo
+
+    %% Shared library usage
+    UserPrefsRepo -.->|"Uses"| SharedDB
+    AnalyticsRepo -.->|"Uses"| SharedDB
+    IntentClassifier -.->|"Uses"| SharedRedis
+    DigestWorker -.->|"Uses"| SharedMail
+    MarketabilityWorker -.->|"Uses"| SharedRedis
+
+    %% Data layer connections
+    UserPrefsRepo -->|"Store/Retrieve"| PostgreSQL
+    AnalyticsRepo -->|"Store/Retrieve"| PostgreSQL
+    DeliveryRepo -->|"Store/Retrieve"| PostgreSQL
+    IntentClassifier -->|"Cache I/O"| RedisCache
+    DigestWorker -->|"Cache I/O"| RedisCache
+    SharedDB -->|"Connect"| PostgreSQL
+    SharedRedis -->|"Connect"| RedisCache
+    SharedMail -->|"Send"| ACS
+
+    %% Cross-service communication
+    DigestCmd -->|"Fallback API call"| MainAPI
+    MarketabilityWorker -->|"Fallback API call"| MainAPI
+
+    %% Circuit breaker
+    MessageBus -.->|"Protected by"| CircuitBreaker
+    ProactiveMsg -.->|"Protected by"| CircuitBreaker
+
+    %% Health probes
+    HealthEndpoint -->|"Check"| PostgreSQL
+    HealthEndpoint -->|"Check"| RedisCache
+    HealthEndpoint -->|"Check"| ServiceBusQueue
+```
+
+### Shared Library Architecture (C4 Level 3)
+**Common utilities library consumed by all services (well_shared/)**
+
+```mermaid
+flowchart TB
+    classDef service fill:#E0E7FF,stroke:#4338CA,color:#1E1B4B,stroke-width:2px;
+    classDef module fill:#DCFCE7,stroke:#059669,color:#064E3B,stroke-width:2px;
+    classDef external fill:#FCE7F3,stroke:#C026D3,color:#701A75,stroke-width:2px;
+    classDef config fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px;
+
+    subgraph Consumers["Service Consumers"]
+        MainAPI["Main API Service\n(well-intake-api)\nPort 8000"]
+        TeamsBot["Teams Bot Service\n(teams-bot)\nPort 8001"]
+        VaultAgent["Vault Agent Service\n(Future)\nPort 8002"]
+    end
+    class Consumers,MainAPI,TeamsBot,VaultAgent service;
+
+    subgraph SharedLibrary["well_shared/ Package"]
+        direction TB
+
+        subgraph CacheModules["cache/ - Caching Abstractions"]
+            RedisManager["redis_manager.py\n• Connection pooling\n• Key namespacing (intake:*, vault:*)\n• Batch operations (mget, mset)\n• Health checks\n• TTL management (2h-7d)\n• Automatic reconnection"]
+
+            C3Module["c3.py\n• C³ Algorithm implementation\n• Probabilistic margin calculation\n• Embedding similarity (δ-bound)\n• Selective rebuild logic\n• Dependency certificates\n• Entry serialization"]
+
+            VoITCache["voit.py\n• VoIT span caching\n• Uncertainty metrics storage\n• Action history tracking\n• Budget persistence\n• Quality score caching"]
+        end
+
+        subgraph DatabaseModules["database/ - Database Abstractions"]
+            Connection["connection.py\n• Async SQLAlchemy sessions\n• Connection pooling (10-20 conns)\n• Retry logic with exponential backoff\n• Transaction management\n• Health checks\n• pgvector support"]
+        end
+
+        subgraph MailModules["mail/ - Email Delivery"]
+            Sender["sender.py\n• Azure Communication Services\n• Email templating\n• Attachment handling\n• Delivery tracking\n• Retry logic (3 attempts)\n• Rate limiting\n• Batch send support"]
+        end
+
+        subgraph EvidenceModules["evidence/ - Evidence Extraction"]
+            Extractor["extractor.py\n• Bullet point generation\n• Financial pattern detection\n• Source attribution\n• Confidence scoring\n• Hallucination prevention\n• Evidence linking"]
+        end
+
+        subgraph TelemetryModules["telemetry/ - Observability"]
+            Insights["insights.py\n• Application Insights client\n• Structured logging\n• Custom metrics (VOI, cache hit)\n• Trace correlation\n• Exception tracking\n• Performance profiling\n• Batch telemetry (15s interval)"]
+        end
+
+        subgraph ConfigModules["config/ - Configuration Management"]
+            VoITConfig["voit_config.py\n• Model tier costs (nano/mini/large)\n• Budget defaults (5.0 units)\n• Quality targets (0.9)\n• Cost weights (λ=0.3, μ=0.2)\n• Uncertainty thresholds\n• Action costs (reuse=0.01, tool=1.8, deep=3.5)"]
+        end
+
+        subgraph ZohoModules["zoho/ - Zoho Utilities"]
+            ZohoCommon["__init__.py\n• Shared Zoho constants\n• Field mappings reference\n• Common schemas\n• Error handling patterns"]
+        end
+    end
+    class CacheModules,DatabaseModules,MailModules,EvidenceModules,TelemetryModules,ConfigModules,ZohoModules module;
+    class RedisManager,C3Module,VoITCache,Connection,Sender,Extractor,Insights,VoITConfig,ZohoCommon module;
+
+    subgraph ExternalServices["External Dependencies"]
+        AzureRedis["Azure Cache for Redis\n(Standard C1, 1GB)"]
+        PostgreSQL["Azure PostgreSQL Flexible\n(pgvector, 400K context)"]
+        ACS["Azure Communication Services\n(Email delivery)"]
+        AppInsights["Application Insights\n(Telemetry sink)"]
+    end
+    class ExternalServices,AzureRedis,PostgreSQL,ACS,AppInsights external;
+
+    subgraph SetupConfig["Package Configuration"]
+        SetupPy["setup.py\n• Package metadata\n• Dependencies\n• Entry points\n• Version: 0.1.0"]
+
+        RequirementsTxt["requirements.txt\n• redis>=4.5.0\n• sqlalchemy>=2.0.0\n• azure-communication-email\n• azure-monitor-opentelemetry"]
+    end
+    class SetupConfig,SetupPy,RequirementsTxt config;
+
+    %% Service consumption
+    MainAPI -.->|"pip install -e well_shared/\n(Editable mode for dev)"| SharedLibrary
+    TeamsBot -.->|"pip install -e well_shared/\n(Editable mode for dev)"| SharedLibrary
+    VaultAgent -.->|"pip install -e well_shared/\n(Editable mode for dev)"| SharedLibrary
+
+    %% Cache module connections
+    MainAPI -->|"Import & use"| RedisManager
+    MainAPI -->|"Import & use"| C3Module
+    MainAPI -->|"Import & use"| VoITCache
+    TeamsBot -->|"Import & use"| RedisManager
+    TeamsBot -->|"Import & use"| C3Module
+    VaultAgent -->|"Import & use"| RedisManager
+    VaultAgent -->|"Import & use"| C3Module
+    VaultAgent -->|"Import & use"| VoITCache
+
+    %% Database module connections
+    MainAPI -->|"Import & use"| Connection
+    TeamsBot -->|"Import & use"| Connection
+    VaultAgent -->|"Import & use"| Connection
+
+    %% Mail module connections
+    MainAPI -->|"Import & use"| Sender
+    TeamsBot -->|"Import & use"| Sender
+    VaultAgent -->|"Import & use"| Sender
+
+    %% Evidence module connections
+    MainAPI -->|"Import & use"| Extractor
+    VaultAgent -->|"Import & use"| Extractor
+
+    %% Telemetry module connections
+    MainAPI -->|"Import & use"| Insights
+    TeamsBot -->|"Import & use"| Insights
+    VaultAgent -->|"Import & use"| Insights
+
+    %% Config module connections
+    MainAPI -->|"Import & use"| VoITConfig
+    TeamsBot -->|"Import & use"| VoITConfig
+    VaultAgent -->|"Import & use"| VoITConfig
+
+    %% Zoho module connections
+    MainAPI -->|"Import & use"| ZohoCommon
+    TeamsBot -->|"Import & use"| ZohoCommon
+    VaultAgent -->|"Import & use"| ZohoCommon
+
+    %% External service connections
+    RedisManager -->|"Connect via\nredis.asyncio"| AzureRedis
+    C3Module -->|"Store entries"| AzureRedis
+    VoITCache -->|"Cache spans"| AzureRedis
+    Connection -->|"Async sessions\nsqlalchemy.ext.asyncio"| PostgreSQL
+    Sender -->|"Send emails\nazure.communication.email"| ACS
+    Insights -->|"Send telemetry\nazure.monitor.opentelemetry"| AppInsights
+
+    %% Setup configuration
+    SetupPy -.->|"Defines dependencies"| RequirementsTxt
+    SharedLibrary -.->|"Installed via"| SetupPy
+
+    %% Usage notes
+    note1["Usage Pattern:\n1. Install in editable mode: cd well_shared && pip install -e .\n2. Import in services: from well_shared.cache import redis_manager\n3. Changes to well_shared/ immediately available to all services\n4. Single source of truth for common utilities"]
+    class note1 config;
 ```
 
 ### FastAPI Core Component Map (C4 Level 3)
@@ -832,6 +1362,466 @@ flowchart TD
     style SelectiveRebuild fill:#FFD700,stroke:#B8860B,stroke-width:3px
     style FullBuild fill:#FFA07A,stroke:#8B0000,stroke-width:3px
     style VoITProcess fill:#FFB6C1,stroke:#C71585,stroke-width:3px
+```
+
+### Zoom Integration Sequence
+**Server-to-Server OAuth 2.0 flow with meeting transcript extraction**
+
+```mermaid
+sequenceDiagram
+    participant User as Recruiter/TalentWell Curator
+    participant App as Main API/TalentWell Curator
+    participant ZoomClient as zoom_client.py
+    participant ZoomAuth as Zoom OAuth Server
+    participant ZoomAPI as Zoom REST API v2
+    participant Redis as Redis Cache
+    participant PostgreSQL as PostgreSQL
+    participant VaultAgent as Vault Agent
+
+    Note over User,VaultAgent: OAuth 2.0 Server-to-Server Authentication
+
+    App->>ZoomClient: Request access token
+    ZoomClient->>Redis: Check cached token<br/>key: zoom:token
+
+    alt Token cached and valid
+        Redis-->>ZoomClient: Return cached token
+    else Token expired or missing
+        ZoomClient->>ZoomAuth: POST /oauth/token<br/>grant_type: account_credentials<br/>account_id: {ZOOM_ACCOUNT_ID}<br/>client_id: {ZOOM_CLIENT_ID}<br/>client_secret: {ZOOM_CLIENT_SECRET}
+        ZoomAuth-->>ZoomClient: {access_token, expires_in: 3600}
+        ZoomClient->>Redis: Cache token (59 min TTL)
+        Redis-->>ZoomClient: OK
+    end
+
+    Note over User,VaultAgent: List Meeting Recordings
+
+    User->>App: Request: "Get recordings from last month"
+    App->>ZoomClient: list_recordings(from_date, to_date)
+    ZoomClient->>ZoomClient: Prepare auth headers<br/>Authorization: Bearer {token}
+
+    ZoomClient->>ZoomAPI: GET /users/me/recordings<br/>from={from_date}&to={to_date}<br/>&page_size=30
+    ZoomAPI-->>ZoomClient: {meetings: [{uuid, topic, start_time,<br/>duration, recording_count}], next_page_token}
+
+    loop Has more pages
+        ZoomClient->>ZoomAPI: GET /users/me/recordings<br/>next_page_token={token}
+        ZoomAPI-->>ZoomClient: {meetings: [...], next_page_token}
+    end
+
+    ZoomClient-->>App: List of 150 meetings
+    App-->>User: Display meetings list
+
+    Note over User,VaultAgent: Fetch Transcript for Specific Meeting
+
+    User->>App: Select meeting: "Candidate John Doe - Advisory Role"
+    App->>ZoomClient: fetch_zoom_transcript_for_meeting(meeting_id)
+
+    ZoomClient->>Redis: Check transcript cache<br/>key: zoom:transcript:{meeting_id}
+
+    alt Transcript cached
+        Redis-->>ZoomClient: Cached transcript JSON
+        ZoomClient-->>App: Transcript data
+    else Transcript not cached
+        ZoomClient->>ZoomAPI: GET /meetings/{meeting_id}/recordings
+        ZoomAPI-->>ZoomClient: {recording_files: [{id, file_type,<br/>download_url, recording_type}]}
+
+        ZoomClient->>ZoomClient: Find VTT transcript file<br/>(file_type: "TRANSCRIPT",<br/>recording_type: "audio_transcript")
+
+        alt VTT transcript found
+            ZoomClient->>ZoomAPI: GET {download_url}<br/>Authorization: Bearer {token}
+            ZoomAPI-->>ZoomClient: VTT file content
+
+            ZoomClient->>ZoomClient: Parse VTT to JSON<br/>{segments: [{start_time, text, speaker}]}
+            ZoomClient->>Redis: Cache transcript (7d TTL)
+            Redis-->>ZoomClient: OK
+        else No transcript available
+            ZoomClient-->>App: {error: "No transcript found"}
+            App-->>User: "Transcript not available for this meeting"
+        end
+
+        alt Retry on transient errors
+            Note over ZoomClient: 5xx errors or network issues
+            ZoomClient->>ZoomClient: Exponential backoff<br/>(1s, 2s, 4s)<br/>+ jitter (±200ms)
+            ZoomClient->>ZoomAPI: Retry request (max 3 attempts)
+        end
+    end
+
+    ZoomClient-->>App: {transcript: {segments: [...],<br/>duration_minutes, participant_count}}
+
+    Note over User,VaultAgent: Integrate with TalentWell Curator
+
+    App->>App: Extract candidate information<br/>from transcript text
+    App->>App: Analyze sentiment and enthusiasm<br/>(FEATURE_LLM_SENTIMENT=true)
+    App->>App: Extract financial metrics<br/>(AUM, production, growth)<br/>(FEATURE_GROWTH_EXTRACTION=true)
+
+    App->>VaultAgent: POST /ingest<br/>{source: "transcript",<br/>payload: {candidate_data,<br/>transcript_text, sentiment_score}}
+    VaultAgent->>PostgreSQL: Store canonical record<br/>vault_records table
+    PostgreSQL-->>VaultAgent: vault_locator: VAULT-{uuid}
+
+    VaultAgent-->>App: {locator, status: "ingested"}
+
+    App->>App: Generate digest bullet points<br/>(evidence_extractor.py)
+    App->>App: Validate DigestCard format<br/>(‼️ 🔔 📍 + 3-5 bullets)
+
+    App-->>User: Display candidate digest card<br/>with Zoom transcript evidence
+
+    Note over User,VaultAgent: Candidate Search Workflow
+
+    User->>App: "Search transcripts for candidate: John Doe"
+    App->>ZoomClient: search_candidate_in_transcripts("John Doe")
+
+    ZoomClient->>ZoomClient: Call list_recordings() for date range
+
+    loop For each meeting
+        ZoomClient->>Redis: Get cached transcript
+        alt Cached
+            Redis-->>ZoomClient: Transcript
+        else Not cached
+            ZoomClient->>ZoomAPI: Fetch and parse transcript
+            ZoomClient->>Redis: Cache result
+        end
+
+        ZoomClient->>ZoomClient: Search transcript text for "John Doe"
+
+        alt Candidate found in transcript
+            ZoomClient->>ZoomClient: Add meeting to results<br/>{meeting_id, topic, date,<br/>matched_segments}
+        end
+    end
+
+    ZoomClient-->>App: {matches: [{meeting_id, topic,<br/>transcript_excerpt}]}
+    App-->>User: Display 3 meetings with candidate mentions
+
+    Note over ZoomClient,Redis: Error Handling
+
+    alt OAuth token expired mid-request
+        ZoomAPI-->>ZoomClient: 401 Unauthorized
+        ZoomClient->>ZoomAuth: Refresh token
+        ZoomAuth-->>ZoomClient: New access token
+        ZoomClient->>Redis: Update cached token
+        ZoomClient->>ZoomAPI: Retry original request
+    end
+
+    alt Rate limit exceeded
+        ZoomAPI-->>ZoomClient: 429 Too Many Requests<br/>Retry-After: 60
+        ZoomClient->>ZoomClient: Sleep 60 seconds
+        ZoomClient->>ZoomAPI: Retry request
+    end
+
+    alt Meeting not found
+        ZoomAPI-->>ZoomClient: 404 Not Found
+        ZoomClient-->>App: {error: "Meeting not found"}
+        App-->>User: "Meeting has been deleted or ID is invalid"
+    end
+```
+
+### Weekly Digest Subscription Flow
+**Automated email delivery system with user preferences and delivery tracking**
+
+```mermaid
+sequenceDiagram
+    participant User as Executive/Advisor
+    participant Teams as Microsoft Teams
+    participant TeamsBot as Teams Bot Service
+    participant Scheduler as Weekly Digest Scheduler<br/>(Hourly background job)
+    participant PostgreSQL as PostgreSQL
+    participant VaultAgent as Vault Agent/Curator
+    participant ZohoCRM as Zoho CRM
+    participant Redis as Redis Cache
+    participant ACS as Azure Communication Services
+    participant Email as User Email Inbox
+
+    Note over User,Email: User Subscription Management
+
+    User->>Teams: Send message: "/preferences"
+    Teams->>TeamsBot: Activity: message received
+    TeamsBot->>PostgreSQL: SELECT * FROM teams_user_preferences<br/>WHERE user_id = '{user_id}'
+
+    alt User preferences exist
+        PostgreSQL-->>TeamsBot: {default_audience, digest_enabled,<br/>weekly_email_enabled, email_address}
+        TeamsBot->>TeamsBot: Build preferences card<br/>(Adaptive Card)
+        TeamsBot->>Teams: Send preferences card<br/>with toggle controls
+        Teams-->>User: Display preferences<br/>✅ Weekly digest: ON<br/>📧 Email: steve@emailthewell.com<br/>🎯 Audience: advisors
+    else No preferences found
+        TeamsBot->>PostgreSQL: INSERT INTO teams_user_preferences<br/>(user_id, digest_enabled=true,<br/>weekly_email_enabled=false)
+        PostgreSQL-->>TeamsBot: Preferences created
+        TeamsBot->>Teams: Send welcome card<br/>"Set up your preferences"
+        Teams-->>User: Display setup wizard
+    end
+
+    User->>Teams: Toggle: "Enable weekly email ✅"
+    Teams->>TeamsBot: Activity: adaptive card action
+    TeamsBot->>PostgreSQL: UPDATE teams_user_preferences<br/>SET weekly_email_enabled = true<br/>WHERE user_id = '{user_id}'
+    PostgreSQL-->>TeamsBot: Updated
+
+    TeamsBot->>PostgreSQL: INSERT INTO subscription_confirmations<br/>(user_id, email, status='pending')
+    PostgreSQL-->>TeamsBot: confirmation_id
+
+    TeamsBot->>ACS: Send confirmation email<br/>Subject: "Confirm your TalentWell digest subscription"<br/>Body: "Click link to confirm"
+    ACS-->>Email: Deliver confirmation email
+
+    User->>Email: Click confirmation link
+    Email->>TeamsBot: GET /api/teams/confirm-subscription?token={token}
+    TeamsBot->>PostgreSQL: UPDATE subscription_confirmations<br/>SET status='confirmed', confirmed_at=NOW()
+    PostgreSQL-->>TeamsBot: Confirmed
+
+    TeamsBot->>Teams: Send card: "✅ Subscription confirmed!"
+    Teams-->>User: Confirmation notification
+
+    Note over Scheduler,ACS: Hourly Digest Scheduler Job
+
+    Scheduler->>Scheduler: Check current time<br/>(runs every hour via CRON)
+
+    alt Monday 9:00 AM EST
+        Scheduler->>PostgreSQL: SELECT * FROM teams_user_preferences<br/>WHERE weekly_email_enabled = true<br/>AND subscription_status = 'confirmed'
+        PostgreSQL-->>Scheduler: 25 subscribed users
+
+        loop For each subscribed user
+            Scheduler->>PostgreSQL: Check last delivery<br/>SELECT * FROM weekly_digest_deliveries<br/>WHERE user_id = '{user_id}'<br/>AND delivered_at > NOW() - INTERVAL '7 days'
+
+            alt Already sent this week
+                Scheduler->>Scheduler: Skip user (already delivered)
+            else Not sent this week
+                Scheduler->>PostgreSQL: Get user preferences<br/>default_audience, email_address
+                PostgreSQL-->>Scheduler: {audience: "advisors",<br/>email: "steve@emailthewell.com"}
+
+                Scheduler->>Redis: Check digest cache<br/>key: vault:digest:advisors:weekly
+
+                alt Cache hit (generated today)
+                    Redis-->>Scheduler: Cached HTML digest
+                else Cache miss
+                    Scheduler->>VaultAgent: Request digest generation<br/>POST /api/vault-agent/publish<br/>{audience: "advisors",<br/>channels: ["email_campaign"]}
+
+                    VaultAgent->>ZohoCRM: Query vault candidates<br/>GET /crm/v8/Leads?cvid=6221978000090941003<br/>(Custom view: _Vault Candidates)
+                    ZohoCRM-->>VaultAgent: 164 vault candidates
+
+                    VaultAgent->>VaultAgent: Apply audience filter<br/>(filter by job_title: advisors)
+                    VaultAgent->>VaultAgent: Score and rank candidates<br/>(financial metrics + sentiment)
+                    VaultAgent->>VaultAgent: Apply VoIT/C³ optimization
+                    VaultAgent->>VaultAgent: Generate digest cards<br/>(‼️ 🔔 📍 format + 3-5 bullets)
+                    VaultAgent->>VaultAgent: Apply privacy mode<br/>(anonymize companies, round AUM)
+
+                    VaultAgent-->>Scheduler: {html_digest, candidate_count: 12}
+                    Scheduler->>Redis: Cache digest (24h TTL)
+                end
+
+                Scheduler->>ACS: Send digest email<br/>To: steve@emailthewell.com<br/>Subject: "TalentWell Weekly Digest - Advisors"<br/>Body: HTML digest with 12 candidates<br/>From: notifications@emailthewell.com
+                ACS-->>Email: Deliver digest email
+
+                Scheduler->>PostgreSQL: INSERT INTO weekly_digest_deliveries<br/>(user_id, audience, candidate_count=12,<br/>status='sent', delivered_at=NOW())
+                PostgreSQL-->>Scheduler: Delivery recorded
+            end
+        end
+
+        Scheduler->>Scheduler: Log completion<br/>"Delivered 25 digests"
+    else Not Monday 9:00 AM
+        Scheduler->>Scheduler: Skip (not delivery time)
+    end
+
+    Note over User,Email: User Receives and Views Digest
+
+    User->>Email: Open digest email
+    Email->>Email: Render HTML digest<br/>(12 candidate cards)
+    Email-->>User: Display formatted digest
+
+    User->>User: Review candidates<br/>(anonymized companies,<br/>rounded AUM, strict compensation)
+
+    User->>Teams: Send message: "I want more details on candidate #3"
+    Teams->>TeamsBot: Natural language query
+    TeamsBot->>TeamsBot: Parse intent (GPT-5-mini)
+    TeamsBot->>PostgreSQL: Query recent digest deliveries<br/>for this user
+    PostgreSQL-->>TeamsBot: {digest_id, candidates_json}
+    TeamsBot->>TeamsBot: Extract candidate #3 data
+    TeamsBot->>ZohoCRM: Fetch full candidate record<br/>(using candidate_locator)
+    ZohoCRM-->>TeamsBot: Full CRM record
+    TeamsBot->>Teams: Send detailed candidate card<br/>(Adaptive Card with full info)
+    Teams-->>User: Display candidate details
+
+    Note over User,Email: Unsubscribe Flow
+
+    User->>Email: Click "Unsubscribe" link<br/>(included in every digest)
+    Email->>TeamsBot: GET /api/teams/unsubscribe?token={token}
+    TeamsBot->>PostgreSQL: UPDATE teams_user_preferences<br/>SET weekly_email_enabled = false<br/>WHERE user_id = '{user_id}'
+    PostgreSQL-->>TeamsBot: Updated
+
+    TeamsBot->>PostgreSQL: INSERT INTO weekly_digest_deliveries<br/>(user_id, status='unsubscribed')
+    PostgreSQL-->>TeamsBot: Logged
+
+    TeamsBot-->>User: Display confirmation page<br/>"You've been unsubscribed"
+
+    User->>Teams: Send message: "/preferences"
+    Teams->>TeamsBot: Activity: message
+    TeamsBot->>PostgreSQL: Get preferences
+    PostgreSQL-->>TeamsBot: {weekly_email_enabled: false}
+    TeamsBot->>Teams: Send card:<br/>"❌ Weekly digest: OFF"
+    Teams-->>User: Confirm unsubscribed status
+
+    Note over Scheduler,PostgreSQL: Delivery Analytics & Monitoring
+
+    Scheduler->>PostgreSQL: Query delivery metrics<br/>SELECT COUNT(*), AVG(candidate_count)<br/>FROM weekly_digest_deliveries<br/>WHERE delivered_at > NOW() - INTERVAL '30 days'<br/>GROUP BY audience
+    PostgreSQL-->>Scheduler: {advisors: {deliveries: 100,<br/>avg_candidates: 15},<br/>c_suite: {deliveries: 20,<br/>avg_candidates: 8}}
+
+    Scheduler->>Scheduler: Log metrics to<br/>Application Insights<br/>(delivery_count, open_rate estimates)
+```
+
+### End-to-End Data Flow (C4 Level 1 Supplement)
+**Complete data journey visualization across all processing paths**
+
+```mermaid
+flowchart TB
+    classDef source fill:#E3F2FD,stroke:#1E40AF,color:#0B1F4B,stroke-width:2px;
+    classDef process fill:#F3E8FF,stroke:#7C3AED,color:#4C1D95,stroke-width:2px;
+    classDef optimize fill:#FED7D7,stroke:#E53E3E,color:#742A2A,stroke-width:3px;
+    classDef enrich fill:#FEF3C7,stroke:#D97706,color:#78350F,stroke-width:2px;
+    classDef store fill:#DCFCE7,stroke:#059669,color:#064E3B,stroke-width:2px;
+    classDef output fill:#FCE7F3,stroke:#C026D3,color:#701A75,stroke-width:2px;
+
+    subgraph DataSources["Data Sources (Ingestion Layer)"]
+        Email["Outlook Email\n(Recruiter submissions)"]
+        ZoomMeeting["Zoom Meetings\n(Candidate interviews)"]
+        Resume["Resume Uploads\n(PDF/DOCX attachments)"]
+        WebScrape["Web Research\n(Firecrawl v2 scraping)"]
+        TeamsChat["Teams Chat Messages\n(Natural language queries)"]
+    end
+    class DataSources,Email,ZoomMeeting,Resume,WebScrape,TeamsChat source;
+
+    subgraph IngestionLayer["Ingestion & Extraction Layer"]
+        direction TB
+
+        EmailParser["Email Parser\n(LangGraph pipeline)\nExtract → Research → Validate"]
+        ZoomParser["Zoom Transcript Parser\n(VTT → JSON segments)"]
+        ResumeParser["Resume Parser\n(PDF text extraction)"]
+        WebParser["Web Content Parser\n(FIRE-1 agent structured extraction)"]
+        NLPParser["NLP Intent Classifier\n(GPT-5-mini query understanding)"]
+    end
+    class IngestionLayer,EmailParser,ZoomParser,ResumeParser,WebParser,NLPParser process;
+
+    subgraph OptimizationLayer["🚨 VoIT + C³ Optimization Layer (Cross-Cutting)"]
+        direction LR
+
+        VoITEngine["VoIT Engine\n• Uncertainty quantification\n• VOI calculation\n• Model tier selection (nano/mini/large)\n• Budget allocation\n• Quality tracking"]
+
+        C3Engine["C³ Engine\n• Probabilistic margin (δ-bound)\n• Embedding similarity\n• Selective rebuild\n• Dependency certificates\n• 90% cache hit rate"]
+    end
+    class OptimizationLayer,VoITEngine,C3Engine optimize;
+
+    subgraph EnrichmentLayer["Enrichment Layer"]
+        direction TB
+
+        ApolloEnrich["Apollo.io Enrichment\n(Contact phone, LinkedIn,<br/>job titles, company data)"]
+        FirecrawlEnrich["Firecrawl v2 Research\n(Company HQ, revenue,<br/>funding, tech stack)"]
+        AzureMapsEnrich["Azure Maps Geocoding\n(Address normalization,<br/>city/state inference)"]
+        GPTEnrich["GPT-5 Analysis\n(Sentiment, growth metrics,<br/>financial patterns)"]
+    end
+    class EnrichmentLayer,ApolloEnrich,FirecrawlEnrich,AzureMapsEnrich,GPTEnrich enrich;
+
+    subgraph NormalizationLayer["Normalization & Canonicalization"]
+        direction TB
+
+        EmailNormalizer["Email → Canonical\n(ExtractedData → DealModel)"]
+        ZoomNormalizer["Transcript → Canonical\n(VaultRecord with sentiment)"]
+        ResumeNormalizer["Resume → Canonical\n(Contact + Experience)"]
+        WebNormalizer["Web Data → Canonical\n(Company metadata)"]
+    end
+    class NormalizationLayer,EmailNormalizer,ZoomNormalizer,ResumeNormalizer,WebNormalizer process;
+
+    subgraph StorageLayer["Persistence & Cache Layer"]
+        direction TB
+
+        PostgresDB["PostgreSQL Database\n• deals, contacts, attachments\n• vault_records (canonical)\n• teams_user_preferences\n• weekly_digest_deliveries\n• batch_jobs, learning_events"]
+
+        RedisCache["Redis Cache\n• intake:* (2-12h TTL)\n• vault:* (7d TTL)\n• c3:* (7d TTL with drift)\n• apollo:*, firecrawl:* (24h)"]
+
+        BlobStorage["Azure Blob Storage\n• Email attachments\n• Manifests & icons\n• Resume files"]
+
+        Embeddings["pgvector Embeddings\n• Semantic similarity\n• Deduplication\n• 400K context window"]
+    end
+    class StorageLayer,PostgresDB,RedisCache,BlobStorage,Embeddings store;
+
+    subgraph OutputLayer["Output & Distribution Layer"]
+        direction TB
+
+        ZohoCRM["Zoho CRM Records\n(Accounts, Contacts, Deals, Leads)"]
+        TeamsCards["Teams Adaptive Cards\n(Digest previews, query results)"]
+        EmailDigests["Weekly Email Digests\n(Azure Communication Services)"]
+        VaultPublish["Vault Publications\n(HTML cards, portal listings)"]
+    end
+    class OutputLayer,ZohoCRM,TeamsCards,EmailDigests,VaultPublish output;
+
+    %% Data flow connections - Email path
+    Email --> EmailParser
+    EmailParser -.->|"Optimized by"| VoITEngine
+    EmailParser -.->|"Cached by"| C3Engine
+    EmailParser --> ApolloEnrich
+    EmailParser --> FirecrawlEnrich
+    EmailParser --> AzureMapsEnrich
+    ApolloEnrich --> EmailNormalizer
+    FirecrawlEnrich --> EmailNormalizer
+    AzureMapsEnrich --> EmailNormalizer
+    EmailNormalizer --> PostgresDB
+    EmailNormalizer --> RedisCache
+    EmailNormalizer --> Embeddings
+    PostgresDB --> ZohoCRM
+    RedisCache --> ZohoCRM
+
+    %% Data flow connections - Zoom path
+    ZoomMeeting --> ZoomParser
+    ZoomParser --> GPTEnrich
+    GPTEnrich --> ZoomNormalizer
+    ZoomNormalizer -.->|"Optimized by"| VoITEngine
+    ZoomNormalizer -.->|"Cached by"| C3Engine
+    ZoomNormalizer --> PostgresDB
+    ZoomNormalizer --> RedisCache
+    PostgresDB --> VaultPublish
+    RedisCache --> EmailDigests
+
+    %% Data flow connections - Resume path
+    Resume --> ResumeParser
+    ResumeParser --> BlobStorage
+    ResumeParser --> ResumeNormalizer
+    ResumeNormalizer --> PostgresDB
+    PostgresDB --> ZohoCRM
+
+    %% Data flow connections - Web research path
+    WebScrape --> WebParser
+    WebParser -.->|"Optimized by"| VoITEngine
+    WebParser --> WebNormalizer
+    WebNormalizer --> RedisCache
+    RedisCache --> FirecrawlEnrich
+
+    %% Data flow connections - Teams natural language path
+    TeamsChat --> NLPParser
+    NLPParser -.->|"Optimized by"| VoITEngine
+    NLPParser --> PostgresDB
+    PostgresDB --> TeamsCards
+
+    %% VoIT/C³ optimization points
+    VoITEngine --> ApolloEnrich
+    VoITEngine --> FirecrawlEnrich
+    VoITEngine --> GPTEnrich
+    C3Engine --> RedisCache
+
+    %% Output generation
+    PostgresDB --> VaultPublish
+    Embeddings --> VaultPublish
+    VaultPublish --> EmailDigests
+    VaultPublish --> TeamsCards
+
+    %% Data transformations annotations
+    EmailParser -.->|"Structured extraction\n(Pydantic schemas)"| EmailNormalizer
+    ZoomParser -.->|"VTT → JSON\n(segment parsing)"| ZoomNormalizer
+    EmailNormalizer -.->|"DealModel\n(SQLModel ORM)"| PostgresDB
+    ZoomNormalizer -.->|"VaultRecord\n(canonical format)"| PostgresDB
+    PostgresDB -.->|"Custom view query\n(cvid=6221978000090941003)"| VaultPublish
+    VaultPublish -.->|"DigestCard format\n(‼️ 🔔 📍 + 3-5 bullets)"| EmailDigests
+    VaultPublish -.->|"Privacy mode\n(anonymize, round AUM)"| EmailDigests
+
+    %% Performance annotations
+    note1["VoIT Optimization Points:\n• Model selection (nano/mini/large)\n• Tool vs. LLM decision\n• Budget allocation\n• 65% cost reduction"]
+    class note1 optimize;
+
+    note2["C³ Cache Hit Scenarios:\n• Email deduplication (90% hit rate)\n• Transcript reuse (semantic similarity)\n• Company research (24h freshness)\n• Vault digest generation (daily cache)"]
+    class note2 optimize;
+
+    note3["Data Quality Controls:\n• Confidence scoring (>0.7 threshold)\n• Duplicate detection (embedding similarity)\n• Evidence linking (no hallucinations)\n• Format validation (DigestCard rules)"]
+    class note3 store;
 ```
 
 ### Complete API Endpoint Catalogue
@@ -2045,6 +3035,87 @@ flowchart TB
     end
     class Runners,TalentWellRunner,DigestHTML vault
 
+    subgraph SharedLibrary["📦 Shared Library (well_shared/)"]
+        direction TB
+
+        subgraph SharedCache["cache/"]
+            SharedRedisManager["redis_manager.py\n(Connection pooling, batch ops)"]
+            SharedC3["c3.py\n(C³ implementation)"]
+            SharedVoIT["voit.py\n(VoIT span caching)"]
+        end
+
+        subgraph SharedDatabase["database/"]
+            SharedConnection["connection.py\n(Async SQLAlchemy sessions)"]
+        end
+
+        subgraph SharedMail["mail/"]
+            SharedSender["sender.py\n(Azure Communication Services)"]
+        end
+
+        subgraph SharedEvidence["evidence/"]
+            SharedExtractor["extractor.py\n(Bullet generation)"]
+        end
+
+        subgraph SharedTelemetry["telemetry/"]
+            SharedInsights["insights.py\n(Application Insights batching)"]
+        end
+
+        subgraph SharedConfig["config/"]
+            SharedVoITConfig["voit_config.py\n(Model tier costs, budgets)"]
+        end
+
+        subgraph SharedZoho["zoho/"]
+            SharedZohoCommon["__init__.py\n(Shared Zoho constants)"]
+        end
+
+        SharedSetup["setup.py\n(Package metadata, v0.1.0)"]
+        SharedRequirements["requirements.txt\n(Dependency specs)"]
+    end
+    class SharedLibrary,SharedCache,SharedDatabase,SharedMail,SharedEvidence,SharedTelemetry,SharedConfig,SharedZoho core
+    class SharedRedisManager,SharedC3,SharedVoIT,SharedConnection,SharedSender,SharedExtractor,SharedInsights,SharedVoITConfig,SharedZohoCommon,SharedSetup,SharedRequirements core
+
+    subgraph TeamsBotService["💬 Teams Bot Service (teams_bot/)"]
+        direction TB
+
+        subgraph TeamsBotApp["teams_bot/app/"]
+            TeamsBotMain["main.py\n(FastAPI app, Port 8001)"]
+            TeamsBotConfig["config.py\n(Bot settings)"]
+        end
+
+        subgraph TeamsBotAPI["teams_bot/app/api/"]
+            TeamsBotHealthCheck["health_check.py\n(Health endpoints)"]
+
+            subgraph TeamsBotTeamsRoutes["teams/"]
+                TeamsBotRoutes["routes.py\n(Bot endpoints)"]
+                TeamsBotDialogFlow["dialog_flow.py\n(Conversation flow)"]
+                TeamsBotAdaptiveCards["adaptive_cards.py\n(Card templates)"]
+            end
+        end
+
+        subgraph TeamsBotServices["teams_bot/app/services/"]
+            TeamsBotNLP["nlp_query_service.py\n(Intent classification, GPT-5-mini)"]
+            TeamsBotProactive["proactive_messaging.py\n(Weekly digest delivery)"]
+            TeamsBotMessageBus["message_bus.py\n(Service Bus integration)"]
+            TeamsBotCircuitBreaker["circuit_breaker.py\n(Fault tolerance)"]
+        end
+
+        subgraph TeamsBotWorkers["teams_bot/app/workers/"]
+            TeamsBotDigestWorker["digest_worker.py\n(Service Bus consumer)"]
+            TeamsBotNLPWorker["nlp_worker.py\n(Vault marketability)"]
+        end
+
+        subgraph TeamsBotModels["teams_bot/app/models/"]
+            TeamsBotUserPrefs["user_preferences.py\n(PostgreSQL ORM)"]
+            TeamsBotDigestDelivery["digest_delivery.py\n(Tracking)"]
+            TeamsBotAnalytics["analytics.py\n(Conversation metrics)"]
+        end
+
+        TeamsBotRequirements["requirements.txt\n(Bot Framework SDK, httpx)"]
+        TeamsBotDockerfile["Dockerfile\n(Multi-stage build)"]
+    end
+    class TeamsBotService,TeamsBotApp,TeamsBotAPI,TeamsBotServices,TeamsBotWorkers,TeamsBotModels core
+    class TeamsBotMain,TeamsBotConfig,TeamsBotHealthCheck,TeamsBotTeamsRoutes,TeamsBotRoutes,TeamsBotDialogFlow,TeamsBotAdaptiveCards,TeamsBotNLP,TeamsBotProactive,TeamsBotMessageBus,TeamsBotCircuitBreaker,TeamsBotDigestWorker,TeamsBotNLPWorker,TeamsBotUserPrefs,TeamsBotDigestDelivery,TeamsBotAnalytics,TeamsBotRequirements,TeamsBotDockerfile core
+
     %% Frontend connections
     TaskpaneJS --> MainPy
     ApolloJS --> ApolloClient
@@ -2149,6 +3220,44 @@ flowchart TB
     %% Runner connections
     TalentWellRunner --> TalentWellCurator
     TalentWellRunner --> DigestHTML
+
+    %% Shared Library connections (consumed by all services)
+    MainPy -.->|"pip install -e"| SharedSetup
+    TeamsBotMain -.->|"pip install -e"| SharedSetup
+    DatabasePy --> SharedConnection
+    RedisManager --> SharedRedisManager
+    C3Manager --> SharedC3
+    VoITController --> SharedVoIT
+    MonitoringPy --> SharedInsights
+    TalentWellCurator --> SharedExtractor
+    SharedConnection --> PostgreSQL
+    SharedRedisManager --> RedisDB
+    SharedSender --> BlobClient
+    SharedInsights --> LoggingPy
+
+    %% Teams Bot Service connections
+    TeamsBotMain --> TeamsBotRoutes
+    TeamsBotMain --> TeamsBotHealthCheck
+    TeamsBotRoutes --> TeamsBotNLP
+    TeamsBotRoutes --> TeamsBotDialogFlow
+    TeamsBotRoutes --> TeamsBotAdaptiveCards
+    TeamsBotNLP -.->|"Uses"| VoITController
+    TeamsBotNLP --> SharedConnection
+    TeamsBotNLP --> ZohoClient
+    TeamsBotDialogFlow --> TeamsBotUserPrefs
+    TeamsBotProactive --> TeamsBotDigestWorker
+    TeamsBotProactive --> SharedSender
+    TeamsBotMessageBus --> ServiceBusClient
+    TeamsBotDigestWorker -.->|"Uses"| VoITController
+    TeamsBotDigestWorker -.->|"Uses"| C3Manager
+    TeamsBotDigestWorker --> ZohoClient
+    TeamsBotDigestWorker --> SharedRedisManager
+    TeamsBotNLPWorker -.->|"Uses"| VoITController
+    TeamsBotNLPWorker --> ZohoClient
+    TeamsBotUserPrefs --> PostgreSQL
+    TeamsBotDigestDelivery --> PostgreSQL
+    TeamsBotAnalytics --> PostgreSQL
+    TeamsBotCircuitBreaker --> TeamsBotMessageBus
 ```
 
 ### VoIT + C³ Revolutionary Algorithms - Detailed Implementation
