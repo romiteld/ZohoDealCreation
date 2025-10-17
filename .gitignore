@@ -24,7 +24,7 @@ wheels/
 *.spec
 
 # Virtual Environment
-zoho/
+/zoho/
 venv/
 ENV/
 env/
@@ -213,18 +213,49 @@ lerna-debug.log*
 voice-ui/node_modules/
 voice-ui/temp/
 voice-ui/*.log
-# Brandon candidate reports
+# ====================================
+# Vault Alerts - Temporary Outputs
+# ====================================
+# NOTE: Preserved example outputs are in scripts/vault_alerts_development/output_examples/
+# These patterns ignore NEW temp outputs while preserving the reference examples
+
+# Brandon candidate reports (temp)
 brandon_*.html
 brandon_*.pdf
 
-# Vault candidate reports (generated files)
+# Vault candidate reports (temp generated files)
 vault_candidates*.html
 vault_candidates*.pdf
 brandon_vault*.html
 brandon_vault*.pdf
+
+# Boss format temp outputs (NOT the preserved examples)
+boss_format_*.html
+!scripts/vault_alerts_development/output_examples/boss_format_*.html
+
+# Advisor alerts temp outputs
+advisor_*.html
+!scripts/vault_alerts_development/output_examples/Advisor_*.html
+
+# Top candidates temp outputs
+top_*.html
+!scripts/vault_alerts_development/output_examples/top_*.html
+
+# Debug temp outputs
+debug_*.html
+!scripts/vault_alerts_development/output_examples/debug_*.html
+
+# Test temp outputs
+test_*.html
+!scripts/vault_alerts_development/output_examples/test_*.html
+
+# Vault alerts temp scripts (NOT the organized R&D scripts)
+generate_vault_*.py
+send_vault_*.py
 
 # Debug files
 debug_*.py
 test_candidates_*.py
 html_to_pdf_converter.py
 .claude/settings.local.json
+_reports/

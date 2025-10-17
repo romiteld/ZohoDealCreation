@@ -1,0 +1,296 @@
+# Performance SLA Configuration
+# Well Intake API - Service Level Agreements
+
+service_name: well-intake-api
+version: 2.0
+environment: production
+
+# Service Level Objectives (SLOs)
+slos:
+  # Availability SLO
+  availability:
+    target: 99.9  # Three nines availability
+    window: 30d   # Rolling 30-day window
+    error_budget: 43.2  # Minutes per month
+    measurement:
+      metric: "uptime_percentage"
+      calculation: "(1 - (error_minutes / total_minutes)) * 100"
+
+  # Latency SLOs
+  latency:
+    api_response:
+      target_p50: 200   # ms
+      target_p95: 500   # ms
+      target_p99: 1000  # ms
+      measurement:
+        metric: "http_request_duration_ms"
+        aggregation: "percentile"
+
+    email_processing:
+      target_p50: 2000   # ms (2 seconds)
+      target_p95: 3000   # ms (3 seconds)
+      target_p99: 5000   # ms (5 seconds)
+      measurement:
+        metric: "email_processing_duration_ms"
+        tags: ["operation:process_email"]
+
+    vault_generation:
+      target_p50: 30000   # ms (30 seconds)
+      target_p95: 60000   # ms (1 minute)
+      target_p99: 180000  # ms (3 minutes)
+      measurement:
+        metric: "vault_alert_generation_duration_ms"
+
+  # Error Rate SLO
+  error_rate:
+    target: 1.0  # 1% error rate maximum
+    window: 5m   # 5-minute rolling window
+    measurement:
+      metric: "http_request_errors"
+      calculation: "(errors / total_requests) * 100"
+
+  # Throughput SLO
+  throughput:
+    target_rps: 50  # Requests per second
+    burst_capacity: 200  # Peak RPS
+    measurement:
+      metric: "requests_per_second"
+      aggregation: "rate"
+
+# Performance Indicators (KPIs)
+kpis:
+  # Resource Utilization
+  resource_utilization:
+    cpu:
+      warning: 60   # %
+      critical: 80  # %
+    memory:
+      warning: 70   # %
+      critical: 85  # %
+    database_connections:
+      warning: 80   # % of pool
+      critical: 95  # % of pool
+
+  # Cache Performance
+  cache_performance:
+    hit_rate:
+      target: 85    # %
+      warning: 70   # %
+      critical: 50  # %
+    eviction_rate:
+      warning: 10   # % per hour
+      critical: 20  # % per hour
+
+  # External API Performance
+  external_apis:
+    zoho:
+      timeout: 5000     # ms
+      retry_limit: 3
+      circuit_breaker:
+        error_threshold: 50  # %
+        timeout: 30000       # ms
+    apollo:
+      timeout: 3000     # ms
+      retry_limit: 2
+    gpt5:
+      timeout: 10000    # ms
+      retry_limit: 1
+      rate_limit: 500   # requests/minute
+    firecrawl:
+      timeout: 8000     # ms
+      retry_limit: 2
+
+# Alert Configuration
+alerts:
+  # Critical Alerts (PagerDuty)
+  critical:
+    - name: "Service Down"
+      condition: "availability < 99.0 for 5m"
+      channels: ["pagerduty", "slack-critical"]
+
+    - name: "High Error Rate"
+      condition: "error_rate > 5.0 for 3m"
+      channels: ["pagerduty", "slack-critical"]
+
+    - name: "Database Connection Pool Exhausted"
+      condition: "database_connections > 95 for 2m"
+      channels: ["pagerduty", "slack-critical"]
+
+    - name: "Extreme Latency"
+      condition: "p95_latency > 3000 for 5m"
+      channels: ["pagerduty", "slack-critical"]
+
+  # Warning Alerts (Slack)
+  warning:
+    - name: "Degraded Performance"
+      condition: "p95_latency > 1000 for 10m"
+      channels: ["slack-warnings"]
+
+    - name: "Low Cache Hit Rate"
+      condition: "cache_hit_rate < 70 for 15m"
+      channels: ["slack-warnings"]
+
+    - name: "High CPU Usage"
+      condition: "cpu_usage > 70 for 10m"
+      channels: ["slack-warnings"]
+
+    - name: "Memory Pressure"
+      condition: "memory_usage > 75 for 10m"
+      channels: ["slack-warnings"]
+
+  # Info Alerts (Email)
+  info:
+    - name: "Daily Performance Report"
+      schedule: "0 9 * * *"  # 9 AM daily
+      channels: ["email-team"]
+
+    - name: "Weekly SLA Report"
+      schedule: "0 9 * * MON"  # Monday 9 AM
+      channels: ["email-management"]
+
+# Monitoring Queries
+queries:
+  # Prometheus queries for metrics
+  prometheus:
+    availability: |
+      (1 - (sum(rate(http_requests_total{status=~"5.."}[5m]))
+      / sum(rate(http_requests_total[5m])))) * 100
+
+    p95_latency: |
+      histogram_quantile(0.95,
+        sum(rate(http_request_duration_seconds_bucket[5m]))
+        by (le, endpoint)
+      ) * 1000
+
+    error_rate: |
+      sum(rate(http_requests_total{status=~"5.."}[5m]))
+      / sum(rate(http_requests_total[5m])) * 100
+
+    cache_hit_rate: |
+      sum(rate(redis_cache_hits_total[5m]))
+      / (sum(rate(redis_cache_hits_total[5m]))
+      + sum(rate(redis_cache_misses_total[5m]))) * 100
+
+    rps: |
+      sum(rate(http_requests_total[1m]))
+
+  # Application Insights queries
+  application_insights:
+    email_processing_p95: |
+      customMetrics
+      | where name == "email_processing_duration"
+      | summarize percentile(value, 95) by bin(timestamp, 5m)
+
+    zoho_api_errors: |
+      customEvents
+      | where name == "zoho_api_call"
+      | where customDimensions.success == "false"
+      | summarize count() by bin(timestamp, 5m)
+
+    vault_generation_time: |
+      customMetrics
+      | where name == "vault_alert_generation_duration"
+      | summarize avg(value), percentile(value, 95) by bin(timestamp, 1h)
+
+# Dashboard Configuration
+dashboards:
+  main:
+    refresh: 30s
+    panels:
+      - title: "Request Rate"
+        type: "graph"
+        query: "rps"
+        unit: "req/s"
+
+      - title: "Response Time (p50/p95/p99)"
+        type: "graph"
+        queries:
+          - "p50_latency"
+          - "p95_latency"
+          - "p99_latency"
+        unit: "ms"
+
+      - title: "Error Rate"
+        type: "graph"
+        query: "error_rate"
+        unit: "%"
+        thresholds:
+          - value: 1
+            color: "yellow"
+          - value: 5
+            color: "red"
+
+      - title: "Cache Hit Rate"
+        type: "gauge"
+        query: "cache_hit_rate"
+        unit: "%"
+        thresholds:
+          - value: 70
+            color: "yellow"
+          - value: 85
+            color: "green"
+
+      - title: "Active Connections"
+        type: "stat"
+        query: "database_active_connections"
+
+      - title: "CPU Usage"
+        type: "graph"
+        query: "cpu_usage"
+        unit: "%"
+
+      - title: "Memory Usage"
+        type: "graph"
+        query: "memory_usage"
+        unit: "%"
+
+      - title: "External API Latency"
+        type: "heatmap"
+        queries:
+          - "zoho_api_latency"
+          - "apollo_api_latency"
+          - "gpt5_api_latency"
+          - "firecrawl_api_latency"
+
+# Capacity Planning
+capacity:
+  current:
+    containers: 10
+    database_cores: 4
+    redis_gb: 6
+    max_rps: 50
+    max_concurrent_users: 200
+
+  growth_projection:
+    6_months:
+      containers: 20
+      database_cores: 8
+      redis_gb: 12
+      max_rps: 150
+      max_concurrent_users: 600
+
+    12_months:
+      containers: 40
+      database_cores: 16
+      redis_gb: 24
+      max_rps: 300
+      max_concurrent_users: 1200
+
+  scaling_triggers:
+    horizontal:
+      cpu_threshold: 60
+      memory_threshold: 70
+      rps_threshold: 40
+      queue_depth_threshold: 100
+
+    vertical:
+      cpu_sustained: 80  # for 1 hour
+      memory_sustained: 85  # for 1 hour
+
+# Runbook References
+runbooks:
+  high_latency: "https://wiki.company.com/runbooks/well-intake-api/high-latency"
+  database_issues: "https://wiki.company.com/runbooks/well-intake-api/database"
+  cache_problems: "https://wiki.company.com/runbooks/well-intake-api/redis"
+  api_errors: "https://wiki.company.com/runbooks/well-intake-api/errors"
+  scaling: "https://wiki.company.com/runbooks/well-intake-api/scaling"
