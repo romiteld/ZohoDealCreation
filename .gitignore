@@ -227,3 +227,4 @@ brandon_vault*.pdf
 debug_*.py
 test_candidates_*.py
 html_to_pdf_converter.py
+.claude/settings.local.json

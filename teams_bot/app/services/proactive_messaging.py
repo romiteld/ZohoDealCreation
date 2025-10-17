@@ -43,6 +43,26 @@ from tenacity import (
 logger = logging.getLogger(__name__)
 
 
+def safe_get(obj, key, default=None):
+    """
+    Get value from object attribute or dict key.
+
+    Handles both ConversationReference objects and dict formats,
+    which can vary across Bot Framework SDK versions.
+
+    Args:
+        obj: Object or dict to get value from
+        key: Attribute/key name
+        default: Default value if not found
+
+    Returns:
+        Value from object/dict or default
+    """
+    if isinstance(obj, dict):
+        return obj.get(key, default)
+    return getattr(obj, key, default)
+
+
 class ProactiveMessagingService:
     """
     Service for sending proactive messages to Teams users.
@@ -305,26 +325,30 @@ class ProactiveMessagingService:
             # Create conversation reference from activity
             conversation_ref = TurnContext.get_conversation_reference(activity)
 
-            # Serialize conversation reference
+            # Serialize conversation reference (handle both object and dict formats)
+            conv_conversation = safe_get(conversation_ref, 'conversation')
+            conv_user = safe_get(conversation_ref, 'user')
+            conv_bot = safe_get(conversation_ref, 'bot')
+
             reference_json = {
-                "channel_id": conversation_ref.channel_id,
-                "service_url": conversation_ref.service_url,
+                "channel_id": safe_get(conversation_ref, 'channel_id'),
+                "service_url": safe_get(conversation_ref, 'service_url'),
                 "conversation": {
-                    "id": conversation_ref.conversation.id if conversation_ref.conversation else None,
-                    "tenant_id": getattr(conversation_ref.conversation, 'tenant_id', None) if conversation_ref.conversation else None,
-                    "conversation_type": getattr(conversation_ref.conversation, 'conversation_type', 'personal') if conversation_ref.conversation else 'personal'
+                    "id": safe_get(conv_conversation, 'id') if conv_conversation else None,
+                    "tenant_id": safe_get(conv_conversation, 'tenant_id') if conv_conversation else None,
+                    "conversation_type": safe_get(conv_conversation, 'conversation_type', 'personal') if conv_conversation else 'personal'
                 },
                 "user": {
-                    "id": conversation_ref.user.id if conversation_ref.user else None,
-                    "name": conversation_ref.user.name if conversation_ref.user else None,
-                    "aad_object_id": getattr(conversation_ref.user, 'aad_object_id', None) if conversation_ref.user else None
+                    "id": safe_get(conv_user, 'id') if conv_user else None,
+                    "name": safe_get(conv_user, 'name') if conv_user else None,
+                    "aad_object_id": safe_get(conv_user, 'aad_object_id') if conv_user else None
                 },
                 "bot": {
-                    "id": conversation_ref.bot.id if conversation_ref.bot else self.app_id,
-                    "name": conversation_ref.bot.name if conversation_ref.bot else "TalentWell"
+                    "id": safe_get(conv_bot, 'id') if conv_bot else self.app_id,
+                    "name": safe_get(conv_bot, 'name') if conv_bot else "TalentWell"
                 },
-                "locale": conversation_ref.locale,
-                "activity_id": conversation_ref.activity_id
+                "locale": safe_get(conversation_ref, 'locale'),
+                "activity_id": safe_get(conversation_ref, 'activity_id')
             }
 
             # Get database connection
@@ -353,19 +377,19 @@ class ProactiveMessagingService:
                         updated_at = CURRENT_TIMESTAMP
                     RETURNING id
                 """,
-                    conversation_ref.conversation.id if conversation_ref.conversation else None,
-                    conversation_ref.service_url,
-                    getattr(conversation_ref.conversation, 'tenant_id', None) if conversation_ref.conversation else None,
-                    conversation_ref.user.id if conversation_ref.user else None,
+                    safe_get(conv_conversation, 'id') if conv_conversation else None,
+                    safe_get(conversation_ref, 'service_url'),
+                    safe_get(conv_conversation, 'tenant_id') if conv_conversation else None,
+                    safe_get(conv_user, 'id') if conv_user else None,
                     user_email,
-                    conversation_ref.channel_id,
+                    safe_get(conversation_ref, 'channel_id'),
                     self.app_id,
                     json.dumps(reference_json)
                 )
 
                 logger.info(
                     f"Stored conversation reference {result} for "
-                    f"conversation {conversation_ref.conversation.id if conversation_ref.conversation else 'None'}"
+                    f"conversation {safe_get(conv_conversation, 'id') if conv_conversation else 'None'}"
                 )
 
                 return str(result)

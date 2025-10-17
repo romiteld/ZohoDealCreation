@@ -37,7 +37,7 @@ from langgraph.graph import StateGraph, END
 from well_shared.cache.redis_manager import RedisCacheManager
 from app.config import PRIVACY_MODE
 from app.config.feature_flags import USE_ZOHO_API
-from app.utils.anonymizer import anonymize_candidate_data
+from app.utils.anonymizer import anonymize_candidate_data, anonymize_text_field
 
 
 # State definition for LangGraph
@@ -803,10 +803,14 @@ Return ONLY valid JSON with 5-6 bullets. LAST bullet MUST be availability + comp
             # Strip leading bullet characters that GPT might add
             bullets = [bullet.lstrip('• ').lstrip('- ').strip() for bullet in bullets]
 
+            # CRITICAL: Anonymize each bullet to catch firm names GPT might have hallucinated
+            # Even though we anonymize input data, GPT can infer/hallucinate firm names from context
+            bullets = [anonymize_text_field(bullet) for bullet in bullets]
+
             # Validate we got 5-6 bullets
             if len(bullets) < 5 or len(bullets) > 6:
-                # Add availability bullet if missing
-                bullets.append(f"Available {availability}; desired comp {compensation}")
+                # Add availability bullet if missing (also anonymize it)
+                bullets.append(anonymize_text_field(f"Available {availability}; desired comp {compensation}"))
 
             # Cache the result (24 hour TTL)
             await cache_mgr.set(cache_key, json.dumps(bullets), ttl=timedelta(hours=24))
@@ -815,13 +819,14 @@ Return ONLY valid JSON with 5-6 bullets. LAST bullet MUST be availability + comp
 
         except Exception as e:
             state['errors'].append(f"Bullet generation failed for {twav}: {e}")
+            # Fallback bullets - anonymize each to catch firm names in error cases
             return [
-                f"Experienced financial professional with background at {firm or 'leading firms'}.",
-                f"Expertise in client relationship management and financial planning.",
-                f"{years_exp or 'Multiple years'} of industry experience.",
-                f"Licenses: {licenses or 'Various registrations'}.",
-                "Seeks growth opportunity with collaborative team.",
-                f"Available {availability}; desired comp {compensation}"
+                anonymize_text_field(f"Experienced financial professional with background at {firm or 'leading firms'}."),
+                anonymize_text_field("Expertise in client relationship management and financial planning."),
+                anonymize_text_field(f"{years_exp or 'Multiple years'} of industry experience."),
+                anonymize_text_field(f"Licenses: {licenses or 'Various registrations'}."),
+                anonymize_text_field("Seeks growth opportunity with collaborative team."),
+                anonymize_text_field(f"Available {availability}; desired comp {compensation}")
             ]
 
     # -------------------------------------------------------------------------
@@ -1063,39 +1068,85 @@ Return ONLY valid JSON with 5-6 bullets. LAST bullet MUST be availability + comp
         return any(keyword in title_lower for keyword in EXECUTIVE_KEYWORDS)
 
     def _get_alert_type(self, title: str) -> str:
-        """Determine alert type for header based on job title."""
+        """
+        Extract and format actual candidate title for alert header.
+
+        Takes the candidate's real job title and formats it for the alert header,
+        preserving the specific role while removing company names and unnecessary words.
+
+        Examples:
+            "Senior Financial Advisor" → "Senior Advisor Candidate Alert"
+            "CIO / CGO" → "CIO / CGO Candidate Alert"
+            "VP of Wealth Management" → "VP, Wealth Management Candidate Alert"
+            "Director, Advisory Services" → "Director, Advisory Services Candidate Alert"
+        """
         if not title:
             return "Advisor Candidate Alert"
 
-        title_lower = title.lower()
+        # Clean the title
+        cleaned_title = self._clean_job_title(title)
 
-        # Check for C-suite titles first (most specific)
-        if 'cio' in title_lower or 'cgo' in title_lower:
-            return "CIO / CGO Candidate Alert"
-        elif 'ceo' in title_lower or 'coo' in title_lower:
-            return "CEO / President Candidate Alert"
-        elif 'cfo' in title_lower:
-            return "CFO Candidate Alert"
+        # Format as alert header
+        return f"{cleaned_title} Candidate Alert"
 
-        # Check for executive leadership titles
-        elif 'president' in title_lower or 'founder' in title_lower:
-            return "CEO / President Candidate Alert"
-        elif 'managing director' in title_lower or 'managing partner' in title_lower:
-            return "Managing Director / Partner Candidate Alert"
-        elif 'partner' in title_lower and 'advisor' not in title_lower:
-            return "Partner / Principal Candidate Alert"
-        elif 'principal' in title_lower and 'advisor' not in title_lower:
-            return "Partner / Principal Candidate Alert"
+    def _clean_job_title(self, title: str) -> str:
+        """
+        Clean and format job title for use in alert headers.
 
-        # Check for VP and director titles
-        elif ('vice president' in title_lower or 'vp ' in title_lower or ' vp' in title_lower) and 'advisor' not in title_lower:
-            return "Vice President Candidate Alert"
-        elif 'head of' in title_lower:
-            return "Head of Department Candidate Alert"
-        elif ('director' in title_lower or 'evp' in title_lower or 'svp' in title_lower) and 'advisor' not in title_lower:
-            return "Director / Executive Candidate Alert"
+        Removes:
+        - Company names (e.g., "at Morgan Stanley")
+        - Redundant words (e.g., extra "Financial", "Services")
+        - Location info (e.g., "- New York")
 
-        # Default to advisor
-        else:
-            return "Advisor Candidate Alert"
+        Preserves:
+        - Seniority level (Senior, Lead, etc.)
+        - Role type (Advisor, Director, VP, etc.)
+        - Specialization (Wealth Management, Private Client, etc.)
+        """
+        import re
+
+        # Remove common noise patterns
+        cleaned = title
+
+        # Remove company references (e.g., "at [Company]", "with [Company]", "for [Company]")
+        cleaned = re.sub(r'\s+(?:at|with|for|@)\s+[\w\s&,.-]+$', '', cleaned, flags=re.IGNORECASE)
+
+        # Remove location info (e.g., "- New York", "(NYC)")
+        cleaned = re.sub(r'\s*[-–]\s*[\w\s,]+$', '', cleaned)
+        cleaned = re.sub(r'\s*\([^)]*\)\s*$', '', cleaned)
+
+        # Normalize separators: convert " - ", " / ", " | " to consistent " / "
+        cleaned = re.sub(r'\s*[-–|]\s*', ' / ', cleaned)
+
+        # Simplify common redundancies
+        replacements = {
+            'Financial Advisor': 'Advisor',
+            'Wealth Advisor': 'Advisor',
+            'Investment Advisor': 'Advisor',
+            'Financial Adviser': 'Advisor',
+            'Wealth Adviser': 'Advisor',
+            'Financial Planner': 'Financial Planner',  # Keep this one
+            'Vice President': 'VP',
+            'Senior Vice President': 'SVP',
+            'Executive Vice President': 'EVP',
+            'Managing Director': 'Managing Director',  # Keep full
+            'Managing Partner': 'Managing Partner',  # Keep full
+        }
+
+        for old, new in replacements.items():
+            # Case-insensitive replacement but preserve original case style
+            if re.search(r'\b' + re.escape(old) + r'\b', cleaned, re.IGNORECASE):
+                cleaned = re.sub(r'\b' + re.escape(old) + r'\b', new, cleaned, flags=re.IGNORECASE)
+
+        # Clean up extra whitespace
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+        # Clean up duplicate slashes
+        cleaned = re.sub(r'/\s*/\s*', ' / ', cleaned)
+
+        # If title is empty after cleaning, return default
+        if not cleaned:
+            return "Advisor"
+
+        return cleaned
 

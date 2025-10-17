@@ -13,7 +13,7 @@ from app.utils.anonymizer import (
     anonymize_candidate_data,
     anonymize_candidate_list,
     anonymize_firm_name,
-    round_aum_to_range,
+    round_aum_with_plus,
     validate_anonymization,
 )
 

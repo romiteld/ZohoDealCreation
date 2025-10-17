@@ -317,26 +317,31 @@ REGIONAL_FALLBACKS = {
 # PATTERN DEFINITIONS
 # ============================================================================
 
-# Education patterns - simpler and more targeted
+# Education patterns - comprehensive university removal
 UNIVERSITY_REMOVAL_PATTERNS = [
-    # "MBA from [University]" → "MBA"
-    (re.compile(r'\b(MBA|MS|MA|BS|BA|PhD|JD|MD)\s+from\s+[A-Za-z\s]+?(?=,|\.|$)', re.IGNORECASE), r'\1'),
+    # "MBA from [University]" → "MBA" (match until comma, period, semicolon, or word boundary)
+    (re.compile(r'\b(MBA|MS|MA|BS|BA|PhD|JD|MD)\s+from\s+[A-Za-z\s]+?(?=\s+(?:in|with|at|,|;|\.|$))', re.IGNORECASE), r'\1'),
 
     # "MBA ([University])" → "MBA"
     (re.compile(r'\b(MBA|MS|MA|BS|BA|PhD|JD|MD|CFA|CFP|ChFC|CLU)\s*\([^\)]+\)', re.IGNORECASE), r'\1'),
 
     # Remove standalone university mentions - handles both "University of X" and "X University" patterns
-    # Match specific universities and common patterns
+    # CRITICAL: Use greedy matching (+) not lazy (+?) to ensure full university names are removed
     (re.compile(r'\b(?:'
-        # Major named universities
-        r'Harvard|Stanford|MIT|Yale|Penn State|LSU|UCLA|USC|NYU|Columbia|Cornell|Duke|Northwestern|Georgetown|Rice|Vanderbilt|Emory|Carnegie Mellon|IE University|INSEAD|Wharton|Kellogg|Booth|Sloan|'
-        # "University of X Y Z" pattern
-        r'University\s+of\s+[\w\s,\-–]+?|'
+        # Major named universities (add more common names)
+        r'Harvard|Stanford|MIT|Yale|Penn\s+State|LSU|UCLA|USC|NYU|Columbia|Cornell|Duke|Northwestern|Georgetown|Rice|Vanderbilt|Emory|Carnegie\s+Mellon|'
+        r'IE\s+University|IE\s+Business|INSEAD|Wharton|Kellogg|Booth|Sloan|Ross|Haas|Stern|Fuqua|Tuck|Darden|Anderson|'
+        r'Oxford|Cambridge|LSE|'
+        # "University of X Y Z" pattern - GREEDY matching to catch full name
+        r'University\s+of\s+[\w\s,\-–]+(?=\s|,|;|\.|$)|'
         # "X State University" pattern
-        r'[\w\s]+?\s+State\s+University|'
-        # "X University" pattern (but not too broad - 1-3 words before University)
-        r'(?:\w+\s+)?(?:\w+\s+)?\w+\s+University'
-        r')(?=\s*[;,\.\(]|$)', re.IGNORECASE), ''),
+        r'[\w\s]+\s+State\s+University(?=\s|,|;|\.|$)|'
+        # "X University" pattern (1-3 words before University) - GREEDY
+        r'(?:\w+\s+){1,3}University(?=\s|,|;|\.|$)'
+        r')\b', re.IGNORECASE), ''),
+
+    # Additional pattern: Remove "at [University]" or "from [University]" mid-sentence
+    (re.compile(r'\s+(?:at|from)\s+(?:the\s+)?University\s+of\s+[\w\s,\-–]+(?=\s|,|;|\.|$)', re.IGNORECASE), ''),
 ]
 
 # Achievement patterns
@@ -446,29 +451,30 @@ def normalize_location(city: Optional[str], state: Optional[str]) -> Tuple[Optio
     return None, state
 
 
-def round_aum_to_range(amount_str: str) -> str:
+def round_aum_with_plus(amount_str: str) -> str:
     """
-    Convert exact AUM/production figures to rounded ranges.
+    Convert exact AUM/production figures to rounded values with + suffix.
 
     Rounding rules:
-    - Under $500M: Round to nearest $50M
+    - Under $50M: Round to nearest $10M
+    - $50M-$500M: Round to nearest $50M
     - Over $500M: Round to nearest $100M
 
     Args:
         amount_str: Amount string like "$1.68B", "$300M", "125M"
 
     Returns:
-        Rounded range string like "$1.5B-$2.0B", "$250M-$400M"
+        Rounded value with + suffix like "$1.5B+", "$300M+", "$40M+"
 
     Examples:
-        >>> round_aum_to_range("$1.68B")
-        "$1.5B-$2.0B"
+        >>> round_aum_with_plus("$1.68B")
+        "$1.5B+"
 
-        >>> round_aum_to_range("300M")
-        "$250M-$400M"
+        >>> round_aum_with_plus("300M")
+        "$300M+"
 
-        >>> round_aum_to_range("$75M")
-        "$50M-$100M"
+        >>> round_aum_with_plus("$37M")
+        "$40M+"
     """
     match = AUM_PATTERN.search(amount_str)
     if not match:
@@ -485,31 +491,30 @@ def round_aum_to_range(amount_str: str) -> str:
     else:  # M
         value_millions = value
 
-    # Determine rounding increment
-    if value_millions < 500:
-        increment = 50
+    # Determine rounding increment based on size
+    if value_millions < 50:
+        increment = 10  # Round to nearest $10M for small amounts
+    elif value_millions < 500:
+        increment = 50  # Round to nearest $50M for mid-range
     else:
-        increment = 100
+        increment = 100  # Round to nearest $100M for large amounts
 
     # Round to nearest increment
-    lower = (value_millions // increment) * increment
-    upper = lower + increment
+    rounded_millions = round(value_millions / increment) * increment
 
     # Format back to appropriate unit
-    if lower >= 1000:
-        lower_val = lower / 1000
-        upper_val = upper / 1000
+    if rounded_millions >= 1000:
+        rounded_val = rounded_millions / 1000
         unit_str = "B"
     else:
-        lower_val = lower
-        upper_val = upper
+        rounded_val = rounded_millions
         unit_str = "M"
 
     # Format with appropriate decimal places
-    if lower_val == int(lower_val) and upper_val == int(upper_val):
-        return f"${int(lower_val)}{unit_str}-${int(upper_val)}{unit_str}"
+    if rounded_val == int(rounded_val):
+        return f"${int(rounded_val)}{unit_str}+"
     else:
-        return f"${lower_val:.1f}{unit_str}-${upper_val:.1f}{unit_str}"
+        return f"${rounded_val:.1f}{unit_str}+"
 
 
 def generalize_growth_statement(text: str) -> str:
@@ -720,7 +725,7 @@ def anonymize_candidate_data(candidate: Dict[str, Any]) -> Dict[str, Any]:
     - Firm names → Generic industry classifications
     - Cities → Major metro areas or regional classifications
     - ZIP codes → Removed
-    - AUM/Production → Rounded to ranges
+    - AUM/Production → Rounded values with + suffix
     - Education → Degree types only (no universities)
     - Achievements → Generalized statements
     - Proprietary systems → Generic descriptions
@@ -748,7 +753,7 @@ def anonymize_candidate_data(candidate: Dict[str, Any]) -> Dict[str, Any]:
         >>> result["city"]
         "Dallas/Fort Worth"
         >>> result["aum"]
-        "$1.5B-$2.0B"
+        "$1.7B+"
     """
     import copy
     anonymized = copy.deepcopy(candidate)
@@ -785,14 +790,14 @@ def anonymize_candidate_data(candidate: Dict[str, Any]) -> Dict[str, Any]:
     if "location" in anonymized and anonymized["location"]:
         anonymized["location"] = ZIP_CODE_PATTERN.sub("", anonymized["location"]).strip()
 
-    # 3. Round AUM/Production to ranges
+    # 3. Round AUM/Production with + suffix
     if "aum" in anonymized and anonymized["aum"]:
         aum_str = str(anonymized["aum"])
-        anonymized["aum"] = round_aum_to_range(aum_str)
+        anonymized["aum"] = round_aum_with_plus(aum_str)
 
     if "production" in anonymized and anonymized["production"]:
         prod_str = str(anonymized["production"])
-        anonymized["production"] = round_aum_to_range(prod_str)
+        anonymized["production"] = round_aum_with_plus(prod_str)
 
     # 4. Anonymize all text fields
     text_fields = [
@@ -925,7 +930,7 @@ def validate_anonymization(original: Dict[str, Any], anonymized: Dict[str, Any])
     - No specific firm names remain
     - No ZIP codes remain
     - No university names remain
-    - AUM values are ranges (not exact)
+    - AUM values have + suffix (not exact)
 
     Args:
         original: Original candidate data
@@ -957,21 +962,28 @@ def validate_anonymization(original: Dict[str, Any], anonymized: Dict[str, Any])
             if ZIP_CODE_PATTERN.search(str(anonymized[field])):
                 warnings.append(f"ZIP code found in {field}: {anonymized[field]}")
 
-    # Check for university names
-    university_pattern = re.compile(
-        r"\b(Harvard|Stanford|MIT|Yale|Penn State|LSU|UCLA|USC)\b",
-        re.IGNORECASE
-    )
-    for field in ["education", "bio", "background"]:
-        if field in anonymized and anonymized[field]:
-            if university_pattern.search(str(anonymized[field])):
-                warnings.append(f"University name found in {field}")
+    # Check for university names - comprehensive patterns matching validation
+    university_patterns = [
+        re.compile(r'University\s+of\s+[\w\s,\-–]+', re.IGNORECASE),  # University of X
+        re.compile(r'[\w\s]+\s+State\s+University', re.IGNORECASE),  # X State University
+        re.compile(r'(?:\w+\s+){1,3}University\b', re.IGNORECASE),  # X University
+        re.compile(r'\b(?:Harvard|Stanford|MIT|Yale|Penn\s+State|LSU|UCLA|USC|NYU|Columbia|Cornell|Duke|'
+                   r'Northwestern|Georgetown|Rice|Vanderbilt|Emory|Carnegie\s+Mellon|IE\s+University|'
+                   r'INSEAD|Wharton|Kellogg|Booth|Sloan|Ross|Haas|Stern|Oxford|Cambridge|LSE)\b', re.IGNORECASE)
+    ]
 
-    # Check AUM format (should be range, not exact)
+    for field in ["education", "bio", "background", "interviewer_notes", "headline"]:
+        if field in anonymized and anonymized[field]:
+            field_str = str(anonymized[field])
+            for pattern in university_patterns:
+                if pattern.search(field_str):
+                    warnings.append(f"University name pattern found in {field}: {pattern.pattern}")
+
+    # Check AUM format (should have + suffix, not exact)
     if "aum" in anonymized and anonymized["aum"]:
         aum_str = str(anonymized["aum"])
-        if "-" not in aum_str and AUM_PATTERN.search(aum_str):
-            warnings.append(f"AUM appears to be exact value, not range: {aum_str}")
+        if "+" not in aum_str and AUM_PATTERN.search(aum_str):
+            warnings.append(f"AUM appears to be exact value without + suffix: {aum_str}")
 
     return warnings
 
