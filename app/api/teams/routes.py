@@ -18,6 +18,11 @@ import asyncpg
 from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext, MessageFactory, CardFactory
 from botbuilder.schema import Activity, ActivityTypes, InvokeResponse
 from botframework.connector.auth import MicrosoftAppCredentials
+from app.api.teams.invoke_models import (
+    InvokeResponseBuilder,
+    create_success_response,
+    create_error_response
+)
 
 from app.api.teams.adaptive_cards import (
     create_welcome_card,
@@ -29,6 +34,11 @@ from app.api.teams.adaptive_cards import (
     create_clarification_card,
     create_suggestion_card,
     create_vault_alerts_builder_card
+)
+from app.api.teams.nlp_formatters import (
+    format_medium_confidence_text,
+    format_results_as_text,
+    format_error_text
 )
 from app.jobs.talentwell_curator import TalentWellCurator
 from app.jobs.vault_alerts_generator import VaultAlertsGenerator
@@ -738,17 +748,14 @@ async def handle_message_activity(
                     WHERE conversation_id = $2 AND activity_id = $3
                 """, "medium_confidence_query", conversation_id, activity.id)
 
-                # Create suggestion card with inline refinement option
-                suggestion_card = create_suggestion_card(
+                # Format as text-only response with confidence indicator
+                formatted_text = format_medium_confidence_text(
                     result=result,
                     confidence=confidence,
-                    user_query=cleaned_text
+                    query=cleaned_text
                 )
 
-                attachment = CardFactory.adaptive_card(suggestion_card["content"])
-                message = MessageFactory.attachment(attachment)
-                message.text = response_text
-                return message
+                return MessageFactory.text(formatted_text)
 
             else:  # >=0.8
                 # High confidence: Direct execution (REUSE result from above)
@@ -779,20 +786,8 @@ async def handle_message_activity(
                     WHERE conversation_id = $2 AND activity_id = $3
                 """, "natural_language_query", conversation_id, activity.id)
 
-                # Return response
-                if result.get("card"):
-                    # If we have a card, attach it
-                    attachment = CardFactory.adaptive_card(result["card"]["content"])
-                    response = MessageFactory.attachment(attachment)
-                    if result.get("text"):
-                        response.text = result["text"]
-                    return response
-                else:
-                    # Text-only response
-                    return {
-                        "type": "message",
-                        "text": response_text
-                    }
+                # Always return text-only response (no cards)
+                return MessageFactory.text(response_text)
 
         except Exception as e:
             logger.error(f"Error processing natural language query: {e}", exc_info=True)
@@ -813,8 +808,17 @@ async def handle_message_activity(
 async def handle_invoke_activity(
     turn_context: TurnContext,
     db: asyncpg.Connection
-):
-    """Handle Adaptive Card button clicks with robust data extraction."""
+) -> InvokeResponse:
+    """
+    Handle Adaptive Card button clicks with robust data extraction.
+
+    CRITICAL: This function MUST return an InvokeResponse to prevent HTTP 500 errors.
+    Never return None or throw unhandled exceptions.
+
+    Returns:
+        InvokeResponse with proper status code and correlation ID
+    """
+    correlation_id = str(uuid.uuid4())
 
     try:
         activity = turn_context.activity
@@ -837,12 +841,13 @@ async def handle_invoke_activity(
         action = final_data.get("action", "")
 
         # Enhanced logging for debugging button clicks
-        logger.info(f"=== INVOKE ACTIVITY RECEIVED ===")
+        logger.info(f"=== INVOKE ACTIVITY RECEIVED (Correlation: {correlation_id}) ===")
         logger.info(f"Action: {action}")
         logger.info(f"Raw Payload Keys: {list(raw_payload.keys())}")
         logger.info(f"Action Metadata: {action_metadata}")
         logger.info(f"Form Data: {form_data}")
         logger.info(f"Final Merged Data: {json.dumps(final_data, indent=2)}")
+        logger.info(f"Correlation ID: {correlation_id}")
         print(f"=== INVOKE: action={action}, final_data={final_data}", flush=True)
 
         user_id = activity.from_property.id if activity.from_property else ""
@@ -851,11 +856,15 @@ async def handle_invoke_activity(
 
         logger.info(f"Invoke action: {action} from user {user_email}")
 
-        response = None
+        # Track telemetry
+        from app.telemetry import track_event
+        track_event("invoke_action", {"action": action, "correlation_id": correlation_id, "user_email": user_email})
+
+        follow_up_message = None
 
         if action == "generate_digest_preview":
             audience = final_data.get("audience", "global")
-            response = await generate_digest_preview(
+            follow_up_message = await generate_digest_preview(
                 user_id=user_id,
                 user_email=user_email,
                 conversation_id=conversation_id,
@@ -869,7 +878,7 @@ async def handle_invoke_activity(
             audience = final_data.get("audience", "global")
             dry_run = final_data.get("dry_run", False)
 
-            response = await generate_full_digest(
+            follow_up_message = await generate_full_digest(
                 user_id=user_id,
                 user_email=user_email,
                 request_id=request_id,
@@ -913,7 +922,7 @@ async def handle_invoke_activity(
                 )
 
                 attachment = CardFactory.adaptive_card(refinement_card["content"])
-                response = MessageFactory.attachment(attachment)
+                follow_up_message = MessageFactory.attachment(attachment)
 
             except RateLimitExceeded as e:
                 # Handle rate limit in refine flow too
@@ -923,7 +932,7 @@ async def handle_invoke_activity(
                     "You've asked for clarification too frequently. "
                     "Please wait a few minutes.\n\n_Limit: 3 per 5 min_"
                 )
-                response = MessageFactory.attachment(CardFactory.adaptive_card(error_card["content"]))
+                follow_up_message = MessageFactory.attachment(CardFactory.adaptive_card(error_card["content"]))
 
         elif action == "apply_filters":
             # Apply filters and regenerate digest
@@ -935,7 +944,7 @@ async def handle_invoke_activity(
                 "max_candidates": final_data.get("max_candidates", 6)
             }
 
-            response = await generate_digest_preview(
+            follow_up_message = await generate_digest_preview(
                 user_id=user_id,
                 user_email=user_email,
                 conversation_id=conversation_id,
@@ -946,11 +955,11 @@ async def handle_invoke_activity(
 
         elif action == "show_preferences":
             # Show preferences card
-            response = await show_user_preferences(user_id, user_email, activity.from_property.name or "User", db)
+            follow_up_message = await show_user_preferences(user_id, user_email, activity.from_property.name or "User", db)
 
         elif action == "save_preferences":
             # Save user preferences
-            response = await save_user_preferences(
+            follow_up_message = await save_user_preferences(
                 user_id=user_id,
                 user_email=user_email,
                 preferences=final_data,
@@ -959,7 +968,7 @@ async def handle_invoke_activity(
 
         elif action == "save_vault_alerts_subscription":
             # Save vault alerts subscription (executive-only)
-            response = await save_vault_alerts_subscription(
+            follow_up_message = await save_vault_alerts_subscription(
                 user_id=user_id,
                 user_email=user_email,
                 settings=final_data,
@@ -968,7 +977,7 @@ async def handle_invoke_activity(
 
         elif action == "preview_vault_alerts":
             # Generate preview of vault alerts with custom filters
-            response = await preview_vault_alerts(
+            follow_up_message = await preview_vault_alerts(
                 user_email=user_email,
                 settings=final_data,
                 db=db
@@ -983,9 +992,9 @@ async def handle_invoke_activity(
             if not session_id or not clarification_response:
                 logger.warning(f"Missing clarification data: session={session_id}, response={clarification_response}")
                 logger.warning(f"Available keys in final_data: {list(final_data.keys())}")
-                response = MessageFactory.text("❌ Invalid submission. Please try again.")
+                follow_up_message = MessageFactory.text("❌ Invalid submission. Please try again.")
             else:
-                response = await handle_clarification_response(
+                follow_up_message = await handle_clarification_response(
                     user_id=user_id,
                     user_email=user_email,
                     session_id=session_id,
@@ -998,7 +1007,7 @@ async def handle_invoke_activity(
             candidate_ids = final_data.get("candidate_ids", [])
             logger.info(f"Email marketability report request from {user_email} for {len(candidate_ids)} candidates")
 
-            response = await email_marketability_report(
+            follow_up_message = await email_marketability_report(
                 user_email=user_email,
                 candidate_ids=candidate_ids,
                 db=db
@@ -1006,40 +1015,48 @@ async def handle_invoke_activity(
 
         else:
             logger.warning(f"Unknown invoke action: {action}")
-            response = MessageFactory.text(f"Unknown action: {action}")
+            follow_up_message = MessageFactory.text(f"Unknown action: {action}")
 
-        # For invoke activities, we need to send an invoke response AND a follow-up message
-        if response:
-            # Send invoke response to acknowledge the button click
-            invoke_response = Activity(
-                type=ActivityTypes.invoke_response,
-                value={
-                    "status": 200,
-                    "body": {"message": "Processing..."}
-                }
-            )
-            await turn_context.send_activity(invoke_response)
+        # Send follow-up message if we have one
+        if follow_up_message:
+            await turn_context.send_activity(follow_up_message)
 
-            # Then send the actual response as a follow-up message
-            await turn_context.send_activity(response)
+        # Always return success InvokeResponse (NEVER return None or status 500)
+        result = InvokeResponseBuilder(action) \
+            .with_success("Action processed successfully") \
+            .with_correlation_id(correlation_id) \
+            .build()
+
+        return result.to_invoke_response()
 
     except Exception as e:
         logger.error(f"Error handling invoke: {e}", exc_info=True)
+        logger.error(f"Correlation ID: {correlation_id}")
 
-        # Send error invoke response
-        invoke_response = Activity(
-            type=ActivityTypes.invoke_response,
-            value={
-                "status": 500,
-                "body": {"message": str(e)}
-            }
-        )
-        await turn_context.send_activity(invoke_response)
+        # Track error telemetry
+        from app.telemetry import track_event
+        track_event("invoke_error", {
+            "action": action if 'action' in locals() else "unknown",
+            "correlation_id": correlation_id,
+            "error": str(e),
+            "error_type": type(e).__name__
+        })
 
-        # Also send error card
-        error_card = create_error_card(str(e))
-        attachment = CardFactory.adaptive_card(error_card["content"])
-        await turn_context.send_activity(MessageFactory.attachment(attachment))
+        # Send error card as follow-up message
+        try:
+            error_message = f"An error occurred processing your request.\nReference: {correlation_id}\n\nError: {str(e)}"
+            error_card = create_error_card(error_message)
+            attachment = CardFactory.adaptive_card(error_card["content"])
+            await turn_context.send_activity(MessageFactory.attachment(attachment))
+        except Exception as card_error:
+            logger.error(f"Failed to send error card: {card_error}")
+
+        # Return error InvokeResponse (do NOT use status 500)
+        return create_error_response(
+            action=action if 'action' in locals() else "unknown",
+            error=e,
+            correlation_id=correlation_id
+        ).to_invoke_response()
 
 
 async def handle_conversation_update(
@@ -1854,6 +1871,176 @@ async def admin_ping():
         "message": "Admin routes are working",
         "timestamp": datetime.now().isoformat()
     }
+
+
+@router.get("/admin/zoho-sync-status")
+async def get_zoho_sync_status(api_key: Optional[str] = Header(None, alias="X-API-Key")):
+    """
+    Get comprehensive Zoho continuous sync status and metrics.
+
+    Returns:
+        - Webhook processing stats (pending, success, failed, conflict)
+        - Performance metrics (latency, dedupe hit rate, conflict rate)
+        - Per-module sync status and record counts
+        - Recent sync history
+
+    Requires API key authentication.
+
+    Example:
+        GET /api/teams/admin/zoho-sync-status
+        Header: X-API-Key: your-api-key
+    """
+    # Verify API key (only executives and system admins)
+    expected_api_key = os.getenv("API_KEY")
+    if not expected_api_key or api_key != expected_api_key:
+        raise HTTPException(status_code=401, detail="Invalid or missing API key")
+
+    try:
+        # Use shared Redis cache manager for 60-second TTL on metrics
+        from well_shared.cache.redis_manager import RedisCacheManager
+        redis_manager = RedisCacheManager()
+
+        cache_key = "admin:zoho-sync-status:metrics"
+        cached_metrics = await redis_manager.client.get(cache_key)
+
+        if cached_metrics:
+            logger.debug("Returning cached sync status metrics")
+            return json.loads(cached_metrics)
+
+        # Fetch fresh metrics from database
+        conn = await get_database_connection()
+
+        try:
+            # 1. Webhook processing stats
+            webhook_stats = await conn.fetchrow("""
+                SELECT
+                    COUNT(*) FILTER (WHERE processing_status = 'pending') as pending,
+                    COUNT(*) FILTER (WHERE processing_status = 'processing') as processing,
+                    COUNT(*) FILTER (WHERE processing_status = 'success') as success,
+                    COUNT(*) FILTER (WHERE processing_status = 'failed') as failed,
+                    COUNT(*) FILTER (WHERE processing_status = 'conflict') as conflict,
+                    COUNT(*) as total_received
+                FROM zoho_webhook_log
+                WHERE received_at >= NOW() - INTERVAL '24 hours'
+            """)
+
+            # 2. Performance metrics (last 24 hours)
+            performance = await conn.fetchrow("""
+                WITH latency_calc AS (
+                    SELECT EXTRACT(EPOCH FROM (processed_at - received_at)) as latency_seconds
+                    FROM zoho_webhook_log
+                    WHERE processing_status = 'success'
+                      AND processed_at IS NOT NULL
+                      AND received_at >= NOW() - INTERVAL '24 hours'
+                )
+                SELECT
+                    AVG(latency_seconds) * 1000 as avg_latency_ms,
+                    PERCENTILE_CONT(0.95) WITHIN GROUP (ORDER BY latency_seconds) * 1000 as p95_latency_ms
+                FROM latency_calc
+            """)
+
+            # 3. Dedupe hit rate (successful dedupe / total received)
+            dedupe_stats = await conn.fetchrow("""
+                SELECT
+                    COALESCE(SUM(dedupe_hit_count), 0) as dedupe_hits,
+                    COALESCE(SUM(webhook_count), 0) as total_webhooks
+                FROM zoho_sync_metadata
+            """)
+
+            dedupe_hit_rate = (
+                dedupe_stats["dedupe_hits"] / dedupe_stats["total_webhooks"]
+                if dedupe_stats["total_webhooks"] > 0 else 0.0
+            )
+
+            # 4. Conflict rate
+            conflict_rate = (
+                webhook_stats["conflict"] / webhook_stats["total_received"]
+                if webhook_stats["total_received"] > 0 else 0.0
+            )
+
+            # 5. Per-module status with accurate record counts
+            modules = await conn.fetch("""
+                SELECT
+                    m.sync_type as module,
+                    m.sync_status,
+                    m.last_successful_sync_at,
+                    m.next_sync_at,
+                    m.records_synced,
+                    m.records_created,
+                    m.records_updated,
+                    m.records_failed,
+                    m.sync_duration_seconds,
+                    m.error_message,
+                    COALESCE(s.n_live_tup, 0) as record_count
+                FROM zoho_sync_metadata m
+                LEFT JOIN pg_stat_user_tables s ON s.relname = 'zoho_' || LOWER(m.sync_type)
+                WHERE m.sync_type IN ('Leads', 'Deals', 'Contacts', 'Accounts')
+                ORDER BY
+                    CASE m.sync_type
+                        WHEN 'Leads' THEN 1
+                        WHEN 'Deals' THEN 2
+                        WHEN 'Contacts' THEN 3
+                        WHEN 'Accounts' THEN 4
+                    END
+            """)
+
+            # Build response
+            response = {
+                "status": "healthy" if webhook_stats["failed"] < 10 else "degraded",
+                "timestamp": datetime.utcnow().isoformat() + "Z",
+                "webhook_stats": {
+                    "total_received_24h": webhook_stats["total_received"],
+                    "pending": webhook_stats["pending"],
+                    "processing": webhook_stats["processing"],
+                    "success": webhook_stats["success"],
+                    "failed": webhook_stats["failed"],
+                    "conflict": webhook_stats["conflict"]
+                },
+                "performance": {
+                    "avg_latency_ms": round(performance["avg_latency_ms"] or 0, 2),
+                    "p95_latency_ms": round(performance["p95_latency_ms"] or 0, 2),
+                    "dedupe_hit_rate": round(dedupe_hit_rate, 3),
+                    "conflict_rate": round(conflict_rate, 4)
+                },
+                "modules": {
+                    row["module"]: {
+                        "sync_status": row["sync_status"],
+                        "last_sync": row["last_successful_sync_at"].isoformat() + "Z" if row["last_successful_sync_at"] else None,
+                        "next_sync": row["next_sync_at"].isoformat() + "Z" if row["next_sync_at"] else None,
+                        "records_synced": row["records_synced"] or 0,
+                        "records_created": row["records_created"] or 0,
+                        "records_updated": row["records_updated"] or 0,
+                        "records_failed": row["records_failed"] or 0,
+                        "duration_seconds": row["sync_duration_seconds"] or 0,
+                        "error_message": row["error_message"],
+                        "total_records": row["record_count"] or 0
+                    }
+                    for row in modules
+                },
+                "health_checks": {
+                    "webhook_receiver": "ok",
+                    "service_bus": "ok" if webhook_stats["pending"] < 100 else "degraded",
+                    "worker": "ok" if webhook_stats["processing"] < 50 else "degraded",
+                    "database": "ok"
+                }
+            }
+
+            # Cache for 60 seconds
+            await redis_manager.client.setex(
+                cache_key,
+                60,
+                json.dumps(response, default=str)
+            )
+
+            return response
+
+        finally:
+            # Always release connection back to pool
+            await conn.close()
+
+    except Exception as e:
+        logger.error(f"Error fetching sync status: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"Error fetching sync status: {str(e)}")
 
 
 @router.post("/admin/test-query-engine")

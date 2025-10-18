@@ -165,7 +165,7 @@ This document defines the 8 streaming datasets for the Well Intake Power BI dash
 
 **Dataset Name**: `WellIntake_DataQuality`
 
-**Update Frequency**: Hourly (via zoho_sync_scheduler.py)
+**Update Frequency**: 15-minute intervals (via multi-module zoho_sync_scheduler.py)
 
 **Schema**:
 ```json

@@ -269,6 +269,24 @@ pytest tests/ -k "shared" -v
 - Utility scripts: zoom_list_recordings.py, zoom_get_transcript.py, zoom_search_candidate.py
 - Retry logic: Exponential backoff with jitter for 5xx errors
 
+### Zoho Continuous Sync (2025-10-17)
+- **Multi-Module Scheduler**: `app/jobs/zoho_sync_scheduler.py` (replaces legacy version)
+  - Supports: Leads, Deals, Contacts, Accounts (env-configurable via `ZOHO_MODULES_TO_SYNC`)
+  - Token bucket rate limiting: 100 calls/min with burst capacity
+  - Exponential backoff for 429 throttling (base 1s, max 3 retries)
+  - 15-minute sync intervals (configurable via `ZOHO_SYNC_INTERVAL_MINUTES`)
+  - ⚠️ **DEPRECATED**: `zoho_sync_scheduler_DEPRECATED.py` (hardcoded credentials - DO NOT USE)
+- **Webhook Infrastructure**: Real-time sync (< 5s latency) via Azure Service Bus
+  - Endpoints: `/api/webhooks/zoho/{module}` with challenge verification + HMAC validation
+  - Worker: `app/workers/zoho_sync_worker.py` - Processes events from queue
+  - Field Mapper: `app/services/zoho_field_mapper.py` - Normalizes all field types
+  - Models: `app/models/zoho_sync_models.py` - Pydantic validation
+- **Admin Visibility**: `GET /api/teams/admin/zoho-sync-status` with 60-second Redis cache
+  - Metrics: Webhook stats, latency (avg/p95), dedupe hit rate, conflict rate
+  - Per-module status with accurate row counts from `pg_stat_user_tables`
+- **Backfill Script**: `scripts/backfill_zoho_deals.py` for legacy data migration
+  - Features: Dry-run mode, batch processing, progress tracking, legacy table archival
+
 ### Weekly Email Digests
 - Subscription system via Teams Bot preferences
 - Azure Communication Services for delivery

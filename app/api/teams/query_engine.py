@@ -17,6 +17,7 @@ from openai import AsyncAzureOpenAI
 from app.config.candidate_keywords import normalize_candidate_type
 from app.integrations import ZohoApiClient
 from app.api.teams.zoho_module_registry import get_module_registry, is_executive
+from app.repositories.zoho_repository import ZohoLeadsRepository
 
 logger = logging.getLogger(__name__)
 
@@ -129,8 +130,8 @@ class QueryEngine:
             intent["user_email"] = user_email  # Pass for redaction
             logger.info(f"User {user_email} role: {user_role}")
 
-            # Step 4: Build and execute Zoho query (NO owner filtering)
-            results, _ = await self._build_query(intent)
+            # Step 4: Build and execute query (PostgreSQL for vault, Zoho API for others)
+            results, _ = await self._build_query(intent, db)
             if intent.get("validation_error"):
                 logger.info("Validation error detected during query build; returning user message")
                 return {
@@ -364,10 +365,11 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
 
     async def _build_query(
         self,
-        intent: Dict[str, Any]
+        intent: Dict[str, Any],
+        db: asyncpg.Connection = None
     ) -> Tuple[List[Dict], List]:
         """
-        Build query using ZohoClient for both vault_candidates and deals.
+        Build query using repository (PostgreSQL) for vault_candidates and ZohoClient for other modules.
 
         Returns:
             Tuple of (results_list, empty_params_list)
@@ -655,18 +657,44 @@ Rate your confidence 0.0-1.0 based on clarity and context."""
             # Remove None values
             zoho_filters = {k: v for k, v in zoho_filters.items() if v is not None}
 
-            logger.info(f"Querying Zoho CRM vault_candidates with filters: {zoho_filters}")
+            logger.info(f"Querying PostgreSQL vault_candidates with filters: {zoho_filters}")
 
             try:
-                # Query Zoho CRM directly for REAL-TIME data
-                zoho_client = ZohoApiClient()
-                results = await zoho_client.query_candidates(**zoho_filters)
+                # Query PostgreSQL zoho_leads table (fast local data)
+                if not db:
+                    logger.error("Database connection not available for vault query")
+                    return [], []
 
-                logger.info(f"Found {len(results)} vault candidates from Zoho CRM (real-time)")
+                repo = ZohoLeadsRepository(db, redis_client=None)  # No Redis for now
+
+                # Map filters from query engine to repository parameters
+                repo_filters = {
+                    "limit": zoho_filters.get("limit", 500),
+                    "use_cache": False  # Disable cache for real-time queries
+                }
+
+                # Extract custom filters
+                custom = zoho_filters.get("custom_filters", {})
+                if custom.get("candidate_locator"):
+                    repo_filters["candidate_locator"] = custom["candidate_locator"]
+                if custom.get("location"):
+                    repo_filters["location"] = custom["location"]
+
+                # Map date filters (use from_date as after_date)
+                if zoho_filters.get("from_date"):
+                    repo_filters["after_date"] = zoho_filters["from_date"]
+
+                # Query repository
+                candidates = await repo.get_vault_candidates(**repo_filters)
+
+                # Convert VaultCandidate models back to dicts for compatibility
+                results = [c.dict() for c in candidates]
+
+                logger.info(f"Found {len(results)} vault candidates from PostgreSQL (<100ms)")
                 return results, []
 
             except Exception as e:
-                logger.error(f"Error querying Zoho CRM vault_candidates: {e}", exc_info=True)
+                logger.error(f"Error querying PostgreSQL vault_candidates: {e}", exc_info=True)
                 return [], []
 
         else:

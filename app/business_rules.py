@@ -248,6 +248,12 @@ def determine_source(email_body: str, referrer_name: Optional[str], sender_email
 
     # Check if this is a consultation email - these are referrals even if from Calendly
     if is_client_consultation_email(email_body, subject, sender_email):
+        # Extract actual Calendly event type from email body
+        event_type_match = re.search(r'Event Type:\s*([^\n]+)', email_body, re.IGNORECASE)
+        if event_type_match:
+            event_type = event_type_match.group(1).strip()
+            return "Referral", event_type
+        # Fall back to generic description if extraction fails
         return "Referral", "Client consultation scheduling"
 
     if "twav" in lower_body or "advisor vault" in lower_body:

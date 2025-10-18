@@ -2316,7 +2316,15 @@ async def process_email(request: EmailRequest, req: Request, _auth=Depends(verif
             request.sender_email,
             request.subject  # Pass subject for client consultation detection
         )
-        
+
+        # Prioritize logged-in Outlook user for credit/owner attribution
+        if hasattr(request, 'user_context') and request.user_context:
+            user_name = request.user_context.get('name', '').strip()
+            if user_name:
+                # Set referrer_name to logged-in user for credit attribution
+                processed_data['referrer_name'] = user_name
+                logger.info(f"Using logged-in Outlook user for credit: {user_name}")
+
         # Check if user input is required for missing fields
         if processed_data.get('requires_user_input'):
             missing_fields = processed_data.get('missing_fields', [])
@@ -3243,6 +3251,10 @@ app.include_router(apollo_router)
 
 # Include Teams bot router
 app.include_router(teams_router)
+
+# Include Zoho Webhooks router for continuous sync
+from app.api.zoho_webhooks import router as zoho_webhooks_router
+app.include_router(zoho_webhooks_router)
 
 # Include Real-time Monitoring router for Outlook Add-in analytics
 from app.api.monitoring_routes import router as monitoring_router

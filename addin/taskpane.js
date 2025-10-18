@@ -1184,11 +1184,36 @@ function normalizeExtractionForForm(extracted, fallback = {}) {
     const deal = merged.deal_record || fallbackSource.deal_record || {};
 
     const toSafeString = (value) => {
-        if (typeof value === 'string') {
-            const trimmed = value.trim();
-            return trimmed !== '' ? trimmed : '';
+        if (typeof value !== 'string') {
+            return '';
         }
-        return '';
+
+        let sanitized = value.replace(/\x00/g, '');
+
+        if (sanitized.includes('<')) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = sanitized;
+            sanitized = tmp.textContent || tmp.innerText || '';
+        }
+
+        sanitized = sanitized.replace(/&nbsp;/gi, ' ');
+        sanitized = sanitized.replace(/[\r\n\t]+/g, ' ');
+        sanitized = sanitized.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+        sanitized = sanitized.replace(/\s+/g, ' ').trim();
+
+        if (!sanitized) {
+            return '';
+        }
+
+        if (sanitized.length > 1000) {
+            sanitized = sanitized.slice(0, 1000);
+        }
+
+        if (/^https?:/i.test(sanitized) || sanitized.includes('://')) {
+            return '';
+        }
+
+        return sanitized;
     };
 
     // Build candidate full name with structured contact info if available

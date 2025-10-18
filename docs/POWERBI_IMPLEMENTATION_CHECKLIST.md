@@ -203,8 +203,10 @@ az containerapp update --name well-intake-api \
 
 2. Start background job:
 ```bash
-# In container startup
+# In container startup (multi-module async scheduler)
 python3 app/jobs/zoho_sync_scheduler.py &
+
+# ⚠️ NOTE: Old single-module scheduler is deprecated (zoho_sync_scheduler_DEPRECATED.py)
 ```
 
 ### Step 3: Test Telemetry (Staging First)

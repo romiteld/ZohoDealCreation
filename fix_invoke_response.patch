@@ -1,0 +1,224 @@
+--- app/api/teams/routes.py.old
++++ app/api/teams/routes.py
+@@ -18,6 +18,11 @@
+ from botbuilder.core import BotFrameworkAdapter, BotFrameworkAdapterSettings, TurnContext, MessageFactory, CardFactory
+ from botbuilder.schema import Activity, ActivityTypes, InvokeResponse
+ from botframework.connector.auth import MicrosoftAppCredentials
++from app.api.teams.invoke_models import (
++    InvokeResponseBuilder,
++    create_success_response,
++    create_error_response
++)
+
+ from app.api.teams.adaptive_cards import (
+     create_welcome_card,
+@@ -813,17 +818,25 @@
+ async def handle_invoke_activity(
+     turn_context: TurnContext,
+     db: asyncpg.Connection
+-):
+-    """Handle Adaptive Card button clicks with robust data extraction."""
++) -> InvokeResponse:
++    """
++    Handle Adaptive Card button clicks with robust data extraction.
++
++    CRITICAL: This function MUST return an InvokeResponse to prevent HTTP 500 errors.
++    Never return None or throw unhandled exceptions.
++
++    Returns:
++        InvokeResponse with proper status code and correlation ID
++    """
++    correlation_id = str(uuid.uuid4())
+
+     try:
+         activity = turn_context.activity
+
+         # Step 1: Extract raw payload (preserve ALL data)
+         raw_payload = activity.value or {}
+
+         # Step 2: Unwrap action metadata from msteams.value
+         action_metadata = {}
+         if "msteams" in raw_payload and "value" in raw_payload["msteams"]:
+             action_metadata = raw_payload["msteams"]["value"]
+@@ -838,10 +851,11 @@
+         action = final_data.get("action", "")
+
+         # Enhanced logging for debugging button clicks
+-        logger.info(f"=== INVOKE ACTIVITY RECEIVED ===")
++        logger.info(f"=== INVOKE ACTIVITY RECEIVED (Correlation: {correlation_id}) ===")
+         logger.info(f"Action: {action}")
+         logger.info(f"Raw Payload Keys: {list(raw_payload.keys())}")
+         logger.info(f"Action Metadata: {action_metadata}")
+         logger.info(f"Form Data: {form_data}")
+         logger.info(f"Final Merged Data: {json.dumps(final_data, indent=2)}")
++        logger.info(f"Correlation ID: {correlation_id}")
+         print(f"=== INVOKE: action={action}, final_data={final_data}", flush=True)
+
+@@ -851,7 +865,10 @@
+
+         logger.info(f"Invoke action: {action} from user {user_email}")
+
+-        response = None
++        # Track telemetry
++        from app.telemetry import track_event
++        track_event("invoke_action", {"action": action, "correlation_id": correlation_id, "user_email": user_email})
++
++        follow_up_message = None
+
+         if action == "generate_digest_preview":
+             audience = final_data.get("audience", "global")
+-            response = await generate_digest_preview(
++            follow_up_message = await generate_digest_preview(
+                 user_id=user_id,
+                 user_email=user_email,
+@@ -870,7 +887,7 @@
+             dry_run = final_data.get("dry_run", False)
+
+-            response = await generate_full_digest(
++            follow_up_message = await generate_full_digest(
+                 user_id=user_id,
+                 user_email=user_email,
+@@ -912,7 +929,7 @@
+                 )
+
+                 attachment = CardFactory.adaptive_card(refinement_card["content"])
+-                response = MessageFactory.attachment(attachment)
++                follow_up_message = MessageFactory.attachment(attachment)
+
+             except RateLimitExceeded as e:
+                 # Handle rate limit in refine flow too
+@@ -922,7 +939,7 @@
+                     "You've asked for clarification too frequently. "
+                     "Please wait a few minutes.\n\n_Limit: 3 per 5 min_"
+                 )
+-                response = MessageFactory.attachment(CardFactory.adaptive_card(error_card["content"]))
++                follow_up_message = MessageFactory.attachment(CardFactory.adaptive_card(error_card["content"]))
+
+         elif action == "apply_filters":
+             # Apply filters and regenerate digest
+@@ -935,7 +952,7 @@
+                 "max_candidates": final_data.get("max_candidates", 6)
+             }
+
+-            response = await generate_digest_preview(
++            follow_up_message = await generate_digest_preview(
+                 user_id=user_id,
+                 user_email=user_email,
+@@ -945,11 +962,11 @@
+
+         elif action == "show_preferences":
+             # Show preferences card
+-            response = await show_user_preferences(user_id, user_email, activity.from_property.name or "User", db)
++            follow_up_message = await show_user_preferences(user_id, user_email, activity.from_property.name or "User", db)
+
+         elif action == "save_preferences":
+             # Save user preferences
+-            response = await save_user_preferences(
++            follow_up_message = await save_user_preferences(
+                 user_id=user_id,
+                 user_email=user_email,
+@@ -959,7 +976,7 @@
+
+         elif action == "save_vault_alerts_subscription":
+             # Save vault alerts subscription (executive-only)
+-            response = await save_vault_alerts_subscription(
++            follow_up_message = await save_vault_alerts_subscription(
+                 user_id=user_id,
+                 user_email=user_email,
+@@ -969,7 +986,7 @@
+
+         elif action == "preview_vault_alerts":
+             # Generate preview of vault alerts with custom filters
+-            response = await preview_vault_alerts(
++            follow_up_message = await preview_vault_alerts(
+                 user_email=user_email,
+                 settings=final_data,
+@@ -982,9 +999,9 @@
+             # Guard for missing fields
+             if not session_id or not clarification_response:
+                 logger.warning(f"Missing clarification data: session={session_id}, response={clarification_response}")
+                 logger.warning(f"Available keys in final_data: {list(final_data.keys())}")
+-                response = MessageFactory.text("❌ Invalid submission. Please try again.")
++                follow_up_message = MessageFactory.text("❌ Invalid submission. Please try again.")
+             else:
+-                response = await handle_clarification_response(
++                follow_up_message = await handle_clarification_response(
+                     user_id=user_id,
+                     user_email=user_email,
+@@ -998,7 +1015,7 @@
+             candidate_ids = final_data.get("candidate_ids", [])
+             logger.info(f"Email marketability report request from {user_email} for {len(candidate_ids)} candidates")
+
+-            response = await email_marketability_report(
++            follow_up_message = await email_marketability_report(
+                 user_email=user_email,
+                 candidate_ids=candidate_ids,
+@@ -1006,35 +1023,55 @@
+
+         else:
+             logger.warning(f"Unknown invoke action: {action}")
+-            response = MessageFactory.text(f"Unknown action: {action}")
++            follow_up_message = MessageFactory.text(f"Unknown action: {action}")
++
++        # Send follow-up message if we have one
++        if follow_up_message:
++            await turn_context.send_activity(follow_up_message)
+
+-        # For invoke activities, we need to send an invoke response AND a follow-up message
+-        if response:
+-            # Send invoke response to acknowledge the button click
+-            invoke_response = Activity(
+-                type=ActivityTypes.invoke_response,
+-                value={
+-                    "status": 200,
+-                    "body": {"message": "Processing..."}
+-                }
+-            )
+-            await turn_context.send_activity(invoke_response)
+-
+-            # Then send the actual response as a follow-up message
+-            await turn_context.send_activity(response)
++        # Always return success InvokeResponse (NEVER return None or status 500)
++        result = InvokeResponseBuilder(action) \
++            .with_success("Action processed successfully") \
++            .with_correlation_id(correlation_id) \
++            .build()
++
++        return result.to_invoke_response()
+
+     except Exception as e:
+         logger.error(f"Error handling invoke: {e}", exc_info=True)
++        logger.error(f"Correlation ID: {correlation_id}")
++
++        # Track error telemetry
++        from app.telemetry import track_event
++        track_event("invoke_error", {
++            "action": action if 'action' in locals() else "unknown",
++            "correlation_id": correlation_id,
++            "error": str(e),
++            "error_type": type(e).__name__
++        })
++
++        # Send error card as follow-up message
++        try:
++            error_message = f"An error occurred processing your request.\nReference: {correlation_id}\n\nError: {str(e)}"
++            error_card = create_error_card(error_message)
++            attachment = CardFactory.adaptive_card(error_card["content"])
++            await turn_context.send_activity(MessageFactory.attachment(attachment))
++        except Exception as card_error:
++            logger.error(f"Failed to send error card: {card_error}")
+
+-        # Send error invoke response
+-        invoke_response = Activity(
+-            type=ActivityTypes.invoke_response,
+-            value={
+-                "status": 500,
+-                "body": {"message": str(e)}
+-            }
+-        )
+-        await turn_context.send_activity(invoke_response)
+-
+-        # Also send error card
+-        error_card = create_error_card(str(e))
+-        attachment = CardFactory.adaptive_card(error_card["content"])
+-        await turn_context.send_activity(MessageFactory.attachment(attachment))

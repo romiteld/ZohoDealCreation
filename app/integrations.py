@@ -12,6 +12,7 @@ import uuid
 import logging
 import re
 import json
+import html
 from typing import Dict, Any, Optional, List, Tuple
 from azure.storage.blob import BlobServiceClient
 from tenacity import retry, stop_after_attempt, wait_fixed, retry_if_exception_type
@@ -938,6 +939,33 @@ class ZohoClient:
         
         return company
 
+    @staticmethod
+    def _sanitize_field(value: Optional[Any], max_length: Optional[int] = None) -> Optional[str]:
+        """Normalize text fields before sending to Zoho."""
+        if value is None:
+            return None
+
+        if isinstance(value, (int, float)):
+            value = str(value)
+
+        if not isinstance(value, str):
+            return None
+
+        cleaned = value.replace('\x00', '')
+        cleaned = html.unescape(cleaned)
+        cleaned = re.sub(r'<[^>]+>', ' ', cleaned)
+        cleaned = re.sub(r'[\x00-\x08\x0B\x0C\x0E-\x1F]', '', cleaned)
+        cleaned = re.sub(r'\s+', ' ', cleaned).strip()
+
+        if not cleaned:
+            return None
+
+        if max_length and len(cleaned) > max_length:
+            logger.warning(f"Truncating value to {max_length} characters for Zoho payload")
+            cleaned = cleaned[:max_length]
+
+        return cleaned
+
     @retry(stop=stop_after_attempt(3), wait=wait_fixed(2))
     def _make_request(self, method: str, endpoint: str, data: dict = None, params: dict = None) -> dict:
         """
@@ -978,6 +1006,10 @@ class ZohoClient:
                            phone: str = None, enriched_data: Dict = None) -> str:
         """Create or update Account with PostgreSQL caching and Steve's template fields."""
 
+        company_name = self._sanitize_field(company_name, 200) or "Unknown Company"
+        website = self._sanitize_field(website, 255) if website else None
+        phone = self._sanitize_field(phone, 30) if phone else None
+
         # Check PostgreSQL cache first
         if self.pg_client and website:
             domain = website.replace('http://', '').replace('https://', '').replace('www.', '')
@@ -1005,19 +1037,26 @@ class ZohoClient:
 
         # Add enriched data and Steve's template fields
         if enriched_data:
-            if enriched_data.get("description"):
-                account_data["Description"] = enriched_data["description"]
-            if enriched_data.get("industry"):
-                account_data["Industry"] = enriched_data["industry"]
+            description = self._sanitize_field(enriched_data.get("description"), 500)
+            industry = self._sanitize_field(enriched_data.get("industry"), 150)
+            source = self._sanitize_field(enriched_data.get("source"), 150)
+            source_detail = self._sanitize_field(enriched_data.get("source_detail"), 200)
+            credit_owner = self._sanitize_field(enriched_data.get("who_gets_credit"), 150)
+            credit_detail = self._sanitize_field(enriched_data.get("credit_detail"), 200)
+
+            if description:
+                account_data["Description"] = description
+            if industry:
+                account_data["Industry"] = industry
             # Steve's template fields
-            if enriched_data.get("source"):
-                account_data["Account_Source"] = enriched_data["source"]
-            if enriched_data.get("source_detail"):
-                account_data["Source_Detail"] = enriched_data["source_detail"]
-            if enriched_data.get("who_gets_credit"):
-                account_data["Who_Gets_Credit"] = enriched_data["who_gets_credit"]
-            if enriched_data.get("credit_detail"):
-                account_data["Credit_Detail"] = enriched_data["credit_detail"]
+            if source:
+                account_data["Account_Source"] = source
+            if source_detail:
+                account_data["Source_Detail"] = source_detail
+            if credit_owner:
+                account_data["Who_Gets_Credit"] = credit_owner
+            if credit_detail:
+                account_data["Credit_Detail"] = credit_detail
 
         if account_id:
             payload = {"data": [{"id": account_id, **account_data}]}
@@ -1045,6 +1084,16 @@ class ZohoClient:
                            source: str = None) -> str:
         """Create or update Contact with PostgreSQL caching and enhanced fields."""
 
+        full_name = self._sanitize_field(full_name, 150) or "Unknown Contact"
+        email = self._sanitize_field(email, 255)
+        phone = self._sanitize_field(phone, 30) if phone else None
+        city = self._sanitize_field(city, 80) if city else None
+        state = self._sanitize_field(state, 80) if state else None
+        source = self._sanitize_field(source, 150) if source else None
+
+        if not email:
+            raise ValueError("Contact email is required for Zoho contact upsert")
+
         # Check PostgreSQL cache first
         if self.pg_client:
             cached_id = await self.pg_client.get_zoho_mapping('contact', 'email', email)
@@ -1056,16 +1105,18 @@ class ZohoClient:
         contact_id = self.search_contact_by_email(email)
 
         names = self.extract_names(full_name)
+        first_name = self._sanitize_field(names["First_Name"], 50) or "Unknown"
+        last_name = self._sanitize_field(names["Last_Name"], 100)
 
         # Build contact data with all fields from Steve's template
         contact_data = {
-            "First_Name": names["First_Name"],
+            "First_Name": first_name,
             "Email": email,
             "Account_Name": {"id": account_id}
         }
 
-        if names["Last_Name"]:
-            contact_data["Last_Name"] = names["Last_Name"]
+        if last_name:
+            contact_data["Last_Name"] = last_name
 
         # Add optional fields from Steve's Contact Record template
         if phone:
@@ -1148,31 +1199,41 @@ class ZohoClient:
 
         # Build Deal data with correct Zoho field names from Steve's template
         zoho_deal = {
-            "Deal_Name": deal_data.get("deal_name", "Unknown Deal"),
+            "Deal_Name": self._sanitize_field(deal_data.get("deal_name"), 255) or "Unknown Deal",
             "Contact_Name": {"id": deal_data["contact_id"]},
             "Account_Name": {"id": deal_data["account_id"]},
             "Stage": "Lead",  # Using "Lead" as the initial stage
-            "Pipeline": deal_data.get("pipeline", "Sales Pipeline"),
-            "Source": deal_data.get("source", "Email Inbound"),
-            "Description": deal_data.get("description", "")
+            "Pipeline": self._sanitize_field(deal_data.get("pipeline"), 120) or "Sales Pipeline",
+            "Source": self._sanitize_field(deal_data.get("source"), 120) or "Email Inbound",
+            "Description": self._sanitize_field(deal_data.get("description"), 500) or ""
         }
 
         # Add all optional fields from Steve's Deal Record template
         if deal_data.get("closing_date"):
-            zoho_deal["Closing_Date"] = deal_data["closing_date"]
+            closing_date = self._sanitize_field(deal_data["closing_date"], 50)
+            if closing_date:
+                zoho_deal["Closing_Date"] = closing_date
 
         if deal_data.get("next_activity_date"):
-            zoho_deal["Next_Activity_Date"] = deal_data["next_activity_date"]
+            next_activity_date = self._sanitize_field(deal_data["next_activity_date"], 50)
+            if next_activity_date:
+                zoho_deal["Next_Activity_Date"] = next_activity_date
 
         if deal_data.get("next_activity_description"):
-            zoho_deal["Next_Activity_Description"] = deal_data["next_activity_description"]
+            next_activity_desc = self._sanitize_field(deal_data["next_activity_description"], 500)
+            if next_activity_desc:
+                zoho_deal["Next_Activity_Description"] = next_activity_desc
 
         # Company-level credit tracking from Steve's template
         if deal_data.get("who_gets_credit"):
-            zoho_deal["Who_Gets_Credit"] = deal_data["who_gets_credit"]
+            credit_owner = self._sanitize_field(deal_data["who_gets_credit"], 150)
+            if credit_owner:
+                zoho_deal["Who_Gets_Credit"] = credit_owner
 
         if deal_data.get("credit_detail"):
-            zoho_deal["Credit_Detail"] = deal_data["credit_detail"]
+            credit_detail = self._sanitize_field(deal_data["credit_detail"], 200)
+            if credit_detail:
+                zoho_deal["Credit_Detail"] = credit_detail
 
         # Only add Owner if configured
         if owner_field:
@@ -1389,10 +1450,17 @@ class ZohoApiClient(ZohoClient):
             attachment_metadata: List of dicts with 'url' and 'filename' keys for proper attachment naming
         """
         try:
+            sender_email_clean = self._sanitize_field(sender_email, 255)
+            if not sender_email_clean:
+                raise ValueError("Sender email is required for Zoho processing")
+            sender_email = sender_email_clean
+
             # Extract structured data from Steve's template format
             company_record = extracted_data.company_record if hasattr(extracted_data, 'company_record') else None
             contact_record = extracted_data.contact_record if hasattr(extracted_data, 'contact_record') else None
             deal_record = extracted_data.deal_record if hasattr(extracted_data, 'deal_record') else None
+            job_title = getattr(extracted_data, 'job_title', None)
+            location = getattr(extracted_data, 'location', None)
 
             # Fallback to legacy fields for backward compatibility
             if not company_record:
@@ -1422,8 +1490,7 @@ class ZohoApiClient(ZohoClient):
                 contact_state = contact_record.state
 
             if not deal_record:
-                job_title = extracted_data.job_title or "Financial Advisor"
-                location = getattr(extracted_data, 'location', None)
+                job_title = job_title or "Financial Advisor"
                 # Use legacy format for backward compatibility
                 from .business_rules import format_deal_name
                 deal_name = format_deal_name(job_title, location, company_name, use_steve_format=False)
@@ -1436,17 +1503,32 @@ class ZohoApiClient(ZohoClient):
                 # If deal name is not provided, format using Steve's format
                 if not deal_name:
                     from .business_rules import format_deal_name
-                    # Extract components for formatting with Steve's format
-                    job_title = getattr(extracted_data, 'job_title', None)
-                    location = getattr(extracted_data, 'location', None)
                     deal_name = format_deal_name(job_title, location, company_name, use_steve_format=True)
                 pipeline = "Sales Pipeline"  # ALWAYS use Sales Pipeline as the only pipeline
                 closing_date = deal_record.closing_date
                 description = deal_record.description_of_reqs
 
+            company_name = self._sanitize_field(company_name, 200) or "Unknown Company"
+            company_phone = self._sanitize_field(company_phone, 30) if company_phone else None
+            company_website = self._sanitize_field(company_website, 255) if company_website else None
+
+            contact_name = self._sanitize_field(contact_name, 150) or "Unknown Contact"
+            contact_email = self._sanitize_field(contact_email, 255) or sender_email
+            contact_phone = self._sanitize_field(contact_phone, 30) if contact_phone else None
+            contact_city = self._sanitize_field(contact_city, 80) if contact_city else None
+            contact_state = self._sanitize_field(contact_state, 80) if contact_state else None
+
+            job_title = self._sanitize_field(job_title, 150) if 'job_title' in locals() else None
+            location = self._sanitize_field(location, 150) if 'location' in locals() else None
+            deal_name = self._sanitize_field(deal_name, 255) or "Untitled Deal"
+            pipeline = self._sanitize_field(pipeline, 120) or "Sales Pipeline"
+            closing_date = self._sanitize_field(closing_date, 50) if closing_date else None
+            description = self._sanitize_field(description, 500) if description else None
+
             # Determine primary email (Reply-To or From)
             primary_email = contact_email or sender_email
-            
+            primary_email = self._sanitize_field(primary_email, 255) or sender_email
+
             # Check for existing records in Zoho CRM first
             existing_contact = await self.check_zoho_contact_duplicate(primary_email)
             existing_account = await self.check_zoho_account_duplicate(company_name)
@@ -1471,19 +1553,22 @@ class ZohoApiClient(ZohoClient):
                 source = "Email Inbound"
                 source_detail = "Direct email contact"
 
+            source = self._sanitize_field(source, 120) or "Email Inbound"
+            source_detail = self._sanitize_field(source_detail, 200)
+
             # 1. Create/update Account with comprehensive company data
             logger.info(f"Creating/updating account for: {company_name}")
             # Prepare enriched data from company record
             enriched_data = {}
             if company_record:
                 if company_record.company_source:
-                    enriched_data['source'] = company_record.company_source
+                    enriched_data['source'] = self._sanitize_field(company_record.company_source, 150)
                 if company_record.source_detail:
-                    enriched_data['source_detail'] = company_record.source_detail
+                    enriched_data['source_detail'] = self._sanitize_field(company_record.source_detail, 200)
                 if company_record.who_gets_credit:
-                    enriched_data['who_gets_credit'] = company_record.who_gets_credit
+                    enriched_data['who_gets_credit'] = self._sanitize_field(company_record.who_gets_credit, 150)
                 if company_record.detail:
-                    enriched_data['credit_detail'] = company_record.detail
+                    enriched_data['credit_detail'] = self._sanitize_field(company_record.detail, 200)
 
             account_id = await self.upsert_account(
                 company_name=company_name,
@@ -1622,12 +1707,12 @@ class ZohoApiClient(ZohoClient):
 
             # Build enrichment data
             enrichment_data = {
-                "email": primary_email,
-                "company": company_name,
-                "job_title": job_title,
-                "location": location,
-                "phone": phone,
-                "company_website": company_website,
+                "email": self._sanitize_field(primary_email, 255),
+                "company": self._sanitize_field(company_name, 200),
+                "job_title": self._sanitize_field(job_title, 150) if job_title else None,
+                "location": self._sanitize_field(location, 150) if location else None,
+                "phone": self._sanitize_field(phone, 30) if phone else None,
+                "company_website": self._sanitize_field(company_website, 255) if company_website else None,
                 "enriched_at": datetime.now(timezone.utc).isoformat(),
                 "source": "outlook_intake"
             }

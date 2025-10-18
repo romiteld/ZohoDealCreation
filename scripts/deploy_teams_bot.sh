@@ -1,19 +1,37 @@
 #!/bin/bash
-set -e
 
+#######################################
 # Teams Bot Deployment Script
-# Deploys Teams Bot service to Azure Container Apps
+# Version: 2.0.0
+# Description: Complete deployment automation for Teams Bot with NLP features
+# Usage: ./deploy_teams_bot.sh [environment] [rollout_percentage]
+# Example: ./deploy_teams_bot.sh production 10
+#######################################
+
+set -e  # Exit on error
+
+# Color codes for output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+NC='\033[0m' # No Color
 
 echo "============================================"
-echo "Teams Bot Service Deployment"
+echo "Teams Bot Service Deployment v2.0.0"
 echo "============================================"
 
 # Configuration
+SUBSCRIPTION_ID="3fee2ac0-3a70-4343-a8b2-3a98da1c9682"
 RESOURCE_GROUP="TheWell-Infra-East"
 ACR_NAME="wellintakeacr0903"
 IMAGE_NAME="teams-bot"
 CONTAINER_APP_NAME="teams-bot"
 ENVIRONMENT_NAME="well-intake-env"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+
+# Default values
+ENVIRONMENT=${1:-"production"}
+ROLLOUT_PERCENTAGE=${2:-"0"}  # 0 = full rollout, otherwise canary
 
 # Build image
 echo "📦 Building Docker image..."
